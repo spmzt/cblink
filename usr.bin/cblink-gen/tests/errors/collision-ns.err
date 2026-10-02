@@ -1,0 +1,4 @@
+collision-ns.yaml:8:5: error: attribute-set generates C identifier 't_client', which collides with the family at 1:1
+collision-ns.yaml:17:5: error: operation generates C identifier 'T_CMD_GET', which collides with the definition at 4:5
+collision-ns.yaml:27:5: error: operation generates C identifier 't_get_dump', which collides with the operation at 17:5
+collision-ns.yaml:42:5: error: stream generates C identifier 't_watch_send', which collides with the operation at 35:5

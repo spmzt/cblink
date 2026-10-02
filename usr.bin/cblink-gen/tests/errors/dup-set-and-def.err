@@ -1,0 +1,4 @@
+dup-set-and-def.yaml:7:5: error: duplicate definition 'c' (first defined at 4:5)
+dup-set-and-def.yaml:11:9: error: enum value 0 already used by 'x' (10:9)
+dup-set-and-def.yaml:13:9: error: duplicate entry 'x' (first defined at 10:9)
+dup-set-and-def.yaml:19:5: error: duplicate attribute-set 's' (first defined at 15:5)

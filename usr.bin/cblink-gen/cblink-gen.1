@@ -1,0 +1,145 @@
+.\"-
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
+.\"
+.Dd October 2, 2026
+.Dt CBLINK-GEN 1
+.Os
+.Sh NAME
+.Nm cblink-gen
+.Nd generate C code and documentation from a cblink family spec
+.Sh SYNOPSIS
+.Nm
+.Op Fl BnV
+.Op Fl b Ar base
+.Op Fl m Ar parts
+.Op Fl o Ar dir
+.Ar spec.yaml
+.Sh DESCRIPTION
+The
+.Nm
+utility reads the description of a
+.Xr cblink 3
+family from
+.Ar spec.yaml
+and writes the C code that servers and clients of that family use:
+typed request and reply structures, policies, parsers, builders,
+client wrappers and server registration.
+It plays the part YNL plays for Linux netlink.
+The spec format, a subset of YAML, is described in
+.Pa docs/SPEC-FORMAT.md
+in the cblink sources.
+.Pp
+The output is deterministic: the same spec always gives byte-identical
+files, so generated code can be committed and checked.
+Files are written atomically: each is created under a temporary name in
+.Ar dir
+and renamed into place, so an interrupted run leaves the previous files
+intact.
+.Pp
+The spec is untrusted input.
+.Nm
+opens the spec and the output directory, then enters
+.Xr capsicum 4
+capability mode before it parses anything.
+.Pp
+The options are as follows:
+.Bl -tag -width "-m parts"
+.It Fl B
+Allow what is reserved for families built into the library:
+the family names
+.Ql ctrl
+and
+.Ql cblink.* ,
+and a
+.Ql fixed-id .
+Only the control family uses this.
+.It Fl b Ar base
+Name the output files
+.Ar base Ns .h ,
+.Ar base Ns .c
+and so on.
+The default is the spec's file name without
+.Pa .yaml .
+.It Fl m Ar parts
+A comma-separated list of the files to write:
+.Bl -tag -width "server"
+.It Cm h
+.Ar base Ns .h :
+constants, attribute and command enumerations, structures and all
+prototypes.
+.It Cm c
+.Ar base Ns .c :
+policies, parsers and builders, needed by both sides.
+.It Cm client
+.Ar base Ns _client.c :
+client wrappers for requests (synchronous, and asynchronous for loop
+callbacks), dumps, subscriptions and streams.
+.It Cm server
+.Ar base Ns _server.c :
+the family definition, registration and reply helpers; the server
+supplies the handler functions declared in the header.
+.It Cm md
+.Ar base Ns .md :
+reference documentation in Markdown.
+.El
+.Pp
+The default is
+.Ql h,c,client,server,md .
+.It Fl n
+Check the spec and report problems without writing anything.
+.It Fl o Ar dir
+Write the files into
+.Ar dir
+instead of the current directory.
+.It Fl V
+Print the version and exit.
+.El
+.Ss Building with make
+.Pa ${LOCALBASE}/share/cblink/cblink.mk
+runs
+.Nm
+from a
+.Xr bsd.prog.mk 5
+Makefile:
+.Bd -literal -offset indent
+PROG=		kvd
+SRCS=		kvd.c
+CBLINK_SPECS=	kv.yaml
+\&.include "${LOCALBASE}/share/cblink/cblink.mk"
+\&.include <bsd.prog.mk>
+.Ed
+.Pp
+See the comment at the top of
+.Pa cblink.mk
+for its variables.
+.Sh FILES
+.Bl -tag -width "${LOCALBASE}/share/cblink/specs/control.yaml" -compact
+.It Pa ${LOCALBASE}/share/cblink/cblink.mk
+make rules for programs built from specs
+.It Pa ${LOCALBASE}/share/cblink/specs/control.yaml
+the control family's spec, an example of the format
+.El
+.Sh EXIT STATUS
+.Bl -tag -width "0"
+.It 0
+Success.
+.It 1
+The spec is invalid; every problem found is reported on standard error as
+.Ar file : Ns Ar line : Ns Ar column : Li error: Ar message .
+.It 2
+Usage error, or an output or system error.
+.El
+.Sh EXAMPLES
+Check a spec, then generate everything but the documentation into
+.Pa obj :
+.Bd -literal -offset indent
+$ cblink-gen -n kv.yaml
+$ cblink-gen -m h,c,client,server -o obj kv.yaml
+.Ed
+.Sh SEE ALSO
+.Xr cblink 3 ,
+.Xr capsicum 4
+.Sh AUTHORS
+.An Pouria Mousavizadeh Tehrani Aq Mt pouria@FreeBSD.org

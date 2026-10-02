@@ -1,0 +1,2 @@
+reserved.yaml:1:7: error: invalid family name 'ctrl' (expected [a-z][a-z0-9_.-]*, at most 63 characters; 'ctrl' and 'cblink.*' are reserved)
+reserved.yaml:3:1: error: 'fixed-id' is reserved for built-in families (cblink-gen -B)

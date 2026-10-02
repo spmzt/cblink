@@ -1,0 +1,45 @@
+name: t
+version: 1
+definitions:
+  - name: cmd-get
+    type: const
+    value: 1
+attribute-sets:
+  - name: client
+    attributes:
+      - name: a
+        type: u8
+  - name: get
+    attributes:
+      - name: a
+        type: u8
+operations:
+  - name: get
+    attribute-set: get
+    do:
+      request:
+        attributes:
+          - a
+    dump:
+      reply:
+        attributes:
+          - a
+  - name: get-dump
+    attribute-set: get
+    do:
+      request:
+        attributes:
+          - a
+  - name: watch
+    attribute-set: get
+  - name: watch-send
+    attribute-set: get
+    do:
+      request:
+        attributes:
+          - a
+streams:
+  - name: watch
+    open: watch
+    direction: bidirectional
+    payload: get

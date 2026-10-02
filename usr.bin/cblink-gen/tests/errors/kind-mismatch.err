@@ -1,0 +1,13 @@
+kind-mismatch.yaml:9:20: error: 'min-len'/'max-len' apply only to text and bytes, not 'u32'
+kind-mismatch.yaml:13:16: error: 'min'/'max' apply only to integer types, not 'text'
+kind-mismatch.yaml:16:28: error: 'nested-attributes' requires type 'nest'
+kind-mismatch.yaml:18:15: error: type 'nest' requires 'nested-attributes'
+kind-mismatch.yaml:21:15: error: 'enum' requires an unsigned type
+kind-mismatch.yaml:25:22: error: 'min-count'/'max-count' require 'multi-attr: true'
+kind-mismatch.yaml:29:22: error: 'exact-len' applies only to bytes
+kind-mismatch.yaml:31:5: error: event 'ev' requires 'mcgrp'
+kind-mismatch.yaml:36:5: error: operation 'both': 'event' cannot be combined with 'do' or 'dump'
+kind-mismatch.yaml:48:12: error: 'mcgrp' requires 'event'
+kind-mismatch.yaml:53:5: error: operation 'nothing' has no 'do', 'dump', 'event' or stream
+kind-mismatch.yaml:65:11: error: operation 'so' opens a stream and must not have 'dump' or 'event'
+kind-mismatch.yaml:67:19: error: client-to-server stream has no 'payload-down'

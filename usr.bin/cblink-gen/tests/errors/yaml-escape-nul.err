@@ -1,0 +1,1 @@
+yaml-escape-nul.yaml:1:9: error: escape is not a valid non-NUL Unicode scalar value

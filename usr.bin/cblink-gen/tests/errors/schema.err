@@ -1,0 +1,9 @@
+schema.yaml:1:7: error: invalid family name 'Bad_Name' (expected [a-z][a-z0-9_.-]*, at most 63 characters; 'ctrl' and 'cblink.*' are reserved)
+schema.yaml:2:10: error: expected a number, got 'x'
+schema.yaml:3:1: error: unknown key 'colour'
+schema.yaml:7:15: error: invalid attribute name 'Abc' (expected [a-z][a-z0-9-]*, at most 63 characters)
+schema.yaml:8:15: error: unknown type 'int'
+schema.yaml:9:21: error: expected 'true' or 'false', got 'yes'
+schema.yaml:10:9: error: attribute name 'for' is a C keyword
+schema.yaml:14:9: error: attribute 'has-x' collides with the presence flag of 'x'
+schema.yaml:19:11: error: expected 'true' or 'false', got '1'

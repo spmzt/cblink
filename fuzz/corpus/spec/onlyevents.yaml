@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# A family with nothing but notifications: no handlers at all.
+---
+name: onlyevents
+version: 1
+attribute-sets:
+  - name: ev
+    attributes:
+      - name: seq
+        type: u64
+operations:
+  - name: happened
+    attribute-set: ev
+    mcgrp: events
+    event:
+      attributes:
+        - seq
+mcast-groups:
+  - name: events

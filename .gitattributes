@@ -1,0 +1,7 @@
+# The port is kept here for convenience but is not part of the release:
+# keeping it out of "git archive" (and so GitHub's tarballs) means that
+# recording the tarball's checksum in its distinfo does not change it.
+/port export-ignore
+
+# Fuzzer seeds are exact bytes: PROXY protocol lines end in CRLF.
+/fuzz/corpus/** -text

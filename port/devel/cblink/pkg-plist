@@ -1,0 +1,10 @@
+bin/cblink-gen
+include/cblink.h
+lib/libcblink.a
+lib/libcblink.so
+lib/libcblink.so.1
+libdata/pkgconfig/cblink.pc
+%%DATADIR%%/cblink.mk
+%%DATADIR%%/specs/control.yaml
+share/man/man1/cblink-gen.1.gz
+share/man/man3/cblink.3.gz

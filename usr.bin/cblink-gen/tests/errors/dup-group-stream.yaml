@@ -1,0 +1,27 @@
+name: t
+version: 1
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u32
+operations:
+  - name: op
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a
+          - a
+mcast-groups:
+  - name: g
+  - name: g
+streams:
+  - name: st
+    open: op
+    direction: bidirectional
+    payload: s
+  - name: st
+    open: op
+    direction: bidirectional
+    payload: s

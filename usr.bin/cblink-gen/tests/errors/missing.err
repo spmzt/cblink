@@ -1,0 +1,5 @@
+missing.yaml:1:1: error: missing required key 'name'
+missing.yaml:3:5: error: missing required key 'name'
+missing.yaml:4:9: error: missing required key 'type'
+missing.yaml:6:5: error: missing required key 'attribute-set'
+missing.yaml:6:5: error: operation 'op' has no 'do', 'dump', 'event' or stream

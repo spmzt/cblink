@@ -1,0 +1,2 @@
+dup-op.yaml:15:5: error: duplicate operation 'op' (first defined at 9:5)
+dup-op.yaml:16:12: error: command id 1 already used by 'op' (9:5)

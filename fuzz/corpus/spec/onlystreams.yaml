@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# A family with nothing but streams: no plain request wrappers.
+---
+name: onlystreams
+version: 1
+attribute-sets:
+  - name: item
+    attributes:
+      - name: n
+        type: u32
+operations:
+  - name: feed
+    attribute-set: item
+    do:
+      request:
+        attributes:
+          - n
+streams:
+  - name: feed
+    open: feed
+    direction: server-to-client
+    payload: item

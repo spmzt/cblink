@@ -1,0 +1,38 @@
+#
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
+#
+# Helpers shared by the atf-sh tests.  POSIX sh only: functions share
+# variables, so helper-private names start with an underscore.
+#
+
+PEER="$(atf_get_srcdir)/cbl_testpeer"
+
+# Start "cbl_testpeer serve" with the given arguments.  It returns once
+# the server listens (-d), so there is nothing to poll.  Sets $port.
+start_server()
+{
+	"${PEER}" serve -d server.pid "$@" > server.out 2> server.err ||
+	    atf_fail "server did not start: $(cat server.err)"
+	port=$(awk '/^ready/ { print $2 }' server.out)
+}
+
+stop_server()
+{
+	[ -s server.pid ] && kill "$(cat server.pid)" 2>/dev/null
+	true
+}
+
+# retry seconds command [args]: run the command until it succeeds, once a
+# second, for at most "seconds" seconds.
+retry()
+{
+	_retry_n=$1
+	shift
+	while ! "$@"; do
+		[ "${_retry_n}" -le 0 ] && return 1
+		_retry_n=$((_retry_n - 1))
+		sleep 1
+	done
+}

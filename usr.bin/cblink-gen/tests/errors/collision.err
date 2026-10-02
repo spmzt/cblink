@@ -1,0 +1,2 @@
+collision.yaml:13:5: error: operation generates C identifier 't_get_req', which collides with the attribute-set at 4:5
+collision.yaml:19:5: error: operation generates C identifier 't_put_key', which collides with the attribute at 10:9

@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# A family with nothing but a do operation.
+---
+name: onlydo
+version: 1
+attribute-sets:
+  - name: msg
+    attributes:
+      - name: text
+        type: text
+operations:
+  - name: say
+    attribute-set: msg
+    do:
+      request:
+        attributes:
+          - text
+      reply:
+        attributes:
+          - text

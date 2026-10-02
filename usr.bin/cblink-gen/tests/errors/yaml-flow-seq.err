@@ -1,0 +1,1 @@
+yaml-flow-seq.yaml:3:17: error: flow sequences ('[') are not supported; use block style

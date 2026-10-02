@@ -1,0 +1,209 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The cblink control family (docs/WIRE-FORMAT.md section 7.2).
+#
+# libcblink is built from code generated from this file:
+#   cblink-gen -B -b cbl_ctrl_gen -m h,c,client,server control.yaml
+# The generated files are committed in lib/libcblink; "make regen" there
+# refreshes them, and a test checks that they match.
+---
+name: ctrl
+version: 1
+c-prefix: cbl_ctrl
+fixed-id: 0
+doc: |
+  The built-in control family, present on every cblink endpoint with the
+  fixed family id 0.  It resolves family names to ids, lists families,
+  manages multicast subscriptions, answers pings and exchanges limits.
+
+definitions:
+  - name: op-flags
+    type: flags
+    doc: Operation flags reported by getfamily (the CBL_OPF_* values).
+    entries:
+      - name: do
+        doc: The command supports do requests.
+      - name: dump
+        doc: The command supports dump requests.
+      - name: stream
+        doc: The command opens a bidirectional stream.
+      - name: push
+        doc: The command opens a server-to-client stream.
+      - name: auth
+        doc: The command requires an authenticated peer.
+  - name: group-flags
+    type: flags
+    doc: Multicast group flags (the CBL_MCF_* values).
+    entries:
+      - name: auth
+        value: 4
+        doc: Subscribing requires an authenticated peer.
+
+attribute-sets:
+  - name: ctrl
+    doc: Top-level attributes of the control family.
+    attributes:
+      - name: family-id
+        type: u16
+        doc: Family id, assigned by the endpoint.
+      - name: family-name
+        type: text
+        checks:
+          min-len: 1
+          max-len: 63
+      - name: version
+        type: u32
+        doc: Family version.
+      - name: ops
+        type: nest
+        nested-attributes: op-info
+        multi-attr: true
+      - name: mcast-groups
+        type: nest
+        nested-attributes: group-info
+        multi-attr: true
+      - name: group-id
+        type: u32
+        checks:
+          min: 1
+      - name: limits
+        type: nest
+        nested-attributes: limits
+      - name: impl
+        type: text
+        doc: Implementation name and version.
+        checks:
+          max-len: 63
+      - name: cookie
+        type: bytes
+        doc: Opaque data echoed by ping.
+        checks:
+          max-len: 64
+  - name: op-info
+    attributes:
+      - name: cmd
+        type: u16
+      - name: name
+        type: text
+        checks:
+          max-len: 63
+      - name: flags
+        type: u32
+        enum: op-flags
+  - name: group-info
+    attributes:
+      - name: id
+        type: u32
+      - name: name
+        type: text
+        checks:
+          max-len: 63
+      - name: flags
+        type: u32
+        enum: group-flags
+  - name: limits
+    doc: Receive limits of an endpoint.
+    attributes:
+      - name: max-frame
+        type: u64
+      - name: max-depth
+        type: u32
+      - name: max-attrs
+        type: u32
+      - name: max-streams
+        type: u32
+      - name: stream-window
+        type: u32
+
+operations:
+  - name: getfamily
+    doc: |
+      Resolve one family by name or id (do), or list all families (dump).
+    attribute-set: ctrl
+    do:
+      request:
+        attributes:
+          - family-id
+          - family-name
+      reply:
+        attributes:
+          - family-id
+          - family-name
+          - version
+          - ops
+          - mcast-groups
+    dump:
+      reply:
+        attributes:
+          - family-id
+          - family-name
+          - version
+          - ops
+          - mcast-groups
+  - name: subscribe
+    doc: Join a multicast group of a family.
+    attribute-set: ctrl
+    do:
+      request:
+        attributes:
+          - family-id
+          - group-id
+        required:
+          - family-id
+          - group-id
+  - name: unsubscribe
+    doc: Leave a multicast group.
+    attribute-set: ctrl
+    do:
+      request:
+        attributes:
+          - family-id
+          - group-id
+        required:
+          - family-id
+          - group-id
+  - name: ping
+    doc: Liveness check; the reply echoes the cookie.
+    attribute-set: ctrl
+    do:
+      request:
+        attributes:
+          - cookie
+      reply:
+        attributes:
+          - cookie
+  - name: hello
+    doc: Exchange receive limits and implementation names.
+    attribute-set: ctrl
+    do:
+      request:
+        attributes:
+          - limits
+          - impl
+      reply:
+        attributes:
+          - limits
+          - impl
+  - name: newfamily
+    doc: A family was registered.
+    attribute-set: ctrl
+    mcgrp: notify
+    event:
+      attributes:
+        - family-id
+        - family-name
+        - version
+        - ops
+        - mcast-groups
+  - name: delfamily
+    doc: A family was unregistered.
+    attribute-set: ctrl
+    mcgrp: notify
+    event:
+      attributes:
+        - family-id
+        - family-name
+
+mcast-groups:
+  - name: notify
+    doc: Family registration changes.

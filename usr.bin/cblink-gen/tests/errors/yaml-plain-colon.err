@@ -1,0 +1,1 @@
+yaml-plain-colon.yaml:1:8: error: plain scalars must not contain ': '; quote the value

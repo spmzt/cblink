@@ -1,0 +1,49 @@
+name: t
+version: 1
+definitions:
+  - name: k
+    type: const
+    value: 4
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: nest
+        nested-attributes: nosuch
+      - name: b
+        type: u32
+        enum: nocolor
+      - name: c
+        type: u32
+        checks:
+          max: nolimit
+      - name: d
+        type: u32
+        enum: k
+operations:
+  - name: op
+    attribute-set: nosuchset
+    do:
+      request:
+        attributes:
+          - a
+  - name: op2
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - b
+          - zz
+        required:
+          - yy
+  - name: ev
+    attribute-set: s
+    mcgrp: nogroup
+    event:
+      attributes:
+        - b
+streams:
+  - name: st
+    open: noop
+    direction: bidirectional
+    payload: noset

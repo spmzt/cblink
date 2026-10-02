@@ -1,0 +1,413 @@
+.\"-
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
+.\"
+.Dd October 2, 2026
+.Dt CBLINK 3
+.Os
+.Sh NAME
+.Nm cblink
+.Nd netlink-style messaging over CBOR between userland programs
+.Sh LIBRARY
+cblink Library
+.Pq libcblink , Fl lcblink
+.Sh SYNOPSIS
+.In cblink.h
+.Pp
+Link with
+.Fl lcblink ,
+or use
+.Xr pkg-config 1
+with the package
+.Ql cblink .
+.Sh DESCRIPTION
+The
+.Nm
+library carries netlink-style messages between programs: a fixed binary
+header with a family, a command, flags, a sequence number and a stream
+id, followed by a body that is a CBOR map
+.Pq RFC 8949
+of typed attributes.
+Servers register
+.Em families
+of operations with declarative attribute
+.Em policies ;
+clients resolve a family by name at run time, send requests, iterate
+dumps, open flow-controlled streams and subscribe to multicast
+notifications.
+The same library serves both sides.
+.Pp
+Messages travel over TCP, SCTP and
+.Ux Ns -domain
+sockets.
+TCP uses TLS 1.3 and SCTP uses DTLS 1.2
+.Pq RFC 6083 ;
+both ends present certificates
+.Pq mutual TLS
+unless plaintext is explicitly requested with
+.Dv CBL_PLAINTEXT .
+.Nm
+contains no HTTP implementation; behind a load balancer it runs under a
+TCP proxy with TLS passthrough,
+optionally with the PROXY protocol.
+.Pp
+The wire format, the full API, the spec format of
+.Xr cblink-gen 1
+and the transports are described in
+.Pa docs/WIRE-FORMAT.md ,
+.Pa docs/API.md ,
+.Pa docs/SPEC-FORMAT.md
+and
+.Pa docs/TRANSPORTS.md ,
+installed under
+.Pa ${PREFIX}/share/doc/cblink
+by the port.
+Most programs do not use the attribute API directly: they describe their
+family in a spec and let
+.Xr cblink-gen 1
+generate typed structures, client wrappers and server glue.
+.Ss Conventions
+All types are opaque.
+Functions that can fail return 0 or an
+.Xr errno 2
+value; they do not set
+.Va errno .
+Objects whose creation fails are not created.
+A function that sends a message consumes it, also on failure, with one
+exception:
+.Fn cbl_stream_send
+returning
+.Er EAGAIN
+leaves the message to the caller, to send again later or to free.
+.Pp
+Each received message owns an arena; strings, byte strings and structures
+parsed from it point into the message and live until
+.Fn cbl_msg_free .
+Building a message records the first error and makes later calls on that
+message no-ops; the error is returned when the message is sent or by
+.Fn cbl_msg_error .
+.Ss Contexts
+.Fn cbl_ctx_new
+creates a context: the family registry, default limits, default TLS
+configuration and multicast groups.
+The library has no global mutable state; independent contexts may be used
+in one process.
+.Fn cbl_ctx_set_limit
+changes a limit before the first listener or connection uses the
+context
+.Pq see Sx LIMITS .
+.Fn cbl_ctx_free
+fails with
+.Er EBUSY
+while a loop, listener or connection made from the context exists.
+.Fn cbl_tls_reload
+rereads certificates, keys, CAs and CRLs for the connections made from
+then on.
+.Ss Messages and attributes
+.Fn cbl_msg_new
+starts a message for a family and command.
+Attributes are added with
+.Fn cbl_put_uint ,
+.Fn cbl_put_int ,
+.Fn cbl_put_bool ,
+.Fn cbl_put_str ,
+.Fn cbl_put_bytes ,
+.Fn cbl_put_double
+and friends; nested maps and arrays are opened and closed with
+.Fn cbl_nest_start ,
+.Fn cbl_nest_end ,
+.Fn cbl_array_start
+and
+.Fn cbl_array_end .
+.Pp
+On a received message,
+.Fn cbl_msg_attr
+looks up a top-level attribute and
+.Fn cbl_attr_get ,
+.Fn cbl_attr_first
+and
+.Fn cbl_attr_next
+walk nested ones;
+.Fn cbl_attr_uint ,
+.Fn cbl_attr_str ,
+.Fn cbl_attr_bytes
+and the other accessors check the type and return
+.Er EINVAL
+on a mismatch.
+Error replies carry an
+.Em extended ack :
+a code, a message, the path of the offending attribute and the expected
+type, read with
+.Fn cbl_msg_err_code ,
+.Fn cbl_msg_err_str ,
+.Fn cbl_msg_err_path
+and
+.Fn cbl_msg_err_miss_type .
+.Pp
+.Fn cbl_msg_encode
+and
+.Fn cbl_frame_decode
+convert between messages and raw frames for programs that carry frames
+themselves.
+.Ss Policies and parsers
+A
+.Vt struct cbl_policy_set
+describes the attributes an operation accepts: their types, ranges,
+lengths, nesting and which are required.
+.Fn cbl_validate
+checks a message against it and reports the first problem as an extended
+ack; registered operations are validated before their handler runs.
+Declarative parsers
+.Pq Fn CBL_DECLARE_PARSER , Fn cbl_parse
+fill C structures from validated messages.
+.Ss Families and servers
+A server describes a family with a
+.Vt struct cbl_family_def :
+its name, version, operations and multicast groups, and registers it with
+.Fn cbl_family_register .
+The family id is assigned at registration; clients learn it by name with
+.Fn cbl_resolve .
+Family 0 is the built-in control family, which answers name lookups,
+subscriptions, pings and hellos.
+.Pp
+An operation's handler receives a
+.Vt cbl_req
+and answers with
+.Fn cbl_req_reply_new
+and
+.Fn cbl_req_send ,
+or returns an error, optionally described with
+.Fn cbl_req_set_err .
+.Fn cbl_req_defer
+keeps a request open after the handler returns, to be finished later with
+.Fn cbl_req_complete .
+If its connection goes away first, the request is cancelled
+.Pq Fn cbl_req_cancelled , Fn cbl_req_set_cancel .
+A stream open may be deferred too, and accepted later from any thread.
+Dump handlers return one item per call with
+.Fn cbl_req_dump_item
+and are called again while the client keeps up.
+Operations flagged
+.Dv CBL_OPF_AUTH
+run only for an authenticated peer.
+.Ss Endpoints
+Endpoints are named by URIs:
+.Bl -tag -width "unix:path" -offset indent
+.It Li tcp:// Ns Ar host : Ns Ar port
+TCP with TLS 1.3.
+.It Li sctp:// Ns Ar host Ns Op , Ns Ar host ... : Ns Ar port
+SCTP with DTLS 1.2; several hosts give a multihomed association.
+.It Li unix: Ns Ar path
+A
+.Ux Ns -domain
+stream socket; peers are identified by
+.Xr getpeereid 3 .
+.El
+.Pp
+.Fn cbl_listener_new
+and
+.Fn cbl_listener_start
+accept connections;
+.Fn cbl_conn_new
+and
+.Fn cbl_conn_connect
+open one.
+TLS is configured with a
+.Vt cbl_tls
+.Pq Fn cbl_tls_new , Fn cbl_tls_set_cert , Fn cbl_tls_set_ca , Fn cbl_tls_set_crl ,
+set on the context, a listener or a connection.
+Starting a TCP or SCTP endpoint without TLS fails with
+.Er EPERM
+unless it was created with
+.Dv CBL_PLAINTEXT .
+A TCP listener created with
+.Dv CBL_LF_PROXY
+expects every connection to start with a PROXY protocol header, version
+1 or 2, from a proxy in front of it, and reports the client address that
+header names
+.Pq Dv CBL_PEER_PROXIED .
+.Fn cbl_listener_add_proxy
+limits who may send that header.
+.Ss Peer identity
+.Fn cbl_req_peer
+and
+.Fn cbl_conn_peer
+describe the other side the same way on every transport:
+.Fn cbl_peer_subject ,
+.Fn cbl_peer_issuer ,
+.Fn cbl_peer_san
+and
+.Fn cbl_peer_fingerprint
+for certificates,
+.Fn cbl_peer_cred
+for local peers, and
+.Fn cbl_peer_flags ,
+which says whether the peer is authenticated
+.Pq Dv CBL_PEER_AUTHENTICATED .
+.Ss Requests, dumps, notifications and streams
+.Fn cbl_request
+sends a request and waits for its reply;
+.Fn cbl_request_async
+calls a function instead.
+On a loop thread, where the synchronous calls fail with
+.Er EDEADLK ,
+.Fn cbl_resolve_async ,
+.Fn cbl_subscribe_async
+and the generated asynchronous wrappers are used instead.
+.Fn cbl_dump_start
+and
+.Fn cbl_dump_next
+iterate the items of a dump.
+.Fn cbl_subscribe
+joins a multicast group of a family; the server sends to it with
+.Fn cbl_notify .
+.Pp
+Streams carry a sequence of messages in one or both directions with
+credit-based flow control:
+.Fn cbl_stream_open
+on the client,
+.Fn cbl_stream_accept
+in the server's open handler,
+.Fn cbl_stream_send ,
+.Fn cbl_stream_half_close ,
+.Fn cbl_stream_close
+and
+.Fn cbl_stream_reset .
+A sender that runs out of credit gets
+.Er EAGAIN
+and is called back through
+.Fa on_writable
+when the receiver grants more.
+A thread that may call a stream after it ended holds it with
+.Fn cbl_stream_ref
+and
+.Fn cbl_stream_rele ;
+such calls fail with
+.Er EPIPE .
+.Ss Event loop and integration
+A
+.Vt cbl_loop
+runs connections, listeners, timers and signals on one thread with
+.Xr kqueue 2 :
+.Fn cbl_loop_run ,
+.Fn cbl_loop_timer ,
+.Fn cbl_loop_signal ,
+.Fn cbl_loop_post .
+Callbacks for a connection run on its loop's thread.
+Programs with their own event loop use
+.Fn cbl_conn_fd ,
+.Fn cbl_conn_interest
+and
+.Fn cbl_conn_process
+instead.
+A connection on no loop drives its socket itself inside
+.Fn cbl_request ,
+which makes simple blocking clients short.
+.Fn cbl_conn_stats
+reports what a connection is doing: queued output, requests in flight,
+dropped notifications.
+.Sh LIMITS
+Every limit has a default, a minimum and a maximum, and applies per
+context, listener or connection
+.Pq Fn cbl_ctx_set_limit , Fn cbl_listener_set_limit , Fn cbl_conn_set_limit .
+Limits on input are checked before memory is allocated for it.
+They include the largest frame
+.Pq Dv CBL_LIM_MAX_FRAME ,
+nesting depth, attribute count, open streams per connection, the initial
+stream window, outstanding requests, connections, and handshake and
+idle timeouts.
+A server stops reading a peer whose replies pile up in its send queue,
+rather than dropping them; a peer that stays quiet is sent keepalive
+pings, and one that does not answer them is dropped after the idle
+timeout.
+.Sh RETURN VALUES
+Functions returning
+.Vt int
+return 0 on success and an
+.Xr errno 2
+value on failure; among them
+.Bl -tag -width "EOPNOTSUPP"
+.It Bq Er EAGAIN
+A stream has no credit; try again from
+.Fa on_writable .
+.It Bq Er EACCES
+The operation needs an authenticated peer.
+.It Bq Er EMSGSIZE
+A message is larger than the peer or the transport accepts.
+.It Bq Er ENOENT
+No such family, group or attribute.
+.It Bq Er EOPNOTSUPP
+The family has no such operation, or the operation does not support
+dumps.
+.It Bq Er EPERM
+TLS is required and was not configured.
+.It Bq Er ETIMEDOUT
+No reply in time.
+.El
+.Pp
+When a request fails at the server, the reply's extended ack says why.
+.Sh EXAMPLES
+A client of a family generated from a spec named
+.Pa kv.yaml :
+.Bd -literal -offset indent
+#include <cblink.h>
+#include "kv.h"
+
+cbl_ctx *ctx;
+cbl_conn *conn;
+struct kv_client cl;
+struct kv_get_req req = { .key = "colour" };
+struct kv_get_rsp *rsp;
+int error;
+
+if ((error = cbl_ctx_new(&ctx)) != 0 ||
+    (error = cbl_conn_new(ctx, "unix:/var/run/kv.sock", 0, &conn)) != 0 ||
+    (error = cbl_conn_connect(conn)) != 0 ||
+    (error = kv_client_init(&cl, conn)) != 0)
+	errc(1, error, "kv");
+if ((error = kv_get(&cl, &req, &rsp)) != 0)
+	errx(1, "get: %s", cl.err != NULL ?
+	    cbl_msg_err_str(cl.err) : strerror(error));
+printf("%.*s\en", (int)rsp->value.len, (const char *)rsp->value.p);
+kv_get_rsp_free(rsp);
+.Ed
+.Pp
+Complete servers and clients are installed by the port under
+.Pa ${PREFIX}/share/examples/cblink .
+.Sh SEE ALSO
+.Xr cblink-gen 1 ,
+.Xr kqueue 2 ,
+.Xr getpeereid 3 ,
+.Xr snl 3 ,
+.Xr netlink 4
+.Sh STANDARDS
+.Rs
+.%A C. Bormann
+.%A P. Hoffman
+.%T Concise Binary Object Representation (CBOR)
+.%R RFC 8949
+.%D December 2020
+.Re
+.Rs
+.%A M. Tuexen
+.%A R. Seggelmann
+.%A E. Rescorla
+.%T Datagram Transport Layer Security (DTLS) for Stream Control Transmission Protocol (SCTP)
+.%R RFC 6083
+.%D January 2011
+.Re
+.Sh AUTHORS
+.An Pouria Mousavizadeh Tehrani Aq Mt pouria@FreeBSD.org
+.Sh SECURITY CONSIDERATIONS
+Every frame is untrusted input: headers are checked before any
+allocation, CBOR bodies are decoded with fixed limits on size, depth and
+item count, and only definite-length, tag-free CBOR with integer keys is
+accepted.
+.Pp
+Plaintext must be requested explicitly.
+A
+.Dv CBL_LF_PROXY
+listener believes the address in the PROXY header, so it must be
+reachable only through the proxy; the header never makes a peer
+authenticated.

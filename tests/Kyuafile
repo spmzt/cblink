@@ -1,0 +1,6 @@
+-- The cblink test suite:  kyua test -k /usr/local/tests/cblink/Kyuafile
+syntax(2)
+test_suite("cblink")
+include("libcblink/Kyuafile")
+include("cblink-gen/Kyuafile")
+include("examples/Kyuafile")

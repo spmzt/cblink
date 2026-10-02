@@ -1,0 +1,10 @@
+ranges.yaml:2:10: error: value 0 out of range 1..4294967295
+ranges.yaml:8:16: error: flag bit 64 out of range
+ranges.yaml:15:16: error: invalid range: max (300) exceeds u8 maximum
+ranges.yaml:19:16: error: invalid range: min (-1) below 0 for 'u16'
+ranges.yaml:23:16: error: invalid range: min (5) > max (4)
+ranges.yaml:28:20: error: invalid range: min-len (10) > max-len (4)
+ranges.yaml:34:22: error: invalid range: min-count (3) > max-count (2)
+ranges.yaml:38:16: error: value 0 out of range 1..65535
+ranges.yaml:41:16: error: value 70000 out of range 1..65535
+ranges.yaml:44:12: error: value 65536 out of range 1..65535

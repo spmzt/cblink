@@ -1,0 +1,16 @@
+*.o
+*.pico
+*.pieo
+*.po
+*.So
+*.a
+*.so
+*.so.*
+*.full
+*.debug
+.depend*
+Kyuafile
+!/tests/Kyuafile
+/obj/
+*.core
+port/devel/cblink/work

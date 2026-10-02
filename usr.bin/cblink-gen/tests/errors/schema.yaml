@@ -1,0 +1,23 @@
+name: Bad_Name
+version: x
+colour: red
+attribute-sets:
+  - name: s
+    attributes:
+      - name: Abc
+        type: int
+        multi-attr: yes
+      - name: for
+        type: u8
+      - name: x
+        type: u8
+      - name: has-x
+        type: u8
+operations:
+  - name: op
+    attribute-set: s
+    auth: 1
+    do:
+      request:
+        attributes:
+          - x

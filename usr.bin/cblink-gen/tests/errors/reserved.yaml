@@ -1,0 +1,15 @@
+name: ctrl
+version: 1
+fixed-id: 3
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u8
+operations:
+  - name: op
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a

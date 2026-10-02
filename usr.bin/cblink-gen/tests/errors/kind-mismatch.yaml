@@ -1,0 +1,67 @@
+name: t
+version: 1
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u32
+        checks:
+          min-len: 1
+      - name: b
+        type: text
+        checks:
+          max: 3
+      - name: c
+        type: u32
+        nested-attributes: s
+      - name: d
+        type: nest
+      - name: e
+        type: text
+        enum: s
+      - name: f
+        type: u32
+        checks:
+          max-count: 2
+      - name: g
+        type: text
+        checks:
+          exact-len: 2
+operations:
+  - name: ev
+    attribute-set: s
+    event:
+      attributes:
+        - a
+  - name: both
+    attribute-set: s
+    mcgrp: grp
+    do:
+      request:
+        attributes:
+          - a
+    event:
+      attributes:
+        - a
+  - name: orphan
+    attribute-set: s
+    mcgrp: grp
+    do:
+      request:
+        attributes:
+          - a
+  - name: nothing
+    attribute-set: s
+  - name: so
+    attribute-set: s
+    dump:
+      reply:
+        attributes:
+          - a
+mcast-groups:
+  - name: grp
+streams:
+  - name: st
+    open: so
+    direction: client-to-server
+    payload-down: s

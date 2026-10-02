@@ -1,0 +1,29 @@
+name: t
+version: 1
+definitions:
+  - name: c
+    type: const
+    value: 1
+  - name: c
+    type: enum
+    entries:
+      - x
+      - name: y
+        value: 0
+      - x
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u32
+  - name: s
+    attributes:
+      - name: a
+        type: u32
+operations:
+  - name: op
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a

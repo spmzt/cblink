@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: BSD-2-Clause
+---
+name: notify
+version: 1
+doc: |
+  Multicast notifications: the server announces a tick to every
+  subscriber of the "ticks" group.
+
+attribute-sets:
+  - name: clock
+    attributes:
+      - name: seq
+        type: u64
+      - name: msec
+        type: u64
+        doc: Milliseconds since the server started.
+
+operations:
+  - name: tick
+    attribute-set: clock
+    mcgrp: ticks
+    event:
+      attributes:
+        - seq
+        - msec
+
+mcast-groups:
+  - name: ticks

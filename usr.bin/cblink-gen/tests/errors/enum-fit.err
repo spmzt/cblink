@@ -1,0 +1,3 @@
+enum-fit.yaml:24:15: error: 'color' has values that do not fit type 'u8'
+enum-fit.yaml:27:15: error: 'bits' has values that do not fit type 'u8'
+enum-fit.yaml:39:21: error: initial-credit out of range 0..2147483647

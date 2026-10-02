@@ -1,0 +1,1 @@
+yaml-missing-value.yaml:2:1: error: missing value for 'version' (write an empty sequence or mapping by omitting the key)

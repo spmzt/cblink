@@ -1,0 +1,21 @@
+name: t
+version: 1
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u32
+operations:
+  - name: op
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a
+  - name: op
+    value: 1
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a

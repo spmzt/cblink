@@ -1,0 +1,39 @@
+name: t
+version: 1
+definitions:
+  - name: big
+    type: const
+    value: 0x80000000
+  - name: color
+    type: enum
+    entries:
+      - red
+      - name: far
+        value: 300
+  - name: bits
+    type: flags
+    entries:
+      - a
+      - name: high
+        value: 9
+attribute-sets:
+  - name: t
+    attributes:
+      - name: c
+        type: u8
+        enum: color
+      - name: f
+        type: u8
+        enum: bits
+      - name: ok
+        type: u16
+        enum: color
+operations:
+  - name: open
+    attribute-set: t
+streams:
+  - name: s
+    open: open
+    direction: bidirectional
+    payload: t
+    initial-credit: big

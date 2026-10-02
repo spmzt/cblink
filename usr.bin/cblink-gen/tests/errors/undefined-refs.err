@@ -1,0 +1,10 @@
+undefined-refs.yaml:12:28: error: undefined attribute-set 'nosuch'
+undefined-refs.yaml:15:15: error: undefined enum 'nocolor'
+undefined-refs.yaml:19:16: error: undefined const 'nolimit'
+undefined-refs.yaml:22:15: error: 'k' is a const, not an enum or flags
+undefined-refs.yaml:25:20: error: undefined attribute-set 'nosuchset'
+undefined-refs.yaml:36:13: error: undefined attribute 'zz' in attribute-set 's' (do request)
+undefined-refs.yaml:38:13: error: required attribute 'yy' is not listed in 'attributes'
+undefined-refs.yaml:41:12: error: undefined multicast group 'nogroup'
+undefined-refs.yaml:47:11: error: undefined operation 'noop'
+undefined-refs.yaml:49:14: error: undefined attribute-set 'noset'

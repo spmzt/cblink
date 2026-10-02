@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: BSD-2-Clause
+---
+name: stream
+version: 1
+doc: |
+  Streams with credit-based flow control: a server-to-client stream that
+  only sends as fast as the client grants credit, and a bidirectional
+  stream.
+
+attribute-sets:
+  - name: line
+    attributes:
+      - name: text
+        type: text
+        checks:
+          max-len: 4096
+      - name: number
+        type: u64
+      - name: count
+        type: u32
+        checks:
+          max: 10000000
+
+operations:
+  - name: count
+    attribute-set: line
+    doc: Open a stream of the numbers 1 to count.
+    do:
+      request:
+        attributes:
+          - count
+        required:
+          - count
+  - name: upper
+    attribute-set: line
+    doc: Open a stream that answers every line in upper case.
+    do:
+      request:
+        attributes:
+          - text
+
+streams:
+  - name: count
+    open: count
+    direction: server-to-client
+    payload: line
+    initial-credit: 4096
+  - name: upper
+    open: upper
+    direction: bidirectional
+    payload: line

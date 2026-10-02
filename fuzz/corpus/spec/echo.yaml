@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: BSD-2-Clause
+---
+name: echo
+version: 1
+doc: |
+  The smallest useful family: one request, one reply.  The reply says
+  who the server believes the client is.
+
+attribute-sets:
+  - name: message
+    attributes:
+      - name: text
+        type: text
+        checks:
+          max-len: 1024
+      - name: peer
+        type: text
+        doc: The client's identity as the server sees it.
+
+operations:
+  - name: echo
+    attribute-set: message
+    do:
+      request:
+        attributes:
+          - text
+        required:
+          - text
+      reply:
+        attributes:
+          - text
+          - peer

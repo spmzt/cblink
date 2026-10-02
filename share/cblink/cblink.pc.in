@@ -1,0 +1,12 @@
+prefix=%%PREFIX%%
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: cblink
+Description: Netlink-style messaging over CBOR (libcblink)
+Version: %%VERSION%%
+Requires.private: %%REQUIRES%%
+Libs: -L${libdir} -lcblink
+Libs.private: %%LIBS_PRIVATE%%
+Cflags: -I${includedir}

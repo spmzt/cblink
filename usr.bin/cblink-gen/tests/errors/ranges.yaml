@@ -1,0 +1,49 @@
+name: t
+version: 0
+definitions:
+  - name: f
+    type: flags
+    entries:
+      - name: a
+        value: 64
+attribute-sets:
+  - name: s
+    attributes:
+      - name: a
+        type: u8
+        checks:
+          max: 300
+      - name: b
+        type: u16
+        checks:
+          min: -1
+      - name: c
+        type: s8
+        checks:
+          min: 5
+          max: 4
+      - name: d
+        type: text
+        checks:
+          min-len: 10
+          max-len: 4
+      - name: e
+        type: u32
+        multi-attr: true
+        checks:
+          min-count: 3
+          max-count: 2
+      - name: f
+        type: u32
+        value: 0
+      - name: g
+        type: u32
+        value: 70000
+operations:
+  - name: op
+    value: 65536
+    attribute-set: s
+    do:
+      request:
+        attributes:
+          - a

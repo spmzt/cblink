@@ -1,0 +1,4 @@
+dup-group-stream.yaml:15:13: error: duplicate attribute in list 'a' (first defined at 14:13)
+dup-group-stream.yaml:18:5: error: duplicate multicast group 'g' (first defined at 17:5)
+dup-group-stream.yaml:24:5: error: duplicate stream 'st' (first defined at 20:5)
+dup-group-stream.yaml:25:11: error: operation 'op' already opens stream 'st'

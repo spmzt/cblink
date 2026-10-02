@@ -1,0 +1,6 @@
+version: 1
+attribute-sets:
+  - attributes:
+      - name: a
+operations:
+  - name: op

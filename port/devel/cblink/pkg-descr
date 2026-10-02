@@ -1,0 +1,11 @@
+cblink carries netlink-style messages between userland programs: a
+fixed binary header followed by a CBOR body of typed attributes.
+Servers register families of operations with declarative attribute
+policies; clients resolve families by name and use request/response,
+dumps, flow-controlled streams and multicast notifications.
+
+It runs over TCP with TLS 1.3, SCTP with DTLS 1.2, and local
+sockets, with mutual TLS by default.
+
+cblink-gen generates typed C code and documentation from a family's
+YAML spec, much like YNL does for Linux netlink.

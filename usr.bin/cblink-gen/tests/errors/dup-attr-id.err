@@ -1,0 +1,1 @@
+dup-attr-id.yaml:11:16: error: attribute id 3 already used by 'a' (6:9)

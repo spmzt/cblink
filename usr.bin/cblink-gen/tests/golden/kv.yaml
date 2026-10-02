@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: BSD-2-Clause
+---
+name: kv
+version: 1
+doc: |
+  A small key/value store. Demonstrates do, dump, notifications,
+  a push stream and authenticated operations.
+
+definitions:
+  - name: max-key-len
+    type: const
+    value: 255
+  - name: entry-flags
+    type: flags
+    entries:
+      - persistent
+      - name: secret
+        doc: Value is redacted in dumps.
+
+attribute-sets:
+  - name: kv
+    attributes:
+      - name: key
+        type: text
+        checks:
+          min-len: 1
+          max-len: max-key-len
+      - name: value
+        type: bytes
+        checks:
+          max-len: 65536
+      - name: flags
+        type: u32
+        enum: entry-flags
+      - name: ttl
+        type: u32
+        checks:
+          max: 86400
+      - name: tags
+        type: text
+        multi-attr: true
+        checks:
+          max-count: 16
+          max-len: 32
+      - name: prefix
+        type: text
+        checks:
+          max-len: max-key-len
+
+operations:
+  - name: get
+    attribute-set: kv
+    do:
+      request:
+        attributes:
+          - key
+        required:
+          - key
+      reply:
+        attributes:
+          - key
+          - value
+          - flags
+          - ttl
+          - tags
+    dump:
+      request:
+        attributes:
+          - prefix
+      reply:
+        attributes:
+          - key
+          - value
+          - flags
+  - name: set
+    attribute-set: kv
+    auth: true
+    do:
+      request:
+        attributes:
+          - key
+          - value
+          - flags
+          - ttl
+          - tags
+        required:
+          - key
+          - value
+  - name: watch
+    attribute-set: kv
+    do:
+      request:
+        attributes:
+          - prefix
+  - name: changed
+    attribute-set: kv
+    mcgrp: changes
+    event:
+      attributes:
+        - key
+        - flags
+
+mcast-groups:
+  - name: changes
+
+streams:
+  - name: watch
+    open: watch
+    direction: server-to-client
+    payload: kv
+    initial-credit: 65536

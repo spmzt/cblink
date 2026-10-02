@@ -1,0 +1,1 @@
+dup-attr-name.yaml:8:9: error: duplicate attribute 'a' (first defined at 6:9)

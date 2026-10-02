@@ -7,6 +7,7 @@
 /* TCP transport and connection core. */
 
 #include <sys/resource.h>
+#include <sys/un.h>
 
 #include <fcntl.h>
 #include <netdb.h>
@@ -829,25 +830,32 @@ ATF_TC_BODY(answer_flood, tc)
 	unsigned char req[CBL_HDRLEN], *batch;
 	const size_t sendq = 64 * 1024, nbatch = 512;
 	struct timespec t0, t;
+	struct sockaddr_un sun = { .sun_family = AF_UNIX };
 	struct pollfd pfd;
-	char uri[64];
-	uint16_t port;
+	char cwd[80], uri[128];
 	cbl_conn *c;
 	size_t len, off = 0, peak = 0;
 	ssize_t n;
-	int lfd, fd, small = 16 * 1024, error = 0;
+	int lfd, fd, error = 0, events, timeout;
 
 	ATF_REQUIRE_EQ(0, cbl_ctx_set_limit(ctx, CBL_LIM_SENDQ_BYTES, sendq));
 	ATF_REQUIRE_EQ(0, cbl_ctx_set_limit(ctx, CBL_LIM_STREAM_CLOSE_MS,
 	    300));
 	ATF_REQUIRE_EQ(0, cbl_ctx_set_limit(ctx, CBL_LIM_IDLE_MS, 0));
-	lfd = raw_listen(&port);
-	ATF_REQUIRE(setsockopt(lfd, SOL_SOCKET, SO_RCVBUF, &small,
-	    sizeof(small)) == 0);
-	snprintf(uri, sizeof(uri), "tcp://127.0.0.1:%u", port);
+	/*
+	 * A local socket: its buffers are small and their limit is firm,
+	 * so the client's writes stop soon after the peer stops reading.
+	 * (TCP over loopback may take many megabytes before it pushes back.)
+	 */
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+		atf_tc_skip("working directory too long for a socket path");
+	snprintf(sun.sun_path, sizeof(sun.sun_path), "%s/flood.sock", cwd);
+	sun.sun_len = SUN_LEN(&sun);
+	ATF_REQUIRE((lfd = socket(AF_UNIX, SOCK_STREAM, 0)) != -1);
+	ATF_REQUIRE(bind(lfd, (struct sockaddr *)&sun, sun.sun_len) == 0);
+	ATF_REQUIRE(listen(lfd, 1) == 0);
+	snprintf(uri, sizeof(uri), "unix:%s", sun.sun_path);
 	c = client_connect(ctx, uri);
-	ATF_REQUIRE(setsockopt(cbl_conn_fd(c), SOL_SOCKET, SO_SNDBUF, &small,
-	    sizeof(small)) == 0);
 	ATF_REQUIRE((fd = accept(lfd, NULL, NULL)) != -1);
 	ATF_REQUIRE(fcntl(fd, F_SETFL, O_NONBLOCK) == 0);
 
@@ -862,14 +870,27 @@ ATF_TC_BODY(answer_flood, tc)
 		n = write(fd, batch + off, len * nbatch - off);
 		if (n > 0)
 			off = (off + (size_t)n) % (len * nbatch);
-		pfd.fd = cbl_conn_fd(c);
-		pfd.events = POLLIN | POLLOUT;
-		pfd.revents = 0;
-		(void)poll(&pfd, 1, 10);
-		error = cbl_conn_process(c, CBL_EV_READ | CBL_EV_WRITE);
-		ATF_REQUIRE_EQ(0, cbl_conn_stats(c, &st));
-		if (st.txq_bytes > peak)
-			peak = st.txq_bytes;
+		/*
+		 * The client takes a batch of frames per call: let it work
+		 * through what was written, and only wait when the peer's
+		 * side is full too.  How long the socket buffers take to
+		 * fill differs a lot between systems; this must not.
+		 */
+		for (int k = 0; k < 64 && error == 0; k++) {
+			error = cbl_conn_process(c, CBL_EV_READ | CBL_EV_WRITE);
+			ATF_REQUIRE_EQ(0, cbl_conn_stats(c, &st));
+			if (st.txq_bytes > peak)
+				peak = st.txq_bytes;
+			if (cbl_conn_interest(c, &events, &timeout) != 0 ||
+			    timeout != 0)
+				break;
+		}
+		if (error == 0 && n <= 0) {
+			pfd.fd = cbl_conn_fd(c);
+			pfd.events = POLLIN;
+			pfd.revents = 0;
+			(void)poll(&pfd, 1, 10);
+		}
 		clock_gettime(CLOCK_MONOTONIC, &t);
 	} while (error == 0 && t.tv_sec - t0.tv_sec < 60);
 	ATF_REQUIRE_MSG(error != 0, "still open, %zu bytes queued", peak);

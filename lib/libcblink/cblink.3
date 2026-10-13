@@ -358,6 +358,11 @@ reads it back into such a struct, what it points to allocated from a
 and with
 .Dv CBL_YD_STRICT
 refuses a key the node has no child for.
+A list entry may be one byte of input and a struct of many: what an
+arena holds is bounded,
+.Fn cbl_yarena_set_limit ,
+64 MiB unless set, and a decode past it fails with
+.Er ENOMEM .
 It checks what the CBOR is, not what the schema further says.
 .Sh LIMITS
 Every limit has a default, a minimum and a maximum, and applies per

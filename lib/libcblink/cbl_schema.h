@@ -304,8 +304,13 @@ typedef struct cbl_yarena cbl_yarena;
 
 cbl_yarena	*cbl_yarena_new(void);
 void		 cbl_yarena_free(cbl_yarena *a);
-/* len bytes, zeroed, a's until it is freed: for a handler's answer. */
+/*
+ * len bytes, zeroed, a's until it is freed: for a handler's answer; NULL
+ * past the arena's limit, 64 MiB unless set: a decode fails with ENOMEM
+ * rather than allocate more for what a peer sent.
+ */
 void		*cbl_yarena_alloc(cbl_yarena *a, size_t len);
+void		 cbl_yarena_set_limit(cbl_yarena *a, size_t limit);
 
 /* n's value from its struct p, appended to b.  0, or an errno. */
 int		 cbl_yencode(const struct cbl_ynode *n, const void *p,

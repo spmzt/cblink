@@ -13,6 +13,7 @@
  */
 
 #include <atf-c.h>
+#include <errno.h>
 #include <string.h>
 
 #include <regex.h>
@@ -426,6 +427,46 @@ ATF_TC_BODY(roundtrip, tc)
 	cbl_ybuf_free(&b);
 }
 
+/*
+ * A thousand empty list entries are a thousand bytes, and a thousand
+ * structs: what a decode allocates is the arena's limit's to bound.
+ */
+ATF_TC_WITHOUT_HEAD(arena_limit);
+ATF_TC_BODY(arena_limit, tc)
+{
+	const struct cbl_ynode *s, *item;
+	struct shapes_shapes out;
+	uint8_t in[1024], *p = in;
+	uint64_t delta;
+	cbl_yarena *a;
+	char why[256];
+
+	ATF_REQUIRE((s = top(module("shapes"), "shapes")) != NULL);
+	ATF_REQUIRE((item = child(s, "item")) != NULL);
+	delta = item->sid - s->sid;
+	ATF_REQUIRE(delta < 24);
+	*p++ = 0xa1;			/* { delta: [ {} x 1000 ] } */
+	*p++ = (uint8_t)delta;
+	*p++ = 0x99;			/* an array, a 16-bit count */
+	*p++ = 1000 >> 8;
+	*p++ = 1000 & 0xff;
+	for (int i = 0; i < 1000 && p < in + sizeof(in); i++)
+		*p++ = 0xa0;
+	ATF_REQUIRE(p - in == 1005);
+
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	cbl_yarena_set_limit(a, 4096);
+	ATF_CHECK_EQ(ENOMEM, shapes_shapes_decode(in, (size_t)(p - in), &out,
+	    a, 0, why, sizeof(why)));
+	ATF_CHECK(strstr(why, "limit") != NULL);
+	cbl_yarena_free(a);
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_CHECK_EQ(0, shapes_shapes_decode(in, (size_t)(p - in), &out, a, 0,
+	    why, sizeof(why)));
+	ATF_CHECK_EQ(1000u, out.item.n);
+	cbl_yarena_free(a);
+}
+
 ATF_TC_WITHOUT_HEAD(identities);
 ATF_TC_BODY(identities, tc)
 {
@@ -486,5 +527,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, identities);
 	ATF_TP_ADD_TC(tp, lookups);
 	ATF_TP_ADD_TC(tp, roundtrip);
+	ATF_TP_ADD_TC(tp, arena_limit);
 	return (atf_no_error());
 }

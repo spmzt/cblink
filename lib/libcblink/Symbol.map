@@ -212,4 +212,5 @@ CBLINK_1.0 {
 	cbl_yarena_new;
 	cbl_yencode_sid;
 	cbl_yarena_alloc;
+	cbl_yarena_set_limit;
 };

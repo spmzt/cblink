@@ -38,8 +38,18 @@
 
 #define	YDEPTH_MAX	CBL_DEPTH_HARD_MAX
 
+/*
+ * What one arena may hold, by default: a struct is allocated for as
+ * little as one byte of input (an empty map, a list entry), so what a
+ * frame asks for is bounded here, not by its length.
+ */
+#define	YARENA_LIMIT	(64 * 1024 * 1024)
+#define	NOMEM		"no memory, or past the arena's limit"
+
 struct cbl_yarena {
 	struct cbl_arena	 ar;
+	size_t			 used;
+	size_t			 limit;
 };
 
 cbl_yarena *
@@ -50,6 +60,7 @@ cbl_yarena_new(void)
 	if ((a = calloc(1, sizeof(*a))) == NULL)
 		return (NULL);
 	cbl_arena_init(&a->ar);
+	a->limit = YARENA_LIMIT;
 	return (a);
 }
 
@@ -63,15 +74,27 @@ cbl_yarena_free(cbl_yarena *a)
 	free(a);
 }
 
+void
+cbl_yarena_set_limit(cbl_yarena *a, size_t limit)
+{
+
+	if (a != NULL)
+		a->limit = limit;
+}
+
 void *
 cbl_yarena_alloc(cbl_yarena *a, size_t len)
 {
 	void *p;
 
-	if (a == NULL)
+	if (len == 0)
+		len = 1;
+	if (a == NULL || len > a->limit - a->used || a->used > a->limit)
 		return (NULL);
-	if ((p = cbl_arena_alloc(&a->ar, len == 0 ? 1 : len)) != NULL)
-		memset(p, 0, len == 0 ? 1 : len);
+	if ((p = cbl_arena_alloc(&a->ar, len)) != NULL) {
+		memset(p, 0, len);
+		a->used += len;
+	}
 	return (p);
 }
 
@@ -545,14 +568,12 @@ skip(struct yrd *r, int depth)
 	}
 }
 
+/* From the arena, within its limit; NULL past it. */
 static void *
 ralloc(struct yrd *r, size_t len)
 {
-	void *p;
 
-	if ((p = cbl_arena_alloc(&r->a->ar, len == 0 ? 1 : len)) != NULL)
-		memset(p, 0, len == 0 ? 1 : len);
-	return (p);
+	return (cbl_yarena_alloc(r->a, len));
 }
 
 /* The next item as it is, copied: anydata, an instance-identifier. */
@@ -566,7 +587,7 @@ raw(struct yrd *r, struct cbl_bytes *out)
 	if ((error = skip(r, 0)) != 0)
 		return (error);
 	if ((copy = ralloc(r, (size_t)(r->p - from))) == NULL)
-		return (fail(r, ENOMEM, "no memory"));
+		return (fail(r, ENOMEM, NOMEM));
 	memcpy(copy, from, (size_t)(r->p - from));
 	out->p = copy;
 	out->len = (size_t)(r->p - from);
@@ -613,7 +634,7 @@ dec_text(struct yrd *r, const char **out, size_t *lenp)
 	if (memchr(r->p, '\0', (size_t)len) != NULL)
 		return (fail(r, EINVAL, "a NUL in a string"));
 	if ((s = ralloc(r, (size_t)len + 1)) == NULL)
-		return (fail(r, ENOMEM, "no memory"));
+		return (fail(r, ENOMEM, NOMEM));
 	memcpy(s, r->p, (size_t)len);
 	r->p += len;
 	*out = s;
@@ -634,7 +655,7 @@ dec_bytes(struct yrd *r, struct cbl_bytes *out)
 	if (len > (uint64_t)(r->end - r->p))
 		return (fail(r, EINVAL, "truncated"));
 	if ((d = ralloc(r, (size_t)len)) == NULL)
-		return (fail(r, ENOMEM, "no memory"));
+		return (fail(r, ENOMEM, NOMEM));
 	memcpy(d, r->p, (size_t)len);
 	r->p += len;
 	out->p = d;
@@ -789,11 +810,13 @@ dec_value(struct yrd *r, const struct cbl_ytype *t, void *v, bool inunion)
 		return (0);
 	case CBL_YT_DECIMAL64:
 		if (!tag(r, 4))
-			return (fail(r, EINVAL, "a decimal64 (tag 4) expected"));
+			return (fail(r, EINVAL, "a decimal64 (tag 4) "
+			    "expected"));
 		if ((error = head(r, 4, &arg, "[exponent, mantissa]")) != 0)
 			return (error);
 		if (arg != 2)
-			return (fail(r, EINVAL, "[exponent, mantissa] expected"));
+			return (fail(r, EINVAL, "[exponent, mantissa] "
+			    "expected"));
 		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
 		    &s)) != 0)
 			return (error);
@@ -885,7 +908,7 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 	switch (n->kind) {
 	case CBL_YN_CONTAINER:
 		if ((q = ralloc(r, n->size)) == NULL)
-			return (fail(r, ENOMEM, "no memory"));
+			return (fail(r, ENOMEM, NOMEM));
 		*(void **)WAT(p, n->off) = q;
 		return (dec_map(r, n, q, depth + 1));
 	case CBL_YN_LIST:
@@ -897,7 +920,7 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 		    n->type->csize) || (q = ralloc(r, (size_t)k *
 		    (n->kind == CBL_YN_LIST ? n->size : n->type->csize))) ==
 		    NULL)
-			return (fail(r, ENOMEM, "no memory"));
+			return (fail(r, ENOMEM, NOMEM));
 		a = (struct yarr *)WAT(p, n->off);
 		a->n = (size_t)k;
 		a->v = q;
@@ -957,7 +980,7 @@ dec_map(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 	    (error = count(r, k, 2)) != 0)
 		return (error);
 	if ((seen = calloc(n->nchild + 1, 1)) == NULL)
-		return (fail(r, ENOMEM, "no memory"));
+		return (fail(r, ENOMEM, NOMEM));
 	for (uint64_t i = 0; i < k && error == 0; i++) {
 		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
 		    &delta)) != 0)

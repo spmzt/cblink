@@ -156,6 +156,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 {
 	bool cbor = false, json = false, hdr = false, md = false, tree = false;
 	bool tables = false, server = false;
+	struct ysidcbor *sidcbor;
+	size_t nsidcbor = 0;
 	char *bname = NULL;
 	int dirfd = -1;
 	cap_rights_t rights;
@@ -274,6 +276,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		return (1);
 	}
 	s = yang_schema(ctx);
+	sidcbor = xcalloc(nsids > 0 ? nsids : 1, sizeof(*sidcbor));
 	for (size_t i = 0; i < nsids; i++) {
 		struct sidfile *sf;
 
@@ -300,6 +303,24 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			if (d.n == 0 && (cbor || json) &&
 			    sid_emit(sf, dirfd, cbor, json) != 0)
 				return (2);
+			/* For GET-SID: the structure's value, after its key. */
+			if (d.n == 0 && server) {
+				struct ysidcbor *c = &sidcbor[nsidcbor++];
+				struct buf b;
+
+				buf_init(&b);
+				sid_write_cbor(sf, &b);
+				c->module = xstrdup(sf->module);
+				c->revision = sf->revision != NULL ?
+				    xstrdup(sf->revision) : NULL;
+				buf_init(&c->cbor);
+				/* a1 19 05 15: {1301: ...} */
+				if (b.len <= 4 || memcmp(b.p, "\xa1\x19\x05\x15",
+				    4) != 0)
+					errx(2, "%s: not a sid-file", d.file);
+				buf_add(&c->cbor, b.p + 4, b.len - 4);
+				buf_free(&b);
+			}
 			sid_free(sf);
 		}
 		if (assign)
@@ -355,7 +376,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			char *name = xasprintf("%s_server.c", base);
 
 			buf_init(&b);
-			if (gen_yang_server(s, base, d.file, &b, &d) != 0) {
+			if (gen_yang_server(s, base, d.file, sidcbor,
+			    nsidcbor, &b, &d) != 0) {
 				diag_print(&d);
 				return (1);
 			}
@@ -379,6 +401,12 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			    nsids);
 		printf("\n");
 	}
+	for (size_t i = 0; i < nsidcbor; i++) {
+		free(sidcbor[i].module);
+		free(sidcbor[i].revision);
+		buf_free(&sidcbor[i].cbor);
+	}
+	free(sidcbor);
 	schema_free(s);
 	diag_free(&d);
 	free(bname);

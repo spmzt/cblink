@@ -396,6 +396,18 @@ sid_cbor_body()
 	atf_check $gen -m sidjson -o two \
 	    -s one/ietf-system@2014-08-06.sid.cbor "$m"
 	atf_check cmp two/ietf-system@2014-08-06.sid full.sid
+	# The server's table carries it for GET-SID: the value, after 1301.
+	mkdir three
+	atf_check $gen -m server -b sys -o three -s full.sid "$m"
+	sed -n '/^static const uint8_t sid0\[\] = {/,/^};/p' \
+	    three/sys_server.c | grep -o '0x[0-9a-f][0-9a-f]' |
+	    sed 's/^0x//' > embedded
+	od -A n -t x1 -v one/ietf-system@2014-08-06.sid.cbor |
+	    tr -s ' ' '\n' | grep . | tail -n +5 > value
+	atf_check -o not-empty cat value
+	atf_check cmp embedded value
+	atf_check -o match:'\{ "ietf-system", "2014-08-06", sid0' \
+	    cat three/sys_server.c
 	# Read as the file, verified as the file.
 	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n \
 	    -s one/ietf-system@2014-08-06.sid.cbor "$m"

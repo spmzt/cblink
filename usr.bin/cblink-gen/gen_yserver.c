@@ -104,7 +104,8 @@ entry_cmp(const void *a, const void *b)
 
 int
 gen_yang_server(struct schema *s, const char *base, const char *from,
-    struct buf *out, struct diags *d)
+    const struct ysidcbor *sids, size_t nsids, struct buf *out,
+    struct diags *d)
 {
 	struct ysrv y = { .d = d };
 	struct buf nm;
@@ -129,10 +130,38 @@ gen_yang_server(struct schema *s, const char *base, const char *from,
 	}
 	if (y.n == 0)
 		buf_puts(out, "\t{ 0, NULL, NULL, NULL, NULL },\n");
-	buf_printf(out, "};\n\nextern const struct cbl_yserver %s_server;\n"
+	buf_puts(out, "};\n");
+	/* The .sid files given, for GET-SID: ietf-sid-file's value. */
+	for (size_t i = 0; i < nsids; i++) {
+		buf_printf(out, "\n/* %s's .sid file. */\nstatic const uint8_t "
+		    "sid%zu[] = {", sids[i].module, i);
+		for (size_t k = 0; k < sids[i].cbor.len; k++)
+			buf_printf(out, "%s0x%02x,", k % 12 == 0 ? "\n\t" : " ",
+			    (unsigned char)sids[i].cbor.p[k]);
+		buf_puts(out, "\n};\n");
+	}
+	if (nsids > 0) {
+		buf_puts(out, "\nstatic const struct cbl_ysidfile sidfiles[] = "
+		    "{\n");
+		for (size_t i = 0; i < nsids; i++) {
+			/* A YANG identifier and a date: nothing to escape. */
+			buf_printf(out, "\t{ \"%s\", ", sids[i].module);
+			if (sids[i].revision != NULL)
+				buf_printf(out, "\"%s\"", sids[i].revision);
+			else
+				buf_puts(out, "NULL");
+			buf_printf(out, ", sid%zu, sizeof(sid%zu) },\n", i, i);
+		}
+		buf_puts(out, "};\n");
+	}
+	buf_printf(out, "\nextern const struct cbl_yserver %s_server;\n"
 	    "const struct cbl_yserver %s_server = {\n\t.schema = &%s_schema,\n"
-	    "\t.nhandler = %zu,\n\t.handler = handlers,\n};\n", nm.p, nm.p,
+	    "\t.nhandler = %zu,\n\t.handler = handlers,\n", nm.p, nm.p,
 	    nm.p, y.n);
+	if (nsids > 0)
+		buf_printf(out, "\t.nsidfile = %zu,\n\t.sidfile = sidfiles,\n",
+		    nsids);
+	buf_puts(out, "};\n");
 	free(y.v);
 	buf_free(&y.adapters);
 	buf_free(&nm);

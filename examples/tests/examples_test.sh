@@ -167,6 +167,8 @@ kvy_body()
 	atf_check -o match:'^store: a2 01 02 02 82 a4 01 65 61 6c 70 68 61 ' \
 	    cat out
 	atf_check -o match:'^decoded: alpha ttl 60, beta persistent$' cat out
+	atf_check -o match:'^get-sid: 1 file, [0-9]+ bytes, as the table has it$' \
+	    cat out
 	atf_check -o match:'^touch: ttl 300$' cat out
 	atf_check -o match:'^clear al: 1 removed, 1 left$' cat out
 	# {SID of changed: {+1 key: "beta", +2 what: deleted (1)}}

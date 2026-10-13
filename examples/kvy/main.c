@@ -9,8 +9,8 @@
  * the ones cblink-gen -m server declares in kv.h and tables in
  * kv_server.c, served by family 1 ("cblink.yang") on a unix: socket of
  * its own: a client edits the store, reads it back (its value in
- * YANG-CBOR, and decoded), and calls an rpc, and the program says what
- * came back.  The action is called through the table, as family 1 does
+ * YANG-CBOR, and decoded), fetches the .sid file, and calls an rpc, and
+ * the program says what came back.  The action is called through the table, as family 1 does
  * not carry actions yet.  A notification is shown as bytes, then sent
  * to the client, which subscribed to family 1's group "notify".
  */
@@ -276,6 +276,9 @@ main(void)
 	cbl_msg *m, *r;
 	cbl_yarena *a;
 	struct pollfd pfd;
+	cbl_dump *d;
+	bool same = false;
+	int nfiles = 0;
 	pthread_t thr;
 	cbl_sub *sub;
 	uint64_t sid;
@@ -331,6 +334,21 @@ main(void)
 	    back.store->entry.v[0].ttl, back.store->entry.v[1].key,
 	    back.store->entry.v[1].persistent ? " persistent" : "");
 	cbl_msg_free(r);
+
+	/* GET-SID: the .sid file the server numbers kv by. */
+	if (cbl_msg_new(cctx, CBL_YANG_FAMILY, CBL_YCMD_GET_SID, CBL_F_DUMP,
+	    &m) != 0 || cbl_dump_start(c, m, &d) != 0)
+		errx(1, "get-sid");
+	while (cbl_dump_next(d, &r) == 0 && r != NULL) {
+		if (cbl_msg_sid_raw(r, CBL_YSID_FILE, &v, &len) != 0)
+			errx(1, "get-sid: not a sid-file");
+		same = len == kv_server.sidfile[0].len &&
+		    memcmp(v, kv_server.sidfile[0].cbor, len) == 0;
+		nfiles++;
+	}
+	cbl_dump_free(d);
+	printf("get-sid: %d file, %zu bytes, %s\n", nfiles, len,
+	    same ? "as the table has it" : "not the table's");
 
 	/* touch, an action: through the table, as family 1 has none yet. */
 	list = NULL;

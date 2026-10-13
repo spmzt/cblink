@@ -374,12 +374,23 @@ int		 gen_yang_schema(struct schema *s, const char *base,
 		    struct diags *d);
 
 /*
+ * A .sid file given (-s), as the server's GET-SID sends it: its module,
+ * and the value of its ietf-sid-file structure in YANG-CBOR.
+ */
+struct ysidcbor {
+	char		*module;
+	char		*revision;	/* NULL: none */
+	struct buf	 cbor;
+};
+
+/*
  * The server's handler table (cbl_schema.h) of the same modules, as
- * base_server.c (gen_yserver.c).  -1 and diagnostics for a node
- * without a SID.
+ * base_server.c (gen_yserver.c), with the .sid files given.  -1 and
+ * diagnostics for a node without a SID.
  */
 int		 gen_yang_server(struct schema *s, const char *base,
-		    const char *from, struct buf *out, struct diags *d);
+		    const char *from, const struct ysidcbor *sids,
+		    size_t nsids, struct buf *out, struct diags *d);
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);

@@ -20,6 +20,9 @@
  *	NOTIFY	to group "notify": {cblink:notification: {event-time,
  *		event: {delta: content}}}, the delta from event's SID
  *		(RFC 9254: anydata's keys are as a container's).
+ *	GET-SID	a dump: {1301: the ietf-sid-file structure}, a frame for
+ *		each module's .sid file, what a generic client decodes
+ *		the others with.
  *
  * A request's targets are top-level nodes; a list entry's (a SID with
  * keys), actions and the .sid files (GET-SID) are for what comes next.
@@ -523,11 +526,50 @@ y_rpc(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	return (error);
 }
 
+/* GET-SID: the servers' .sid files, one a frame. */
+static int
+y_getsid_dump(cbl_req *req, const cbl_msg *msg __unused,
+    struct cbl_dump_state *st, void *arg __unused)
+{
+	cbl_ctx *ctx = req->conn->ctx;
+	const struct cbl_ysidfile *f = NULL;
+	cbl_msg *item;
+	int error;
+
+	/* pos[0]: the server; pos[1]: its file. */
+	pthread_rwlock_rdlock(&ctx->famlock);
+	while (st->pos[0] < ctx->nysrv) {
+		const struct cbl_yserver *s = ctx->ysrv[st->pos[0]].srv;
+
+		if (st->pos[1] < s->nsidfile) {
+			f = &s->sidfile[st->pos[1]++];
+			break;
+		}
+		st->pos[0]++;
+		st->pos[1] = 0;
+	}
+	pthread_rwlock_unlock(&ctx->famlock);
+	if (f == NULL)
+		return (0);
+	if ((error = cbl_req_dump_item(req, &item)) != 0)
+		return (error);
+	if ((error = cbl_msg_put_sid_raw(item, CBL_YSID_FILE, f->cbor,
+	    f->len)) != 0) {
+		cbl_msg_free(item);
+		return (error);
+	}
+	if ((error = cbl_req_send(req, item)) != 0)
+		return (error);
+	return (EAGAIN);
+}
+
 static const struct cbl_op yops[] = {
 	{ CBL_YCMD_GET, CBL_OPF_DO | CBL_OPF_DUMP, "get", NULL, y_get,
 	    y_get_dump, NULL },
 	{ CBL_YCMD_EDIT, CBL_OPF_DO, "edit", NULL, y_edit, NULL, NULL },
 	{ CBL_YCMD_RPC, CBL_OPF_DO, "rpc", NULL, y_rpc, NULL, NULL },
+	{ CBL_YCMD_GET_SID, CBL_OPF_DUMP, "get-sid", NULL, NULL,
+	    y_getsid_dump, NULL },
 };
 
 static const struct cbl_mcgrp ygroups[] = {
@@ -687,7 +729,8 @@ cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv, void *arg)
 	int error;
 
 	if (ctx == NULL || srv == NULL || srv->schema == NULL ||
-	    (srv->nhandler > 0 && srv->handler == NULL))
+	    (srv->nhandler > 0 && srv->handler == NULL) ||
+	    (srv->nsidfile > 0 && srv->sidfile == NULL))
 		return (EINVAL);
 	for (uint32_t i = 1; i < srv->nhandler; i++)
 		if (srv->handler[i].sid <= srv->handler[i - 1].sid)

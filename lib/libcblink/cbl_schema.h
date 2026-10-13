@@ -416,10 +416,25 @@ struct cbl_yhandler {
 	cbl_yaction_f		*action;
 };
 
+/*
+ * A module's .sid file as GET-SID sends it: the value of RFC 9595's
+ * ietf-sid-file structure (SID 1301), in YANG-CBOR.
+ */
+#define	CBL_YSID_FILE		1301
+
+struct cbl_ysidfile {
+	const char		*module;
+	const char		*revision;	/* NULL: none */
+	const uint8_t		*cbor;
+	size_t			 len;
+};
+
 struct cbl_yserver {
 	const struct cbl_yschema *schema;
 	uint32_t		 nhandler;
 	const struct cbl_yhandler *handler;	/* by SID */
+	uint32_t		 nsidfile;
+	const struct cbl_ysidfile *sidfile;	/* the -s files given */
 };
 
 /*
@@ -442,6 +457,7 @@ enum cbl_ycmd {
 	CBL_YCMD_EDIT = 2,
 	CBL_YCMD_RPC = 3,
 	CBL_YCMD_NOTIFY = 4,	/* NOTIFY frames, group "notify" */
+	CBL_YCMD_GET_SID = 5,	/* dump: {1301: sid-file}, a module each */
 };
 
 /*

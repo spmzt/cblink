@@ -68,6 +68,32 @@ type_free(struct sntype *t)
 static void	snode_free(struct snode *n);
 
 static void
+strings_free(char **v, size_t n)
+{
+
+	for (size_t i = 0; i < n; i++)
+		free(v[i]);
+	free(v);
+}
+
+static void
+swnode_free(struct swnode *n)
+{
+	struct swnode *next;
+
+	for (; n != NULL; n = next) {
+		next = n->next;
+		swnode_free(n->child);
+		free(n->name);
+		free(n->type);
+		free(n->path);
+		free(n->key);
+		strings_free(n->iffeatures, n->niffeatures);
+		free(n);
+	}
+}
+
+static void
 exts_free(struct sext *e, size_t n)
 {
 
@@ -75,6 +101,7 @@ exts_free(struct sext *e, size_t n)
 		free(e[i].ext);
 		free(e[i].arg);
 		snode_free(e[i].data);
+		swnode_free(e[i].written);
 	}
 	free(e);
 }
@@ -90,6 +117,8 @@ snode_free(struct snode *n)
 		free(n->name);
 		free(n->keys);
 		type_free(n->type);
+		free(n->wtype);
+		free(n->wpath);
 		free(n->units);
 		for (size_t i = 0; i < n->ndflts; i++)
 			free(n->dflts[i]);
@@ -103,6 +132,7 @@ snode_free(struct snode *n)
 			free(n->musts[i].eapptag);
 		}
 		free(n->musts);
+		strings_free(n->iffeatures, n->niffeatures);
 		exts_free(n->exts, n->nexts);
 		free(n);
 	}
@@ -137,6 +167,11 @@ schema_free(struct schema *s)
 		snode_free(m->rpcs);
 		snode_free(m->notifs);
 		exts_free(m->exts, m->nexts);
+		for (size_t j = 0; j < m->naugments; j++) {
+			free(m->augments[j].target);
+			swnode_free(m->augments[j].nodes);
+		}
+		free(m->augments);
 		free(m->name);
 		free(m->revision);
 		free(m->ns);

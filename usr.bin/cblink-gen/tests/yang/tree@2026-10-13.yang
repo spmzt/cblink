@@ -1,0 +1,247 @@
+module tree {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:tree";
+  prefix t;
+
+  import good {
+    prefix g;
+  }
+  import ietf-yang-types {
+    prefix yang;
+  }
+  import ietf-yang-structure-ext {
+    prefix sx;
+  }
+
+  description
+    "What a tree diagram (RFC 8340) shows, for cblink-gen's -m tree
+     against yanglint -f tree: every kind of node and its marks,
+     shorthand cases compiled and written, if-features, status and
+     config inherited, operations, augments of another module's tree
+     with uses, and structures.";
+
+  revision 2026-10-13;
+
+  feature fast;
+  feature slow;
+
+  typedef ref {
+    type leafref {
+      path "/t:top/t:item/t:name";
+    }
+  }
+
+  grouping stamp {
+    leaf when {
+      type yang:date-and-time;
+    }
+    leaf who {
+      if-feature "fast or slow";
+      type string;
+    }
+  }
+
+  container top {
+    presence "on";
+    list item {
+      key "name kind";
+      leaf name {
+        type string;
+      }
+      leaf kind {
+        type enumeration {
+          enum a;
+          enum b;
+        }
+      }
+      leaf-list tags {
+        type string;
+        ordered-by user;
+      }
+      leaf-list peers {
+        type leafref {
+          path "../name";
+        }
+      }
+      leaf link {
+        type ref;
+      }
+      leaf mtu {
+        type uint16;
+        units "octets";
+        default "1500";
+      }
+      anydata blob {
+        mandatory true;
+      }
+      anyxml raw;
+      choice shape {
+        default round;
+        leaf round {
+          if-feature fast;
+          type empty;
+        }
+        case square {
+          leaf side {
+            type uint32;
+            mandatory true;
+          }
+        }
+        container poly {
+          leaf sides {
+            type uint8;
+          }
+        }
+      }
+      choice must-pick {
+        mandatory true;
+        leaf one {
+          type string;
+        }
+        leaf two {
+          type string;
+        }
+      }
+      action reset {
+        input {
+          leaf hard {
+            type boolean;
+          }
+        }
+        output {
+          uses stamp;
+        }
+      }
+      action ping;
+      notification flapped {
+        leaf count {
+          type uint32;
+        }
+      }
+    }
+    list stats {
+      config false;
+      leaf hits {
+        type yang:counter64;
+      }
+    }
+    container old {
+      status deprecated;
+      leaf a {
+        type string;
+      }
+      leaf b {
+        status obsolete;
+        type string;
+      }
+    }
+  }
+
+  augment "/t:top" {
+    leaf local {
+      type string;
+    }
+  }
+
+  augment "/g:things/g:thing" {
+    if-feature slow;
+    uses stamp;
+    container state {
+      config false;
+      leaf up {
+        type boolean;
+      }
+      list hist {
+        key "at";
+        leaf at {
+          type yang:date-and-time;
+        }
+        container inner {
+          leaf at {
+            type string;
+          }
+        }
+      }
+    }
+    choice mode {
+      leaf auto {
+        type empty;
+      }
+      list manual {
+        key "id";
+        leaf id {
+          type uint8;
+        }
+      }
+      case other {
+        leaf what {
+          type string;
+        }
+      }
+    }
+    container dep {
+      status deprecated;
+      leaf x {
+        type string;
+      }
+      leaf y {
+        status obsolete;
+        type string;
+      }
+    }
+    action poke {
+      input {
+        leaf force {
+          type boolean;
+        }
+      }
+    }
+    notification poked {
+      leaf by {
+        type string;
+      }
+    }
+  }
+
+  rpc go {
+    output {
+      leaf done {
+        type boolean;
+      }
+    }
+  }
+
+  rpc nothing;
+
+  notification alarm {
+    leaf text {
+      type string;
+    }
+    container where {
+      leaf path {
+        type string;
+      }
+    }
+  }
+
+  sx:structure memo {
+    leaf subject {
+      type string;
+    }
+    list line {
+      key "n";
+      leaf n {
+        type uint32;
+      }
+      leaf text {
+        type string;
+      }
+    }
+  }
+
+  sx:structure second {
+    leaf only {
+      type string;
+    }
+  }
+}

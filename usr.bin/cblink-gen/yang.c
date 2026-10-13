@@ -206,8 +206,14 @@ yang_ctx_new(const char **dirs, size_t ndirs)
 		buf_printf(&b, "%s%s", i > 0 ? ":" : "", dirs[i]);
 	}
 	ly_set_log_clb(log_clb);
+	/*
+	 * Each compiled node keeps its parsed node in its priv, for what is
+	 * only written there and the tree diagrams show: its if-features
+	 * and its type as written.
+	 */
 	if (ly_ctx_new(ndirs > 0 ? b.p : NULL, LY_CTX_DISABLE_SEARCHDIR_CWD |
-	    LY_CTX_REF_IMPLEMENTED, &ctx) != LY_SUCCESS)
+	    LY_CTX_REF_IMPLEMENTED | LY_CTX_SET_PRIV_PARSED, &ctx) !=
+	    LY_SUCCESS)
 		errx(2, "libyang: cannot make a context");
 	buf_free(&b);
 	if (ly_ctx_set_options(ctx, LY_CTX_DISABLE_SEARCHDIRS) != LY_SUCCESS)
@@ -381,6 +387,118 @@ xstrdup_or_null(const char *p)
 	return (p != NULL ? xstrdup(p) : NULL);
 }
 
+static char **
+conv_iffeatures(struct lysp_qname *q, size_t *np)
+{
+	char **v;
+	LY_ARRAY_COUNT_TYPE u;
+
+	*np = LY_ARRAY_COUNT(q);
+	v = xcalloc(*np, sizeof(*v));
+	LY_ARRAY_FOR(q, u)
+		v[u] = xstrdup(q[u].str);
+	return (v);
+}
+
+/* A leaf's or leaf-list's type statement: its argument, a path given. */
+static void
+conv_wtype(const struct lysp_node *pn, char **typep, char **pathp)
+{
+	const void *v = pn;
+	const struct lysp_type *t;
+
+	if (pn->nodetype == LYS_LEAF)
+		t = &((const struct lysp_node_leaf *)v)->type;
+	else if (pn->nodetype == LYS_LEAFLIST)
+		t = &((const struct lysp_node_leaflist *)v)->type;
+	else
+		return;
+	*typep = xstrdup_or_null(t->name);
+	*pathp = t->path != NULL ? xstrdup(lyxp_get_expr(t->path)) : NULL;
+}
+
+static struct swnode *conv_wlist(const struct lysp_node *, struct swnode *);
+
+/* The children of a node or an augment: data, actions, notifications. */
+static struct swnode *
+conv_wchildren(const struct lysp_node *pn, struct swnode *parent)
+{
+	const struct lysp_node_action *a;
+	const struct lysp_node_notif *no;
+	struct swnode *first, **tail;
+
+	first = conv_wlist(lysp_node_child(pn), parent);
+	for (tail = &first; *tail != NULL; tail = &(*tail)->next)
+		;
+	if ((a = lysp_node_actions(pn)) != NULL)
+		*tail = conv_wlist(&a->node, parent);
+	for (; *tail != NULL; tail = &(*tail)->next)
+		;
+	if ((no = lysp_node_notifs(pn)) != NULL)
+		*tail = conv_wlist(&no->node, parent);
+	return (first);
+}
+
+/*
+ * A node as written.  An action's or rpc's children are its input and its
+ * output, always both, as in the compiled model.
+ */
+static struct swnode *
+conv_wnode(const struct lysp_node *pn, struct swnode *parent)
+{
+	const struct lysp_node_action *a;
+	struct swnode *n;
+
+	n = xcalloc(1, sizeof(*n));
+	n->parent = parent;
+	n->name = xstrdup(pn->name);
+	if (pn->nodetype == LYS_USES)
+		n->uses = true;
+	else
+		n->kind = kind_of(pn->nodetype);
+	if ((pn->flags & LYS_CONFIG_W) != 0)
+		n->flags |= SNF_CONFIG;
+	if ((pn->flags & LYS_CONFIG_R) != 0)
+		n->flags |= SNF_STATE;
+	if ((pn->flags & LYS_STATUS_CURR) != 0)
+		n->flags |= SNF_CURRENT;
+	if ((pn->flags & LYS_STATUS_DEPRC) != 0)
+		n->flags |= SNF_DEPRECATED;
+	if ((pn->flags & LYS_STATUS_OBSLT) != 0)
+		n->flags |= SNF_OBSOLETE;
+	if ((pn->flags & LYS_MAND_TRUE) != 0)
+		n->flags |= SNF_MANDATORY;
+	if (pn->nodetype == LYS_CONTAINER && ((const struct
+	    lysp_node_container *)(const void *)pn)->presence != NULL)
+		n->flags |= SNF_PRESENCE;
+	if (pn->nodetype == LYS_LIST)
+		n->key = xstrdup_or_null(((const struct lysp_node_list *)
+		    (const void *)pn)->key);
+	conv_wtype(pn, &n->type, &n->path);
+	n->iffeatures = conv_iffeatures(pn->iffeatures, &n->niffeatures);
+
+	if ((pn->nodetype & (LYS_RPC | LYS_ACTION)) != 0) {
+		a = (const struct lysp_node_action *)(const void *)pn;
+		n->child = conv_wnode(&a->input.node, n);
+		n->child->next = conv_wnode(&a->output.node, n);
+		return (n);
+	}
+	n->child = conv_wchildren(pn, n);
+	return (n);
+}
+
+static struct swnode *
+conv_wlist(const struct lysp_node *pn, struct swnode *parent)
+{
+	struct swnode *first = NULL, **tail = &first;
+
+	for (; pn != NULL; pn = pn->next) {
+		*tail = conv_wnode(pn, parent);
+		tail = &(*tail)->next;
+	}
+	return (first);
+}
+
 static enum sntype_base
 base_of(LY_DATA_TYPE t)
 {
@@ -539,6 +657,35 @@ conv_type(struct conv *c, const struct lysc_type *lt)
 }
 
 /*
+ * An sx:augment-structure's nodes as written: libyang's structure plugin
+ * keeps them in an augment of its own, a substatement of the parsed
+ * instance, which is found as the plugin finds it, by its argument.
+ */
+static struct swnode *
+conv_augstruct(const struct lysc_ext_instance *ce)
+{
+	const struct lysp_ext_instance *pe;
+	LY_ARRAY_COUNT_TYPE u, v;
+
+	if (ce->module == NULL || ce->module->parsed == NULL ||
+	    ce->argument == NULL)
+		return (NULL);
+	LY_ARRAY_FOR(ce->module->parsed->exts, u) {
+		pe = &ce->module->parsed->exts[u];
+		if (pe->def == NULL || pe->def->compiled != ce->def ||
+		    pe->argument == NULL || strcmp(pe->argument,
+		    ce->argument) != 0)
+			continue;
+		LY_ARRAY_FOR(pe->substmts, v)
+			if (pe->substmts[v].stmt == LY_STMT_AUGMENT &&
+			    *pe->substmts[v].storage_p != NULL)
+				return (conv_wchildren(
+				    *pe->substmts[v].storage_p, NULL));
+	}
+	return (NULL);
+}
+
+/*
  * Extension instances, and the data nodes an instance holds (found with
  * lyplg_ext_get_storage(), as libyang's structure and yang-data plugins
  * keep them).  An instance without a module is a copy libyang made from
@@ -572,6 +719,9 @@ conv_exts(struct conv *c, struct lysc_ext_instance *le, size_t *np)
 			e[u].data = conv_list(c, first, NULL);
 			c->in = saved;
 		}
+		if (strcmp(e[u].ext,
+		    "ietf-yang-structure-ext:augment-structure") == 0)
+			e[u].written = conv_augstruct(&le[u]);
 	}
 	return (e);
 }
@@ -590,6 +740,7 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 	struct snode *n, **tail;
 	const struct lysc_node_action *a;
 	const struct lysc_node_notif *no;
+	const struct lysp_node *pn;
 
 	n = xcalloc(1, sizeof(*n));
 	n->kind = kind_of(ln->nodetype);
@@ -653,6 +804,19 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 		}
 	}
 
+	/*
+	 * What only the parsed node says: its if-features and its type as
+	 * written.  An implicit case has none: libyang made its parsed node
+	 * only to compile it.
+	 */
+	if ((pn = ln->priv) != NULL) {
+		if ((pn->flags & LYS_INTERNAL) != 0)
+			n->flags |= SNF_INTERNAL;
+		n->iffeatures = conv_iffeatures(pn->iffeatures,
+		    &n->niffeatures);
+		conv_wtype(pn, &n->wtype, &n->wpath);
+	}
+
 	n->exts = conv_exts(c, ln->exts, &n->nexts);
 
 	/* Data children, then actions, then notifications. */
@@ -700,6 +864,37 @@ conv_list(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 		tail = &(*tail)->next;
 	}
 	return (first);
+}
+
+/*
+ * The module's augments of other modules' trees, as written: those of its
+ * own tree are in the compiled tree as any other node.  Those of its
+ * submodules are left out, as yanglint leaves them out of the module's
+ * tree diagram.
+ */
+static void
+conv_augments(struct smodule *m, const struct lys_module *lm)
+{
+	const struct lysp_node_augment *aug;
+	const char *id, *colon, *slash;
+	struct saugment *sa;
+
+	if (lm->parsed == NULL)
+		return;
+	for (aug = lm->parsed->augments; aug != NULL; aug = aug->next) {
+		id = aug->nodeid + (aug->nodeid[0] == '/');
+		colon = strchr(id, ':');
+		slash = strchr(id, '/');
+		if (colon == NULL || (slash != NULL && slash < colon) ||
+		    (strncmp(id, lm->prefix, (size_t)(colon - id)) == 0 &&
+		    lm->prefix[colon - id] == '\0'))
+			continue;	/* its own tree */
+		m->augments = xreallocarray(m->augments, m->naugments + 1,
+		    sizeof(*m->augments));
+		sa = &m->augments[m->naugments++];
+		sa->target = xstrdup(aug->nodeid);
+		sa->nodes = conv_wchildren(&aug->node, NULL);
+	}
 }
 
 struct schema *
@@ -822,6 +1017,7 @@ yang_schema(struct ly_ctx *ctx)
 		    NULL, NULL);
 		c.s->mods[i]->exts = conv_exts(&c, lm->compiled->exts,
 		    &c.s->mods[i]->nexts);
+		conv_augments(c.s->mods[i], lm);
 	}
 	free(c.lmods);
 	return (c.s);

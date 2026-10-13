@@ -101,6 +101,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/ietf-system@2014-08-06.sid yang/iana-crypt-hash@2014-08-06.yang \
 		yang/ietf-netconf-acm@2018-02-14.yang yang/subtract@2026-10-13.yang \
 		yang/shapes@2026-10-13.yang yang/clash@2026-10-13.yang \
+		yang/tree@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
 YANGDIR=	${TESTSDIR}/yang

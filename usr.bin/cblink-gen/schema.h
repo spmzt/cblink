@@ -21,6 +21,7 @@
 struct smodule;
 struct sident;
 struct snode;
+struct swnode;
 
 /*
  * An extension instance on a node or a module: the extension (its
@@ -36,6 +37,7 @@ struct sext {
 	struct smodule	*module;	/* where it is written */
 	bool		 inherited;
 	struct snode	*data;		/* the nodes it holds */
+	struct swnode	*written;	/* sx:augment-structure: as written */
 	uint64_t	 sid;		/* a structure's; 0: none */
 };
 
@@ -63,6 +65,10 @@ enum snode_kind {
 #define	SNF_USERORDER	0x0010	/* ordered-by user */
 #define	SNF_DEPRECATED	0x0020
 #define	SNF_OBSOLETE	0x0040
+#define	SNF_INTERNAL	0x0080	/* libyang's, not the module's */
+/* A written node's (struct swnode), with SNF_CONFIG for config true. */
+#define	SNF_STATE	0x0100	/* config false */
+#define	SNF_CURRENT	0x0200	/* status current */
 
 /* Built-in types, after RFC 7950 section 4.2.4. */
 enum sntype_base {
@@ -163,6 +169,8 @@ struct snode {
 	struct snode	*next;		/* next sibling */
 	uint32_t	 flags;		/* SNF_* */
 	struct sntype	*type;		/* leaf, leaf-list */
+	char		*wtype;		/* ... its type, as written */
+	char		*wpath;		/* ... a leafref's path written there */
 	uint32_t	 min;		/* list, leaf-list: min-elements */
 	uint32_t	 max;		/* list, leaf-list: max-elements */
 	struct snode	**keys;		/* list: its key leaves, in order */
@@ -175,10 +183,40 @@ struct snode {
 	size_t		 nwhen;
 	struct smust	*musts;
 	size_t		 nmusts;
+	char		**iffeatures;	/* its if-features, as written */
+	size_t		 niffeatures;
 	struct sext	*exts;		/* its extension instances */
 	size_t		 nexts;
 	struct sext	*in;		/* the instance holding it, or NULL */
 	uint64_t	 sid;		/* 0: none (choice, case, or unassigned) */
+};
+
+/*
+ * A node as its module writes it, before groupings are expanded and
+ * augments applied, for what a tree diagram (RFC 8340) shows that way:
+ * the module's augments of other modules' trees and the nodes of its
+ * sx:augment-structure.  It says only what its statement says: config
+ * and status where they are written, a uses as itself.
+ */
+struct swnode {
+	enum snode_kind	 kind;		/* SN_CONTAINER for a uses */
+	bool		 uses;		/* a uses: name is the grouping's */
+	char		*name;
+	struct swnode	*parent;
+	struct swnode	*child;		/* data nodes, actions, notifications */
+	struct swnode	*next;
+	uint32_t	 flags;		/* SNF_*, as written */
+	char		*type;		/* leaf, leaf-list: as written */
+	char		*path;		/* ... a leafref's path written there */
+	char		*key;		/* list: its key statement */
+	char		**iffeatures;
+	size_t		 niffeatures;
+};
+
+/* An augment of another module's tree, as written. */
+struct saugment {
+	char		*target;	/* its schema node identifier */
+	struct swnode	*nodes;
 };
 
 /* An identity, and those derived from it directly. */
@@ -220,6 +258,8 @@ struct smodule {
 	struct snode	*notifs;
 	struct sext	*exts;		/* instances at the top of the module */
 	size_t		 nexts;
+	struct saugment	*augments;	/* of other modules' trees */
+	size_t		 naugments;
 	uint64_t	 sid;
 };
 
@@ -276,5 +316,20 @@ int		 gen_yang_h(struct schema *s, const char *base,
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);
+
+/*
+ * The tree diagrams (RFC 8340) of the modules named on the command line,
+ * as yanglint -f tree prints them (gen_ytree.c); one module's.
+ */
+void		 gen_yang_tree(const struct schema *s, struct buf *b);
+void		 gen_yang_tree_module(const struct smodule *m, struct buf *b);
+
+/*
+ * Markdown, a page for each module named on the command line: its tree
+ * diagram and its nodes, wherever they are, with their SIDs when the
+ * module's .sid file is attached (gen_ymd.c); from names the inputs.
+ */
+void		 gen_yang_md(const struct schema *s, const char *from,
+		    struct buf *b);
 
 #endif /* !_CBLINK_GEN_SCHEMA_H_ */

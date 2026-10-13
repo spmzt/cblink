@@ -20,7 +20,7 @@
 .Op Fl adn
 .Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl b Ar base
-.Op Fl m Cm h , Ns Cm sid , Ns Cm sidjson
+.Op Fl m Cm h , Ns Cm md , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
 .Op Fl o Ar dir
 .Op Fl p Ar dir
 .Op Fl s Ar file.sid
@@ -102,7 +102,8 @@ Name the output files
 .Ar base Ns .c
 and so on.
 The default is the spec's file name without
-.Pa .yaml .
+.Pa .yaml ;
+for YANG modules, the first module's name, without its revision.
 .It Fl m Ar parts
 A comma-separated list of the files to write:
 .Bl -tag -width "server"
@@ -149,6 +150,16 @@ and
 made
 .Ql _ ;
 two nodes that would have one name are an error.
+.It Cm md
+.Ar base Ns .md :
+a page of Markdown for each module named: its tree diagram, and a
+table of the nodes it defines, in its own tree and in those it
+augments, with their kind, type, config, mandatory, defaults, units
+and, when its
+.Pa .sid
+file is attached with
+.Fl s ,
+their SIDs; then its features and identities.
 .It Cm sid
 .Ar module Ns @ Ns Ar revision Ns .sid.cbor ,
 one for each
@@ -165,6 +176,16 @@ file:
 the file in JSON, as
 .Fl a
 writes it.
+.It Cm tree
+.Ar base Ns .tree :
+the tree diagrams (RFC 8340) of the modules named, exactly as
+.Ql yanglint -f tree
+prints them: a module's own tree, rpcs and notifications compiled,
+with the nodes other modules augment into them; its augments of other
+modules' trees as written, a grouping used there as one
+.Ql -u
+line; then its structures and yang-data.
+Lines are not wrapped.
 .El
 .It Fl n
 Check the spec and report problems without writing anything.
@@ -268,6 +289,18 @@ Check a spec, then generate everything but the documentation into
 .Bd -literal -offset indent
 $ cblink-gen -n kv.yaml
 $ cblink-gen -m h,c,client,server -o obj kv.yaml
+.Ed
+.Pp
+Write the tree diagram and the Markdown of a YANG module, with the SIDs
+of its
+.Pa .sid
+file, into
+.Pa ietf-ip.tree
+and
+.Pa ietf-ip.md :
+.Bd -literal -offset indent
+$ cblink-gen -m md,tree -s ietf-ip@2018-02-22.sid \
+    ietf-ip@2018-02-22.yang
 .Ed
 .Sh SEE ALSO
 .Xr cblink 3 ,

@@ -311,7 +311,7 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang
 	# Without -m: C generation from YANG is not all written yet.
-	atf_check -s exit:2 -e match:'not written yet but for -m h,sid,sidjson' \
+	atf_check -s exit:2 -e match:'not written yet but for -m h,md,sid,sidjson,tree' \
 	    $gen -o . "$y/good@2026-10-13.yang"
 }
 
@@ -453,6 +453,62 @@ yang_h_body()
 	    $gen -m h,c "$y/good@2026-10-13.yang"
 }
 
+atf_test_case yang_tree
+yang_tree_head()
+{
+	atf_set "descr" "Tree diagrams (RFC 8340) as yanglint -f tree" \
+	    "prints them, and the Markdown reference with the SIDs"
+	atf_set "require.progs" "yanglint"
+}
+yang_tree_body()
+{
+	setup
+	y="$(atf_get_srcdir)/yang"
+
+	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
+	    grep -q 'needs cblink-gen built with libyang'; then
+		atf_skip "cblink-gen built without libyang"
+	fi
+	# Each alone, then a module with another's augments in its tree,
+	# then a deviation: line for line what yanglint prints.  tree has
+	# every kind of node and mark, compiled and as written.
+	for m in good ext ietf-system ietf-netconf-acm ietf-sid-file tree \
+	    "tree good" "good good-dev"; do
+		set --
+		for f in $m; do
+			set -- "$@" "$y/$f"@*.yang
+		done
+		b=$(echo $m | tr ' ' -)
+		atf_check $gen -m tree -b "$b" "$@"
+		atf_check -o save:"$b.want" yanglint -i -p "$y" -f tree "$@"
+		atf_check -o file:"$b.want" cat "$b.tree"
+	done
+	# The module's own nodes compiled, its augment of good's as written.
+	atf_check -o match:'^     \|  \+--rw \(shape\)\?$' cat tree.tree
+	atf_check -o match:'^    \+---u stamp$' cat tree.tree
+	atf_check -o match:'^        \+--rw t:who\?      string \{fast or slow\}\?$' \
+	    cat tree-good.tree
+
+	# The Markdown: the tree diagram, the nodes with their SIDs.
+	cat "$y/ietf-system@2014-08-06.sid" > full.sid
+	atf_check -o ignore $gen -n -a -s full.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check $gen -m md,tree -s full.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check -o match:'^# Module `ietf-system`$' \
+	    -o match:'^\| SID \| 1700 \|$' cat ietf-system.md
+	sed -n '/^```$/,/^```$/p' ietf-system.md | sed '1d;$d' > md.tree
+	atf_check cmp md.tree ietf-system.tree
+	atf_check -o match:'^\| `/ietf-system:system/ntp/server/udp/port` \| leaf \| `inet:port-number` \(uint16\) \| true \|  \| `123` \|  \| 1763 \|$' \
+	    cat ietf-system.md
+	atf_check -o match:'^\| `/ietf-system:system/clock/timezone-utc-offset` \| leaf \| `int16` \| true \|  \|  \| minutes \| [0-9]+ \|$' \
+	    cat ietf-system.md
+	atf_check -o match:'^\| `ntp` \| yes \| [0-9]+ \|$' cat ietf-system.md
+	# Without a .sid file, no SID column.
+	atf_check $gen -m md "$y/good@2026-10-13.yang"
+	atf_check -o match:'^\| Node \| Kind \| Type \| Config \| Mandatory \| Default \| Units \|$' \
+	    -o match:'^\| `/good:things/thing` \| list \[name\] \|  \| true \|  \|  \|  \|$' \
+	    cat good.md
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case golden
@@ -466,4 +522,5 @@ atf_init_test_cases()
 	atf_add_test_case yang_frontend
 	atf_add_test_case sid_cbor
 	atf_add_test_case yang_h
+	atf_add_test_case yang_tree
 }

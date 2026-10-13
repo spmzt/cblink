@@ -37,6 +37,27 @@ count_node(struct snode *n __unused, void *arg)
 
 	(*(size_t *)arg)++;
 }
+
+/* The tree diagrams or the Markdown, as base.tree or base.md. */
+static int
+doc_emit(const struct schema *s, int dirfd, const char *base,
+    const char *from, bool md)
+{
+	struct buf b;
+	char *name;
+	int rv;
+
+	buf_init(&b);
+	if (md)
+		gen_yang_md(s, from, &b);
+	else
+		gen_yang_tree(s, &b);
+	name = xasprintf("%s.%s", base, md ? "md" : "tree");
+	rv = write_file(dirfd, name, &b);
+	free(name);
+	buf_free(&b);
+	return (rv);
+}
 #endif
 
 #define	DEFAULT_PARTS	"h,c,client,server,md"
@@ -48,7 +69,7 @@ usage(void)
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
 	    "       cblink-gen [-adn] [-F module:feature,...] ... "
-	    "[-b base] [-m h,sid,sidjson]\n"
+	    "[-b base] [-m h,md,sid,sidjson,tree]\n"
 	    "                  [-o dir] [-p dir] ... [-s file.sid] ... "
 	    "module.yang ...\n");
 	exit(2);
@@ -131,7 +152,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     const char *parts, const char *outdir, const char *base, bool assign,
     bool check, bool dump)
 {
-	bool cbor = false, json = false, hdr = false;
+	bool cbor = false, json = false, hdr = false, md = false, tree = false;
 	char *bname = NULL;
 	int dirfd = -1;
 	cap_rights_t rights;
@@ -184,8 +205,10 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	ctx = yang_ctx_new(dirs, ndirs);
 
 	/*
-	 * The parts written yet: "h", the structs; "sid", the .sid files'
-	 * YANG-CBOR form as GET-SID answers it; "sidjson", their JSON.
+	 * The parts written yet: "h", the structs; "md", the modules'
+	 * Markdown; "sid", the .sid files' YANG-CBOR form as GET-SID
+	 * answers it; "sidjson", their JSON; "tree", the modules' tree
+	 * diagrams.
 	 */
 	if (!check && !dump) {
 		for (const char *p = parts; *p != '\0';) {
@@ -197,18 +220,22 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 				cbor = true;
 			else if (n == 7 && strncmp(p, "sidjson", 7) == 0)
 				json = true;
+			else if (n == 4 && strncmp(p, "tree", 4) == 0)
+				tree = true;
+			else if (n == 2 && strncmp(p, "md", 2) == 0)
+				md = true;
 			else
 				errx(2, "-m %.*s: not written for YANG yet; "
-				    "-m h,sid,sidjson are", (int)n, p);
+				    "-m h,md,sid,sidjson,tree are", (int)n, p);
 			p += n + (p[n] == ',');
 		}
-		if (!cbor && !json && !hdr)
+		if (!cbor && !json && !hdr && !md && !tree)
 			errx(2, "generating C from YANG is not written yet "
-			    "but for -m h,sid,sidjson; -n checks the "
+			    "but for -m h,md,sid,sidjson,tree; -n checks the "
 			    "modules, -d dumps them");
 		if ((cbor || json) && nsids == 0)
 			errx(2, "-m sid,sidjson: no -s file");
-		/* The header's name: -b, or the first module's. */
+		/* The outputs' name: -b, or the first module's. */
 		if (base == NULL) {
 			pathcopy = xstrdup(argv[0]);
 			bname = xstrdup(basename(pathcopy));
@@ -299,6 +326,9 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			buf_free(&b);
 			free(name);
 		}
+		if ((tree && doc_emit(s, dirfd, base, d.file, false) != 0) ||
+		    (md && doc_emit(s, dirfd, base, d.file, true) != 0))
+			return (2);
 	} else {
 		for (size_t i = 0; i < s->nmods; i++)
 			nmods += s->mods[i]->implemented;

@@ -633,6 +633,9 @@ dec_text(struct yrd *r, const char **out, size_t *lenp)
 		return (fail(r, EINVAL, "truncated"));
 	if (memchr(r->p, '\0', (size_t)len) != NULL)
 		return (fail(r, EINVAL, "a NUL in a string"));
+	/* YANG strings are Unicode (RFC 7950 section 9.4), sent as UTF-8. */
+	if (!cbl_utf8_valid(r->p, (size_t)len))
+		return (fail(r, EINVAL, "a string that is not UTF-8"));
 	if ((s = ralloc(r, (size_t)len + 1)) == NULL)
 		return (fail(r, ENOMEM, NOMEM));
 	memcpy(s, r->p, (size_t)len);

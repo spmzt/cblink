@@ -414,6 +414,14 @@ ATF_TC_BODY(roundtrip, tc)
 	ATF_CHECK(back.clock->has_timezone_utc_offset);
 	ATF_CHECK_EQ(-210, back.clock->timezone_utc_offset);
 	ATF_CHECK(back.ntp == NULL && back.contact == NULL);
+	/* hostname "\xff": not UTF-8, refused. */
+	{
+		static const uint8_t bad[] = { 0xa1, 0x18, 0x23, 0x61, 0xff };
+
+		ATF_CHECK_EQ(EINVAL, ietf_system_system_decode(bad,
+		    sizeof(bad), &back, a, 0, why, sizeof(why)));
+		ATF_CHECK(strstr(why, "UTF-8") != NULL);
+	}
 	/* A key it has no child for: refused strictly, skipped else. */
 	{
 		static const uint8_t extra[] = { 0xa1, 0x18, 0x63, 0xf6 };

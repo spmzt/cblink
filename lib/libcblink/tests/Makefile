@@ -19,6 +19,7 @@ ATF_TESTS_C=	attr_test \
 		sid_test \
 		stream_test \
 		tcp_test \
+		pattern_test \
 		xpath_test
 
 CFLAGS+=	-I${.CURDIR}/..
@@ -28,6 +29,7 @@ DPADD+=		${.OBJDIR:H}/libcblink.so
 # The XPath parser is internal to the library: compiled in.
 .PATH:		${.CURDIR:H}
 SRCS.xpath_test=	xpath_test.c cbl_xpath.c
+SRCS.pattern_test=	pattern_test.c cbl_pattern.c
 
 # YANG-CBOR written and read with libcbor itself.
 CFLAGS.sid_test+=	${CBOR_CFLAGS}

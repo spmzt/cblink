@@ -7,11 +7,12 @@
 #	$(make -C fuzz -V .OBJDIR)/fuzz_frame -max_total_time=300 \
 #	    fuzz/corpus/frame
 #
-# (likewise fuzz_proxy with corpus/proxy, fuzz_spec with corpus/spec and
-# fuzz_xpath with corpus/xpath; for long runs of fuzz_xpath, whose inputs
-# are many and small, ASAN_OPTIONS=quarantine_size_mb=16 keeps
-# AddressSanitizer's quarantine of freed memory from reaching the RSS
-# limit).
+# (likewise fuzz_proxy with corpus/proxy, fuzz_spec with corpus/spec,
+# fuzz_xpath with corpus/xpath and fuzz_pattern with corpus/pattern; for
+# long runs of fuzz_xpath and fuzz_pattern, whose inputs are many and
+# small, ASAN_OPTIONS=quarantine_size_mb=16 keeps AddressSanitizer's
+# quarantine of freed memory from reaching the RSS limit).  To use more
+# CPUs, -jobs=N -workers=N: -fork=N was seen to hang on FreeBSD.
 # Point -artifact_prefix and a first, scratch corpus directory elsewhere to
 # keep new inputs out of the committed seeds.
 
@@ -22,11 +23,12 @@ GEN=		${.CURDIR}/../usr.bin/cblink-gen
 LIBSRCS!=	cd ${LIB} && echo cbl_*.c
 GENSRCS=	spec.c util.c yaml.c
 
-PROGS=		fuzz_frame fuzz_proxy fuzz_spec fuzz_xpath
+PROGS=		fuzz_frame fuzz_proxy fuzz_spec fuzz_xpath fuzz_pattern
 SRCS.fuzz_frame=	fuzz_frame.c ${LIBSRCS}
 SRCS.fuzz_proxy=	fuzz_proxy.c ${LIBSRCS}
 SRCS.fuzz_spec=		fuzz_spec.c ${GENSRCS}
 SRCS.fuzz_xpath=	fuzz_xpath.c cbl_xpath.c
+SRCS.fuzz_pattern=	fuzz_pattern.c cbl_pattern.c
 MAN=
 
 LOCALBASE?=	/usr/local

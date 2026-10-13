@@ -836,6 +836,10 @@ node_ref(struct ys *y, const struct snode *n)
 	    n->sid);
 	cstr(&init, n->name);
 	buf_printf(&init, ",\n\t.kind = %s,\n", ynode_kind[n->kind]);
+	/* An input's and an output's deltas are from the rpc's SID. */
+	if ((n->kind == SN_INPUT || n->kind == SN_OUTPUT) && n->parent != NULL)
+		buf_printf(&init, "\t.base = UINT64_C(%" PRIu64 "),\n",
+		    n->parent->sid);
 	if ((n->flags & 0x7f) != 0)
 		buf_printf(&init, "\t.flags = 0x%x,\n", n->flags & 0x7f);
 	/* Where it is in the structs. */

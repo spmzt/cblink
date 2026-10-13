@@ -42,7 +42,7 @@ cbl_ynode_child(const struct cbl_ynode *n, int64_t delta)
 	if (n == NULL || n->nchild == 0)
 		return (NULL);
 	/* Modulo 2^64, as SIDs and their deltas are. */
-	sid = n->sid + (uint64_t)delta;
+	sid = cbl_ynode_base(n) + (uint64_t)delta;
 	off = sid - n->child[0]->sid;
 	if (sid >= n->child[0]->sid && off < n->nmap) {
 		if (n->map == NULL)

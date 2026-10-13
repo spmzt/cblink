@@ -472,7 +472,8 @@ enc_map(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 
 		if (!present(c, p))
 			continue;
-		if ((error = put_int(b, (int64_t)(c->sid - n->sid))) != 0 ||
+		if ((error = put_int(b, (int64_t)(c->sid -
+		    cbl_ynode_base(n)))) != 0 ||
 		    (error = enc_child(b, c, p, depth)) != 0)
 			return (error);
 	}

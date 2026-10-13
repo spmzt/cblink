@@ -321,20 +321,23 @@ static void
 check_lookup(const struct cbl_ynode *n, size_t *dense, size_t *mapped)
 {
 	ATF_CHECK(cbl_yschema_node(ys, n->sid) == n);
+	/* An input's and an output's deltas are from the rpc's SID. */
+	ATF_CHECK((n->kind == CBL_YN_INPUT || n->kind == CBL_YN_OUTPUT) ==
+	    (n->base != 0 && n->base != n->sid));
 	if (n->nmap > 0 && n->map == NULL)
 		(*dense)++;
 	else if (n->nmap > 0)
 		(*mapped)++;
 	for (uint32_t i = 0; i < n->nchild; i++) {
 		ATF_CHECK_MSG(cbl_ynode_child(n, (int64_t)(n->child[i]->sid -
-		    n->sid)) == n->child[i], "%s/%s", n->name,
+		    cbl_ynode_base(n))) == n->child[i], "%s/%s", n->name,
 		    n->child[i]->name);
 		check_lookup(n->child[i], dense, mapped);
 	}
 	for (uint32_t off = 0; n->map != NULL && off < n->nmap; off++)
 		if (n->map[off] == 0)
 			ATF_CHECK(cbl_ynode_child(n, (int64_t)
-			    (n->child[0]->sid + off - n->sid)) == NULL);
+			    (n->child[0]->sid + off - cbl_ynode_base(n))) == NULL);
 	ATF_CHECK(cbl_ynode_child(n, INT64_MIN) == NULL);
 }
 
@@ -532,6 +535,34 @@ read_leaf(const char *leaf, const uint8_t *value, size_t vlen,
 	memcpy(in + n, value, vlen);
 	return (shapes_shapes_decode(in, n + vlen, out, a, CBL_YD_STRICT, why,
 	    sizeof(why)));
+}
+
+/*
+ * An rpc's input: its children's deltas are from the rpc's SID, not the
+ * input's (RFC 9254 section 3.2): /shapes:ping is 2^40 + 100008, its
+ * input/count 2^40 + 100010, so count 5 is {2: 5}.
+ */
+ATF_TC_WITHOUT_HEAD(rpc_deltas);
+ATF_TC_BODY(rpc_deltas, tc)
+{
+	struct shapes_ping_input in = { .has_count = true, .count = 5 }, got;
+	struct cbl_ybuf b = { 0 };
+	cbl_yarena *a;
+
+	ATF_REQUIRE_EQ(0, shapes_ping_input_encode(&in, &b));
+	ATF_REQUIRE_EQ(3, b.len);
+	ATF_CHECK(memcmp(b.p, "\xa1\x02\x05", 3) == 0);
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	memset(&got, 0, sizeof(got));
+	ATF_REQUIRE_EQ(0, shapes_ping_input_decode(b.p, b.len, &got, a,
+	    CBL_YD_STRICT, NULL, 0));
+	ATF_CHECK(got.has_count && got.count == 5);
+	/* The input's own SID as the base: delta 1, no such child. */
+	memset(&got, 0, sizeof(got));
+	ATF_CHECK(shapes_ping_input_decode("\xa1\x01\x05", 3, &got, a,
+	    CBL_YD_STRICT, NULL, 0) != 0 || !got.has_count);
+	cbl_yarena_free(a);
+	cbl_ybuf_free(&b);
 }
 
 ATF_TC_WITHOUT_HEAD(kinds);
@@ -742,6 +773,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, roundtrip);
 	ATF_TP_ADD_TC(tp, arena_limit);
 	ATF_TP_ADD_TC(tp, kinds);
+	ATF_TP_ADD_TC(tp, rpc_deltas);
 	ATF_TP_ADD_TC(tp, message);
 	return (atf_no_error());
 }

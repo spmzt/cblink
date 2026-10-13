@@ -186,6 +186,12 @@ struct cbl_ymodule;
 
 struct cbl_ynode {
 	uint64_t		 sid;
+	/*
+	 * What its children's SID deltas are from: an rpc's or an
+	 * action's input and output, the rpc's or the action's SID (RFC
+	 * 9254 section 3.2); 0, every other node, its own.
+	 */
+	uint64_t		 base;
 	const char		*name;
 	const struct cbl_ymodule *module;	/* the one that defines it */
 	uint8_t			 kind;		/* enum cbl_ynode_kind */
@@ -273,6 +279,14 @@ struct cbl_yschema {
 };
 
 /* The child of n a map key's delta names (RFC 9254), or NULL. */
+/* The SID n's children's deltas are from. */
+static inline uint64_t
+cbl_ynode_base(const struct cbl_ynode *n)
+{
+
+	return (n->base != 0 ? n->base : n->sid);
+}
+
 const struct cbl_ynode *cbl_ynode_child(const struct cbl_ynode *n,
 		    int64_t delta);
 /* The node, the structure, of a SID, or NULL. */

@@ -289,29 +289,22 @@ cbl_msg_err_str(const cbl_msg *msg)
 	return (msg != NULL ? msg->err_str : NULL);
 }
 
+/* The error's path: error-path's elements (cbl_fw.c). */
 size_t
 cbl_msg_err_path(const cbl_msg *msg, struct cbl_path_elem *path, size_t max)
 {
-	const cbl_attr *e;
 	size_t n;
 
-	if (msg == NULL || msg->err_path == NULL)
+	if (msg == NULL)
 		return (0);
-	for (n = 0; n < msg->err_path->count; n++) {
-		e = &msg->err_path->child[n];
-		if (e->kind == CBL_K_ARRAY && e->count == 1)
-			e = &e->child[0];
-		if (e->kind != CBL_K_UINT || e->v.u > UINT32_MAX)
+	for (n = 0; n < msg->err_npath; n++)
+		if (msg->err_pathv[n] > UINT32_MAX)
 			return (0);	/* malformed path: report none */
+	for (n = 0; n < msg->err_npath && n < max; n++) {
+		path[n].index = false;
+		path[n].v = (uint32_t)msg->err_pathv[n];
 	}
-	for (n = 0; n < msg->err_path->count && n < max; n++) {
-		e = &msg->err_path->child[n];
-		path[n].index = e->kind == CBL_K_ARRAY;
-		if (path[n].index)
-			e = &e->child[0];
-		path[n].v = (uint32_t)e->v.u;
-	}
-	return (msg->err_path->count);
+	return (msg->err_npath);
 }
 
 int
@@ -327,9 +320,9 @@ cbl_msg_err_cookie(const cbl_msg *msg, const void **pp, size_t *lenp)
 
 	if (msg == NULL || pp == NULL || lenp == NULL)
 		return (EINVAL);
-	if (msg->err_cookie == NULL)
+	if (!msg->has_err_cookie)
 		return (ENOENT);
-	*pp = msg->err_cookie->v.s.p;
-	*lenp = msg->err_cookie->v.s.len;
+	*pp = msg->err_cookiep;
+	*lenp = msg->err_cookielen;
 	return (0);
 }

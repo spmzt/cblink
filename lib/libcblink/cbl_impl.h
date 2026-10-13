@@ -298,12 +298,28 @@ struct cbl_msg {
 	uint32_t		 nnodes;
 	cbl_attr		 empty;		/* root for an empty body */
 
-	/* Framework attributes of a received message. */
+	/* Version 2's framework of a received message (cbl_fw.c). */
 	int			 err_code;
 	const char		*err_str;
-	const cbl_attr		*err_path;
+	uint64_t		*err_pathv;
+	size_t			 err_npath;
 	int			 err_miss;
-	const cbl_attr		*err_cookie;
+	const void		*err_cookiep;
+	size_t			 err_cookielen;
+	bool			 has_err_cookie;
+	struct cbl_yarena	*ya;	/* what is decoded of the body */
+
+	/* And of one being built: its error, written at encode. */
+	struct cbl_fwout {
+		bool		 has;
+		int		 code;
+		const char	*text;
+		uint64_t	*path;
+		size_t		 npath;
+		int		 miss;
+		const void	*cookie;
+		size_t		 cookielen;
+	}			 fwout;
 
 	struct cbl_arena	 arena;
 };
@@ -312,11 +328,18 @@ int	cbl_msg_alloc_empty(const struct cbl_limits *lim, cbl_msg **msgp);
 int	cbl_msg_decode_body(cbl_msg *msg);
 int	cbl_msg_from_frame(const struct cbl_limits *lim, unsigned char *buf,
 	    size_t len, cbl_msg **msgp);
-int	cbl_msg_put_fw_uint(cbl_msg *msg, int key, uint64_t v);
-int	cbl_msg_put_fw_str(cbl_msg *msg, int key, const char *s);
-int	cbl_msg_put_fw_bytes(cbl_msg *msg, int key, const void *p,
-	    size_t len);
 int	cbl_msg_fail(cbl_msg *msg, int error, const char *why);
+
+/* Version 2's framework: the cblink module's structures (cbl_fw.c). */
+bool	 cbl_fw_sid(uint64_t sid);
+int	 cbl_fw_error(cbl_msg *msg, int code, const char *text,
+	    const struct cbl_path_elem *path, size_t pathlen, int miss_type);
+int	 cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len);
+int	 cbl_fw_flush(cbl_msg *msg);
+int	 cbl_fw_credit(cbl_msg *msg, uint32_t increment);
+int	 cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text);
+void	 cbl_fw_extract(cbl_msg *msg);
+uint64_t cbl_fw_get_credit(cbl_msg *msg, bool *found);
 const cbl_attr *cbl_map_lookup(const cbl_attr *map, int64_t key);
 
 bool	cbl_utf8_valid(const unsigned char *p, size_t len);

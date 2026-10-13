@@ -517,38 +517,6 @@ fix_parents(cbl_attr *n)
 	}
 }
 
-static void
-extract_fw(cbl_msg *msg)
-{
-	const cbl_attr *root = cbl_msg_body(msg), *a;
-	char *s;
-
-	a = cbl_map_lookup(root, CBL_FW_CODE);
-	if (a != NULL && a->kind == CBL_K_UINT && a->v.u >= 1 &&
-	    a->v.u <= INT_MAX)
-		msg->err_code = (int)a->v.u;
-	else if ((msg->hdr.flags & CBL_F_ERROR) != 0)
-		msg->err_code = EPROTO;		/* ERROR without a valid code */
-
-	a = cbl_map_lookup(root, CBL_FW_MSG);
-	if (a != NULL && a->kind == CBL_K_TEXT &&
-	    a->v.s.len <= CBL_ERRMSG_MAX &&
-	    memchr(a->v.s.p, '\0', a->v.s.len) == NULL &&
-	    (s = cbl_arena_alloc(&msg->arena, a->v.s.len + 1)) != NULL) {
-		memcpy(s, a->v.s.p, a->v.s.len);
-		msg->err_str = s;
-	}
-	a = cbl_map_lookup(root, CBL_FW_PATH);
-	if (a != NULL && a->kind == CBL_K_ARRAY && a->count <= CBL_PATH_MAX)
-		msg->err_path = a;
-	a = cbl_map_lookup(root, CBL_FW_MISS_TYPE);
-	if (a != NULL && a->kind == CBL_K_UINT && a->v.u <= CBL_ATTR_MAX)
-		msg->err_miss = (int)a->v.u;
-	a = cbl_map_lookup(root, CBL_FW_COOKIE);
-	if (a != NULL && a->kind == CBL_K_BYTES && a->v.s.len <= CBL_COOKIE_MAX)
-		msg->err_cookie = a;
-}
-
 int
 cbl_msg_decode_body(cbl_msg *msg)
 {
@@ -560,7 +528,7 @@ cbl_msg_decode_body(cbl_msg *msg)
 	body = msg->buf + msg->hdr.hdrlen;
 	bodylen = msg->len - msg->hdr.hdrlen;
 	if (bodylen == 0) {
-		extract_fw(msg);
+		cbl_fw_extract(msg);
 		return (0);
 	}
 
@@ -593,7 +561,7 @@ cbl_msg_decode_body(cbl_msg *msg)
 	msg->nodes = d->pool;
 	msg->nnodes = d->pool_size;
 	fix_parents(&msg->nodes[0]);
-	extract_fw(msg);
+	cbl_fw_extract(msg);
 out:
 	if (error != 0)
 		msg->errstr = d->why;

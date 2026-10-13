@@ -342,7 +342,7 @@ enum cbl_kind {
 	CBL_K_ANY, CBL_K_UINT, CBL_K_INT, CBL_K_BOOL, CBL_K_FLAG,
 	CBL_K_TEXT, CBL_K_BYTES, CBL_K_FLOAT, CBL_K_NEST, CBL_K_NULL,
 };
-#define	CBL_PF_REQUIRED	0x01	/* missing -> EINVAL + MISS_TYPE */
+#define	CBL_PF_REQUIRED	0x01	/* missing -> EINVAL, missing-element */
 #define	CBL_PF_MULTI	0x02	/* value is an array of `kind` */
 #define	CBL_PF_MASK	0x04	/* uint: value & ~u.max must be 0 (flag sets) */
 
@@ -375,7 +375,9 @@ int	cbl_validate(const cbl_msg *, const cbl_attr *nest_or_NULL,
 
 The framework runs `cbl_validate()` on the request against the op's policy
 **before** calling the handler. On failure it sends the `ERROR` frame with
-`CODE`, `MSG`, `PATH` and `MISS_TYPE` filled in, and the handler is never
+the `cblink:error` structure's `errno`, `error-message`, `error-path` and,
+for a missing attribute, `error-tag` `missing-element` filled in
+(WIRE-FORMAT.md section 6.1), and the handler is never
 called. Attributes that are not in the policy are ignored (WIRE-FORMAT.md
 section 5.4).
 

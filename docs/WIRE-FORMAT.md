@@ -22,7 +22,7 @@ The design follows netlink(4) and genetlink(4) closely:
 | `genlmsghdr.cmd`            | `cmd` header field                         |
 | `NLM_F_REQUEST/ACK/MULTI/DUMP` | `REQUEST`, `ACK`, `MULTI`, `DUMP` flags |
 | `NLMSG_DONE`                | `DONE` flag                                |
-| `NLMSG_ERROR` + ext ack TLVs| `ERROR` flag + framework attributes (section 6) |
+| `NLMSG_ERROR` + ext ack TLVs| `ERROR` flag + the `cblink:error` structure (section 6) |
 | TLV attributes (`nlattr`)   | integer-keyed CBOR map entries             |
 | nested attributes           | nested CBOR maps                           |
 | repeated attributes         | CBOR arrays                                |
@@ -205,8 +205,8 @@ dump failed part-way. An `ERROR` with neither `MULTI` nor `DONE` is allowed
 before the first part (for example, a policy failure). `ACK` on a dump
 request is ignored, because `DONE` is already terminal.
 
-An acknowledgement MAY carry the framework attributes `MSG` (a warning) and
-`COOKIE`, as netlink extended ack allows on success.
+An acknowledgement MAY carry the `error` structure with an `error-message`
+(a warning) and a `cookie`, as netlink extended ack allows on success.
 
 ---
 
@@ -232,21 +232,20 @@ Restrictions (a strict profile of RFC 8949):
 | Integer width                    | Senders SHOULD use the shortest ("preferred") encoding. Receivers MUST accept any width. |
 
 Violations are reported as `ERROR` `EBADMSG` (malformed CBOR) or
-`EPROTO` (a restriction above), with `MSG` and, where possible, `PATH`.
+`EPROTO` (a restriction above), with `error-message` and, where possible,
+`error-path`.
 
 ### 5.2 Attribute keys
 
 | Key range              | Meaning |
 |------------------------|---------|
-| `1` … `65535`          | **Family attributes.** The family's attribute set defines their meaning (the `nla_type` equivalent). |
-| `0`                    | Reserved. Ignored on receive. |
-| `> 65535`              | Never valid. Ignored on receive (treated as unknown). |
-| `-1` … `-64`           | **Framework attributes** (section 6). Defined by this document, never by a family. |
-| `< -64`                | Reserved for future framework use. Ignored on receive. |
+| `1` … `2⁶³ − 1` at the top | **SIDs** (RFC 9595): each a node's value, or a structure of the `cblink` module (section 6). Until the YAML families go (PLAN-SDN-YANG 1.7.5), `1` … `65535` are also their attributes. |
+| any integer below the top | **SID deltas** (RFC 9254 section 3.2), negative ones too. |
+| `0` at the top         | Reserved. Ignored on receive. |
 
-Negative keys keep framework metadata, such as error details and stream
-credit, in the same map as family attributes without any risk of
-collision. Policies and parsers for family attributes never see them.
+The framework's metadata, such as error details and stream credit, is the
+`cblink` module's structures, at their SIDs beside the other items:
+version 1's negative keys are gone.
 
 ### 5.3 Values, nesting and repetition
 
@@ -287,41 +286,48 @@ of that kind. See API.md for the full policy definition.
 
 ---
 
-## 6. Framework attributes and errors
+## 6. The framework: the cblink module's structures
 
-| Key  | Name        | CBOR             | Used in |
-|-----:|-------------|------------------|---------|
-| `-1` | `CODE`      | uint             | `ERROR`, `S_CLOSE`, `S_RESET` |
-| `-2` | `MSG`       | text (≤ 1024 B)  | `ERROR`, ack (warning), `S_CLOSE`, `S_RESET` |
-| `-3` | `PATH`      | array            | `ERROR` |
-| `-4` | `COOKIE`    | bytes (≤ 256 B)  | `ERROR`, ack |
-| `-5` | `MISS_TYPE` | uint             | `ERROR` (required attribute missing) |
-| `-6` | `CREDIT`    | uint (≤ 2³¹−1)   | `S_OPEN`, `S_CREDIT` |
+What version 1 carried under negative keys is, in version 2, the data
+structures (RFC 8791) of the YANG module `cblink`
+(`share/yang/cblink@2026-10-13.yang`), each at its SID in the body like
+any other item, its value YANG-CBOR (RFC 9254):
 
-These keys are reserved in every body. A family attribute set can never
-define them, because family keys are positive.
+| Structure | SID (provisional) | Fields | Used in |
+|-----------|-------------------|--------|---------|
+| `error`   | 2⁴⁰ + 22 | `error-type`, `error-tag` (an identity), `error-app-tag`, `error-path` (an instance-identifier), `error-message` (≤ 1024 characters), `error-info`, `errno`, `cookie` (≤ 256 B) | `ERROR`, ack (warning, cookie), `S_RESET`; and the next notification after some were missed, with `errno` `ENOBUFS` |
+| `credit`  | 2⁴⁰ + 31 | `increment` (≤ 2³¹−1) | `S_OPEN`, its accept, `S_CREDIT` |
+| `close`   | 2⁴⁰ + 42 | `code`, `message` | `S_CLOSE` |
+| `hello`   | 2⁴⁰ + 33 | `limits`, `implementation`, `content-id` | the control family's `hello` |
+| `notification` | 2⁴⁰ + 45 | `event-time`, `event` | `NOTIFY` of YANG notifications |
+
+The SIDs are the module's `.sid` file's (`share/yang/cblink@2026-10-13.sid`);
+see `share/yang/SIDS.md` in Arcana for the block they are taken from.
 
 ### 6.1 Error frames (`NLMSG_ERROR` with extended ack)
 
 An `ERROR` frame echoes the request's `family`, `cmd` and `seq`. Its body
-contains:
+holds the `error` structure:
 
-- `CODE` (**required**): an errno-style code ≥ 1. The **wire numbering is
-  FreeBSD's `<sys/errno.h>`**. Implementations on other systems MUST map to
-  and from it. The library exposes these values unchanged as `E*` constants.
-- `MSG` (optional): a human-readable message, like `NLMSGERR_ATTR_MSG`.
-- `PATH` (optional): the offending attribute, like `NLMSGERR_ATTR_OFFS`.
-  It is an array of path elements starting at the body root. Each element
-  is either a **uint**, which selects that key in the current map, or a
-  **one-element array `[n]`**, which selects index `n` in the current
-  array. Example: `[3, [2], 7]` means attribute 3, then its third element,
-  then attribute 7 inside it.
-- `MISS_TYPE` (optional): when a required attribute is missing, its key.
-  `PATH` then points to the map that should have contained it, like
-  `NLMSGERR_ATTR_MISS_TYPE` and `NLMSGERR_ATTR_MISS_NEST`.
-- `COOKIE` (optional): opaque, command-specific bytes.
-
-Unknown keys in an error body are ignored.
+- `errno` (**required** in `ERROR`): an errno-style code ≥ 1. The **wire
+  numbering is FreeBSD's `<sys/errno.h>`**. Implementations on other
+  systems MUST map to and from it. The library exposes these values
+  unchanged as `E*` constants.
+- `error-type` and `error-tag`: RFC 8040's, the tag an identity derived
+  from `cblink:error-tag`, which gives a console answering RESTCONF the
+  HTTP status of RFC 8040 section 7. The library sends `application` and
+  the tag of the errno: `access-denied` for `EACCES` and `EPERM`,
+  `data-exists`, `data-missing`, `invalid-value`, `too-big`, `in-use`,
+  `operation-not-supported`, `resource-denied`, `malformed-message`, or
+  `operation-failed`.
+- `error-message` (optional): a human-readable message, like
+  `NLMSGERR_ATTR_MSG`.
+- `error-path` (optional): what is at fault, an instance-identifier: a
+  SID, or an array of the target's SID and keys. Version 1's `PATH` of
+  attribute keys is sent in that array shape.
+- A required item missing: `error-tag` `missing-element`, its key the
+  last element of `error-path`, like `NLMSGERR_ATTR_MISS_TYPE`.
+- `cookie` (optional): opaque, command-specific bytes, on an ack too.
 
 ### 6.2 Standard error codes
 
@@ -350,12 +356,16 @@ The request was a `kv` (family 17) `get` (cmd 1) with seq 1. It failed with
 `ENOENT`, the message `"no such key"`, and path `[1]`:
 
 ```
-CB 4C 02 18  00 00 00 2B  00 11 00 01  00 00 00 20  magic,v1,hdrlen=24 len=43 fam=17 cmd=1 flags=ERROR
+CB 4C 02 18  00 00 00 41  00 11 00 01  00 00 00 20  magic,v2,hdrlen=24 len=65 fam=17 cmd=1 flags=ERROR
 00 00 00 01  00 00 00 00                            seq=1 stream=0
-A3                                                  map(3)
-   20 02                                            -1 (CODE): 2 (ENOENT)
-   21 6B 6E 6F 20 73 75 63 68 20 6B 65 79           -2 (MSG):  "no such key"
-   22 81 01                                         -3 (PATH): [1]
+A1                                                  map(1)
+   1B 00 00 01 00 00 00 00 16                       2^40+22 (cblink:error):
+   A5                                                 map(5), keys deltas from it
+      01 03                                           +1 error-type: application (3)
+      02 1B 00 00 01 00 00 00 00 11                   +2 error-tag: 2^40+17 (data-missing)
+      04 81 01                                        +4 error-path: [1]
+      05 6B 6E 6F 20 73 75 63 68 20 6B 65 79          +5 error-message: "no such key"
+      07 02                                           +7 errno: 2 (ENOENT)
 ```
 
 ---
@@ -490,15 +500,15 @@ open one.
 
 ```
            opener                                   acceptor
-             |  REQUEST|S_OPEN  seq=s id=n {-6: W_o, attrs}  |
+             |  REQUEST|S_OPEN  seq=s id=n {credit: W_o, ...}|
              |---------------------------------------------->|  policy check,
              |                                               |  handler accepts
-             |  S_OPEN          seq=s id=n {-6: W_a}         |
+             |  S_OPEN          seq=s id=n {credit: W_a}     |
              |<----------------------------------------------|  (or ERROR|S_OPEN seq=s: rejected)
              |                                               |
              |  S_DATA  id=n {payload attrs}  ...            |  both directions,
              |<--------------------------------------------->|  within credit
-             |  S_CREDIT id=n {-6: k}                        |
+             |  S_CREDIT id=n {cblink:credit: {increment: k}}|
              |<--------------------------------------------->|
              |  S_HCLOSE id=n          (no more data from me)|
              |---------------------------------------------->|
@@ -509,12 +519,12 @@ open one.
 
 | Event      | Meaning |
 |------------|---------|
-| `S_OPEN` request | Body: the opening command's request attributes, validated against its policy, plus `CREDIT` (`-6`), the opener's initial receive window in bytes. If `CREDIT` is absent, the opener's configured default window applies. The opener may send `S_DATA` only after it receives the accept, because the acceptor's window is unknown until then. |
-| accept     | Body: `CREDIT`, the acceptor's initial window, and optionally family attributes (an open reply). It may carry `S_DATA` or `S_HCLOSE` too. |
+| `S_OPEN` request | Body: the opening command's request attributes, validated against its policy, plus the `credit` structure, the opener's initial receive window in bytes. If it is absent, the opener's configured default window applies. The opener may send `S_DATA` only after it receives the accept, because the acceptor's window is unknown until then. |
+| accept     | Body: the `credit` structure, the acceptor's initial window, and optionally family attributes (an open reply). It may carry `S_DATA` or `S_HCLOSE` too. |
 | reject     | `ERROR|S_OPEN` with the stream id and the error attributes. The stream never existed. |
 | `S_HCLOSE` | The sender sends no more `S_DATA`. It still receives data and still sends `S_CREDIT`. When both directions are half-closed, the stream is closed and its id is released. |
-| `S_CLOSE`  | Graceful close of both directions, with optional `CODE` and `MSG` (like the WebSocket close frame). After sending it, an endpoint sends nothing more on the stream except a reply `S_CLOSE`. The receiver delivers any data already received, replies with `S_CLOSE`, and the stream is gone. If no reply arrives within `stream_close_timeout` (default 10 s), the stream is reset locally. |
-| `S_RESET`  | Abort. Optional `CODE` and `MSG`. Pending data is discarded. No reply is sent. The stream is gone immediately. A frame for a stream id that was never opened (above the highest id opened with its parity) is answered with `S_RESET` (`EPROTO`), at most once per id. Frames for a closed stream (its id at or below that) are dropped silently. A stream frame whose body does not decode resets its stream. |
+| `S_CLOSE`  | Graceful close of both directions, with the optional `close` structure, a `code` and a `message` (like the WebSocket close frame). After sending it, an endpoint sends nothing more on the stream except a reply `S_CLOSE`. The receiver delivers any data already received, replies with `S_CLOSE`, and the stream is gone. If no reply arrives within `stream_close_timeout` (default 10 s), the stream is reset locally. |
+| `S_RESET`  | Abort. Optional `error` structure: its `errno` and `error-message`. Pending data is discarded. No reply is sent. The stream is gone immediately. A frame for a stream id that was never opened (above the highest id opened with its parity) is answered with `S_RESET` (`EPROTO`), at most once per id. Frames for a closed stream (its id at or below that) are dropped silently. A stream frame whose body does not decode resets its stream. |
 
 ### 8.3 Credit-based flow control
 
@@ -523,7 +533,7 @@ open one.
   means an empty-body data frame still costs 24 bytes and cannot be sent
   without limit. A sender MUST NOT send an `S_DATA` frame larger than its
   remaining credit.
-- The receiver grants more credit with `S_CREDIT {-6: increment}`, typically
+- The receiver grants more credit with `S_CREDIT {cblink:credit: {increment}}`, typically
   after the application has consumed data. Increments are added to the
   window. A window above 2³¹−1 is a flow-control error.
 - A receiver whose window is exceeded resets the stream with `ENOBUFS`.
@@ -542,21 +552,22 @@ open one.
 initiator), opener window 65536, acceptor window 32768:
 
 ```
-CB 4C 02 18  00 00 00 26  00 11 00 03  00 01 00 01   len=38 fam=17 cmd=3 flags=REQUEST|S_OPEN
+CB 4C 02 18  00 00 00 30  00 11 00 03  00 01 00 01   len=48 fam=17 cmd=3 flags=REQUEST|S_OPEN
 00 00 00 08  00 00 00 01                             seq=8 stream=1
-A2 25 1A 00 01 00 00  01 65 75 73 65 72 2F           {-6: 65536, 1: "user/"}
+A2 01 65 75 73 65 72 2F                              {1: "user/",
+   1B 00 00 01 00 00 00 00 1F  A1 01 1A 00 01 00 00         cblink:credit: {increment: 65536}}
 
-CB 4C 02 18  00 00 00 1D  00 11 00 03  00 01 00 00   len=29 flags=S_OPEN (accept)
+CB 4C 02 18  00 00 00 27  00 11 00 03  00 01 00 00   len=39 flags=S_OPEN (accept)
 00 00 00 08  00 00 00 01                             seq=8 stream=1
-A1 25 19 80 00                                       {-6: 32768}
+A1 1B 00 00 01 00 00 00 00 1F A1 01 19 80 00                   {cblink:credit: {increment: 32768}}
 
 CB 4C 02 18  00 00 00 21  00 11 00 03  00 02 00 00   len=33 flags=S_DATA
 00 00 00 00  00 00 00 01                             seq=0 stream=1
 A1 01 66 75 73 65 72 2F 61                           {1: "user/a"}     costs 33 credit
 
-CB 4C 02 18  00 00 00 1C  00 11 00 03  00 20 00 00   len=28 flags=S_CREDIT
+CB 4C 02 18  00 00 00 26  00 11 00 03  00 20 00 00   len=38 flags=S_CREDIT
 00 00 00 00  00 00 00 01                             seq=0 stream=1
-A1 25 18 21                                          {-6: 33}
+A1 1B 00 00 01 00 00 00 00 1F A1 01 18 21                      {cblink:credit: {increment: 33}}
 
 CB 4C 02 18  00 00 00 18  00 11 00 03  00 04 00 00   len=24 flags=S_HCLOSE
 00 00 00 00  00 00 00 01                             stream=1, empty body
@@ -582,8 +593,9 @@ direction is half-closed implicitly when the stream is accepted.
 - Notifications are best-effort per subscriber. If a subscriber's send queue
   is over its limit (`sendq_bytes`), the notification is dropped for that
   subscriber and a per-connection drop counter is incremented. The next
-  notification delivered to that subscriber includes framework attribute
-  `CODE` = `ENOBUFS`, signalling "you missed notifications", like
+  notification delivered to that subscriber includes the `error`
+  structure with `errno` `ENOBUFS`, signalling "you missed notifications",
+  like
   `ENOBUFS` on a netlink socket overrun.
 
 Example: `kv` (17) notification `changed` (cmd 4), group 2, body
@@ -667,7 +679,8 @@ direction.
 - An incompatible change increments `version`. A receiver rejects unknown
   versions (section 2.1).
 - Compatible extensions use reserved flag bits only with a new version, new
-  framework keys in `-1 … -64`, header bytes past offset 24 (`hdrlen`), and
+  structures and leaves of the `cblink` module (new SIDs, never reused),
+  header bytes past offset 24 (`hdrlen`), and
   new control-family attributes or commands. Unknown attributes are ignored.
 - A family evolves through its own `version` (reported by `getfamily`). New
   attributes and commands are compatible. Removing or retyping an attribute

@@ -36,6 +36,7 @@ cbl_msg_alloc_empty(const struct cbl_limits *lim, cbl_msg **msgp)
 	atomic_init(&msg->refs, 1);
 	msg->lim = *lim;
 	msg->err_miss = -1;
+	msg->fwout.miss = -1;
 	msg->empty.kind = CBL_K_NEST;
 	msg->empty.inmap = 1;
 	cbl_arena_init(&msg->arena);
@@ -76,6 +77,7 @@ cbl_msg_free(cbl_msg *msg)
 	if (atomic_fetch_sub(&msg->refs, 1) != 1)
 		return;
 	free(msg->buf);
+	cbl_yarena_free(msg->ya);
 	cbl_arena_free(&msg->arena);
 	free(msg);
 }
@@ -292,8 +294,8 @@ msg_note_key(cbl_msg *msg, struct cbl_bframe *f, int64_t key)
 
 /*
  * Start a value: open the root map if needed, emit the key when the
- * current container is a map, and account for limits.  "fw" allows the
- * negative framework keys; KEY_SID a SID at the body's top (version 2).
+ * current container is a map, and account for limits.  KEY_SID: a SID
+ * at the body's top (version 2); else a family attribute.
  */
 #define	KEY_SID		2
 
@@ -317,10 +319,6 @@ msg_begin_value(cbl_msg *msg, int64_t key, int fw)
 			if (msg->depth != 1 || key < 1)
 				return (cbl_msg_fail(msg, EINVAL, "a SID keys "
 				    "the body's top, 1 to 2^63 - 1"));
-		} else if (fw) {
-			if (key >= 0 || key < CBL_FW_MIN)
-				return (cbl_msg_fail(msg, EINVAL,
-				    "invalid framework key"));
 		} else if (key < CBL_ATTR_MIN || key > CBL_ATTR_MAX)
 			return (cbl_msg_fail(msg, EINVAL,
 			    "attribute type must be 1..65535 inside a map"));
@@ -672,28 +670,6 @@ cbl_put_attr(cbl_msg *msg, uint16_t type, const cbl_attr *a)
 	return (put_attr_k(msg, type, false, a));
 }
 
-/* Framework attributes (negative keys). */
-int
-cbl_msg_put_fw_uint(cbl_msg *msg, int key, uint64_t v)
-{
-
-	return (put_uint_k(msg, key, true, v));
-}
-
-int
-cbl_msg_put_fw_str(cbl_msg *msg, int key, const char *s)
-{
-
-	return (put_text_k(msg, key, true, s, strlen(s)));
-}
-
-int
-cbl_msg_put_fw_bytes(cbl_msg *msg, int key, const void *p, size_t len)
-{
-
-	return (put_bytes_k(msg, key, true, p, len));
-}
-
 /* Longest prefix of "s" not above "max" bytes ending on a UTF-8 boundary. */
 static size_t
 utf8_trunc(const char *s, size_t len, size_t max)
@@ -717,32 +693,23 @@ cbl_msg_put_error(cbl_msg *msg, int code, const char *text,
 		return (EINVAL);
 	if (code < 0 || pathlen > CBL_PATH_MAX || (path == NULL && pathlen > 0))
 		return (cbl_msg_fail(msg, EINVAL, "bad error attributes"));
-	if (code > 0 && (error = put_uint_k(msg, CBL_FW_CODE, true,
-	    (uint64_t)code)) != 0)
-		return (error);
-	if (text != NULL && (error = put_text_k(msg, CBL_FW_MSG, true, text,
-	    utf8_trunc(text, strlen(text), CBL_ERRMSG_MAX))) != 0)
-		return (error);
-	if (pathlen > 0) {
-		if ((error = start_k(msg, CBL_FW_PATH, true, false)) != 0)
-			return (error);
-		for (size_t i = 0; i < pathlen; i++) {
-			if (path[i].index) {
-				if ((error = start_k(msg, CBL_ELEM, false,
-				    false)) != 0 ||
-				    (error = put_uint_k(msg, CBL_ELEM, false,
-				    path[i].v)) != 0 ||
-				    (error = msg_pop(msg)) != 0)
-					return (error);
-			} else if ((error = put_uint_k(msg, CBL_ELEM, false,
-			    path[i].v)) != 0)
-				return (error);
-		}
-		if ((error = msg_pop(msg)) != 0)
-			return (error);
+	if (msg->decoded)
+		return (cbl_msg_fail(msg, EPERM, "message is read-only"));
+	if (msg->finalized)
+		return (cbl_msg_fail(msg, EBUSY, "message already encoded"));
+	/* Kept, and sent as the cblink error structure at encode. */
+	if (text != NULL) {
+		size_t len = utf8_trunc(text, strlen(text), CBL_ERRMSG_MAX);
+		char *t;
+
+		if ((t = cbl_arena_alloc(&msg->arena, len + 1)) == NULL)
+			return (cbl_msg_fail(msg, ENOMEM, "out of memory"));
+		memcpy(t, text, len);
+		t[len] = '\0';
+		text = t;
 	}
-	if (miss_type >= 0 && (error = put_uint_k(msg, CBL_FW_MISS_TYPE, true,
-	    (uint64_t)miss_type)) != 0)
+	if ((error = cbl_fw_error(msg, code, text, path, pathlen,
+	    miss_type)) != 0)
 		return (error);
 	return (0);
 }
@@ -823,7 +790,7 @@ cbl_msg_put_cookie(cbl_msg *msg, const void *p, size_t len)
 		return (EINVAL);
 	if (len > CBL_COOKIE_MAX || (p == NULL && len != 0))
 		return (cbl_msg_fail(msg, EINVAL, "bad cookie"));
-	return (put_bytes_k(msg, CBL_FW_COOKIE, true, p, len));
+	return (cbl_fw_cookie(msg, p, len));
 }
 
 /* Finish the body and write the header.  Idempotent. */
@@ -842,6 +809,9 @@ cbl_msg_encode(cbl_msg *msg, const void **framep, size_t *lenp)
 		if (msg->depth > 1)
 			return (cbl_msg_fail(msg, EINVAL,
 			    "unterminated nest or array"));
+		/* The error asked of it, written last. */
+		if ((error = cbl_fw_flush(msg)) != 0)
+			return (error);
 		if (msg->depth == 1 && (error = msg_pop(msg)) != 0)
 			return (error);
 		if (msg->len == 0) {

@@ -28,10 +28,13 @@ decode_hex(cbl_ctx *ctx, const char *hex)
 	return (msg);
 }
 
+/* docs/WIRE-FORMAT.md section 6.3: {cblink:error: {...}}. */
 #define	ERR_FRAME \
-	"CB 4C 02 18 00 00 00 2B 00 11 00 01 00 00 00 20" \
+	"CB 4C 02 18 00 00 00 41 00 11 00 01 00 00 00 20" \
 	"00 00 00 01 00 00 00 00" \
-	"A3 20 02 21 6B 6E 6F 20 73 75 63 68 20 6B 65 79 22 81 01"
+	"A1 1B 00 00 01 00 00 00 00 16" \
+	"A5 01 03 02 1B 00 00 01 00 00 00 00 11 04 81 01" \
+	"05 6B 6E 6F 20 73 75 63 68 20 6B 65 79 07 02"
 
 ATF_TC_WITHOUT_HEAD(wire_error_frame);
 ATF_TC_BODY(wire_error_frame, tc)
@@ -54,7 +57,7 @@ ATF_TC_BODY(wire_error_frame, tc)
 	ATF_REQUIRE_EQ(1, got[0].v);
 	ATF_REQUIRE(!got[0].index);
 	ATF_REQUIRE_EQ(-1, cbl_msg_err_miss_type(msg));
-	/* Framework keys are invisible to attribute iteration. */
+	/* The cblink:error structure is invisible to attribute iteration. */
 	ATF_REQUIRE(cbl_attr_first(cbl_msg_body(msg)) == NULL);
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
@@ -143,20 +146,20 @@ ATF_TC_BODY(wire_notify, tc)
 	cbl_ctx_free(ctx);
 }
 
-/* Section 8.4: stream frames decode, framework keys stay hidden. */
+/* Section 8.4: stream frames decode, the framework's structures hidden. */
 ATF_TC_WITHOUT_HEAD(wire_stream_frames);
 ATF_TC_BODY(wire_stream_frames, tc)
 {
 	static const char *frames[] = {
-		"CB 4C 02 18 00 00 00 26 00 11 00 03 00 01 00 01"
+		"CB 4C 02 18 00 00 00 30 00 11 00 03 00 01 00 01"
 		"00 00 00 08 00 00 00 01"
-		"A2 25 1A 00 01 00 00 01 65 75 73 65 72 2F",
-		"CB 4C 02 18 00 00 00 1D 00 11 00 03 00 01 00 00"
-		"00 00 00 08 00 00 00 01 A1 25 19 80 00",
+		"A2 01 65 75 73 65 72 2F 1B 00 00 01 00 00 00 00 1F A1 01 1A 00 01 00 00",
+		"CB 4C 02 18 00 00 00 27 00 11 00 03 00 01 00 00"
+		"00 00 00 08 00 00 00 01 A1 1B 00 00 01 00 00 00 00 1F A1 01 19 80 00",
 		"CB 4C 02 18 00 00 00 21 00 11 00 03 00 02 00 00"
 		"00 00 00 00 00 00 00 01 A1 01 66 75 73 65 72 2F 61",
-		"CB 4C 02 18 00 00 00 1C 00 11 00 03 00 20 00 00"
-		"00 00 00 00 00 00 00 01 A1 25 18 21",
+		"CB 4C 02 18 00 00 00 26 00 11 00 03 00 20 00 00"
+		"00 00 00 00 00 00 00 01 A1 1B 00 00 01 00 00 00 00 1F A1 01 18 21",
 		"CB 4C 02 18 00 00 00 18 00 11 00 03 00 04 00 00"
 		"00 00 00 00 00 00 00 01",
 	};

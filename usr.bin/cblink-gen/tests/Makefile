@@ -100,6 +100,8 @@ CTRL=		${.CURDIR}/../../../share/cblink/specs/control.yaml \
 		${LIBCBLINK_SRC}/cbl_ctrl_gen.c \
 		${LIBCBLINK_SRC}/cbl_ctrl_gen_client.c \
 		${LIBCBLINK_SRC}/cbl_ctrl_gen_server.c \
+		${LIBCBLINK_SRC}/cbl_ymod.h \
+		${LIBCBLINK_SRC}/cbl_ymod_schema.c \
 		${.CURDIR}/../../../docs/ctrl.md
 CTRLDIR=	${TESTSDIR}/ctrl
 # cblink.mk, to build from specs given in each form of path.
@@ -115,7 +117,9 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/clash@2026-10-13.yang \
 		yang/tree@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
-		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
+		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
+		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \
+		${.CURDIR}/../../../share/yang/cblink@2026-10-13.sid
 YANGDIR=	${TESTSDIR}/yang
 
 .for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG

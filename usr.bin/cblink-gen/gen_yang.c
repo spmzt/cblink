@@ -37,8 +37,13 @@ struct yg {
 	size_t		 nnames;
 };
 
-/* Members are named per struct; these may not be. */
+/*
+ * Members are named per struct; these may not be: C's keywords, and the
+ * macros a header may define in lower case (errno, assert, offsetof) or
+ * a compiler in its GNU modes (unix, linux, sun).
+ */
 static const char *const keywords[] = {
+	"assert", "errno", "linux", "offsetof", "sun", "unix",
 	"alignas", "alignof", "auto", "bool", "break", "case", "char",
 	"const", "constexpr", "continue", "default", "do", "double", "else",
 	"enum", "extern", "false", "float", "for", "goto", "if", "inline",

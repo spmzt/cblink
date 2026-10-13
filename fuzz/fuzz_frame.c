@@ -65,6 +65,8 @@ one(cbl_ctx *c0, const uint8_t *data, size_t size)
 	struct cbl_path_elem path[8];
 	struct cbl_ctrl_ctrl c;
 	struct cbl_verr ve;
+	const void *ck;
+	size_t cklen;
 	cbl_msg *m;
 	int error;
 
@@ -74,6 +76,8 @@ one(cbl_ctx *c0, const uint8_t *data, size_t size)
 	(void)cbl_msg_err_code(m);
 	(void)cbl_msg_err_str(m);
 	(void)cbl_msg_err_path(m, path, 8);
+	(void)cbl_msg_err_miss_type(m);
+	(void)cbl_msg_err_cookie(m, &ck, &cklen);
 	if (cbl_validate(cbl_msg_body(m), &cbl_ctrl_ctrl_policy, &ve) == 0)
 		(void)cbl_ctrl_ctrl_parse(m, cbl_msg_body(m), &c);
 	cbl_msg_free(m);

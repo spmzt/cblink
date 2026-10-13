@@ -114,6 +114,29 @@ ctrl_regen_body()
 	    "$(atf_get_srcdir)/ctrl/control.yaml"
 }
 
+atf_test_case ymod_regen
+ymod_regen_head()
+{
+	atf_set "descr" "The committed cblink module's structs and tables" \
+	    "match the module (wire version 2's framework)"
+}
+ymod_regen_body()
+{
+	setup
+	y="$(atf_get_srcdir)/yang"
+
+	if $gen -n "$y/cblink@2026-10-13.yang" 2>&1 |
+	    grep -q 'needs cblink-gen built with libyang'; then
+		atf_skip "cblink-gen built without libyang"
+	fi
+	mkdir out
+	atf_check -o ignore $gen -m h,schema -b cbl_ymod -o out \
+	    -s "$y/cblink@2026-10-13.sid" "$y/cblink@2026-10-13.yang"
+	for f in cbl_ymod.h cbl_ymod_schema.c; do
+		atf_check -o file:"$(atf_get_srcdir)/ctrl/${f}" cat "out/${f}"
+	done
+}
+
 atf_test_case cli
 cli_head()
 {
@@ -525,6 +548,7 @@ atf_init_test_cases()
 	atf_add_test_case errors
 	atf_add_test_case crlf
 	atf_add_test_case ctrl_regen
+	atf_add_test_case ymod_regen
 	atf_add_test_case cli
 	atf_add_test_case big_input
 	atf_add_test_case cblink_mk

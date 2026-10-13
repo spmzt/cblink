@@ -231,7 +231,7 @@ ATF_TC_BODY(long_strings, tc)
 	cbl_ctx_free(ctx);
 }
 
-/* cbl_put_attr() copies a decoded subtree, dropping framework keys. */
+/* cbl_put_attr() copies a decoded subtree, the framework's dropped. */
 ATF_TC_WITHOUT_HEAD(copy_attr);
 ATF_TC_BODY(copy_attr, tc)
 {
@@ -386,7 +386,8 @@ ATF_TC_BODY(extended_ack, tc)
 	ATF_REQUIRE_EQ(CBL_ERRMSG_MAX, strlen(cbl_msg_err_str(msg)));
 	ATF_REQUIRE_EQ(3, cbl_msg_err_path(msg, got, 3));
 	ATF_REQUIRE(got[0].v == 3 && !got[0].index);
-	ATF_REQUIRE(got[1].v == 2 && got[1].index);
+	/* Version 2's path is an instance-identifier's: no indices. */
+	ATF_REQUIRE(got[1].v == 2 && !got[1].index);
 	ATF_REQUIRE(got[2].v == 7 && !got[2].index);
 	ATF_REQUIRE_EQ(9, cbl_msg_err_miss_type(msg));
 	ATF_REQUIRE_EQ(0, cbl_msg_err_cookie(msg, &ck, &cklen));

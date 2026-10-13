@@ -17,6 +17,7 @@ SRCS=		cbl_arena.c \
 		cbl_dump.c \
 		cbl_family.c \
 		cbl_frame.c \
+		cbl_fw.c \
 		cbl_loop.c \
 		cbl_msg.c \
 		cbl_notify.c \
@@ -33,7 +34,8 @@ SRCS=		cbl_arena.c \
 		cbl_tls.c \
 		cbl_uri.c \
 		cbl_xpath.c \
-		cbl_ycodec.c
+		cbl_ycodec.c \
+		cbl_ymod_schema.c
 
 VERSION_DEF=	${.CURDIR}/Versions.def
 SYMBOL_MAPS=	${.CURDIR}/Symbol.map

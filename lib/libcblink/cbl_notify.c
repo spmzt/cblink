@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "cbl_impl.h"
+#include "cbl_schema.h"
 #include "cbl_ctrl_gen.h"
 
 static int
@@ -192,10 +193,16 @@ copy_with_missed(cbl_conn *conn, cbl_msg *msg)
 	}
 	copy->hdr = msg->hdr;
 	copy->hdr.length = 0;
+	/* Its items as they are, but the framework's; and ENOBUFS. */
 	body = cbl_msg_body(rx);
-	for (a = cbl_attr_first(body); a != NULL; a = cbl_attr_next(a))
-		(void)cbl_put_attr(copy, cbl_attr_type(a), a);
-	(void)cbl_msg_put_fw_uint(copy, CBL_FW_CODE, ENOBUFS);
+	for (uint32_t i = 0; body != NULL && i < body->count; i++) {
+		a = &body->child[i];
+		if (a->key < 1 || cbl_fw_sid((uint64_t)a->key))
+			continue;
+		(void)cbl_msg_put_sid_raw(copy, (uint64_t)a->key,
+		    rx->buf + rx->hdr.hdrlen + a->off, a->len);
+	}
+	(void)cbl_fw_error(copy, ENOBUFS, NULL, NULL, 0, -1);
 	cbl_msg_free(rx);
 	if (cbl_msg_encode(copy, NULL, NULL) != 0) {
 		cbl_msg_free(copy);

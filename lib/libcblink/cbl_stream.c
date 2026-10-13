@@ -92,10 +92,13 @@ send_ctl(cbl_conn *conn, const cbl_stream *s, uint32_t id, uint32_t flags,
 	msg->hdr.cmd = s != NULL ? s->cmd : 0;
 	msg->hdr.flags = flags;
 	msg->hdr.stream = id;
-	if (code > 0 || text != NULL)
+	/* A close's code is cblink's close; a reset's an error. */
+	if ((flags & CBL_F_S_CLOSE) != 0 && (code > 0 || text != NULL))
+		(void)cbl_fw_close(msg, (uint32_t)code, text);
+	else if (code > 0 || text != NULL)
 		(void)cbl_msg_put_error(msg, code, text, NULL, 0, -1);
 	if ((flags & CBL_F_S_CREDIT) != 0)
-		(void)cbl_msg_put_fw_uint(msg, CBL_FW_CREDIT, credit);
+		(void)cbl_fw_credit(msg, (uint32_t)credit);
 	return (cbl_conn_enqueue_ctl(conn, msg));
 }
 
@@ -194,15 +197,6 @@ reset_and_end(cbl_stream *s, int code, const char *text)
 	stream_end(s, code, text);
 }
 
-static uint64_t
-fw_uint(const cbl_msg *msg, int key, bool *found)
-{
-	const cbl_attr *a = cbl_map_lookup(cbl_msg_body(msg), key);
-
-	*found = a != NULL && a->kind == CBL_K_UINT;
-	return (*found ? a->v.u : 0);
-}
-
 int
 cbl_stream_open(cbl_conn *conn, cbl_msg *open_req, uint32_t flags,
     const struct cbl_stream_cbs *cbs, void *arg, cbl_stream **sp)
@@ -259,7 +253,7 @@ cbl_stream_open(cbl_conn *conn, cbl_msg *open_req, uint32_t flags,
 	open_req->hdr.flags = CBL_F_REQUEST | CBL_F_S_OPEN;
 	open_req->hdr.stream = id;
 	open_req->hdr.seq = s->open_seq;
-	(void)cbl_msg_put_fw_uint(open_req, CBL_FW_CREDIT, s->window);
+	(void)cbl_fw_credit(open_req, s->window);
 	if ((error = cbl_conn_enqueue(conn, open_req)) != 0) {
 		pthread_mutex_lock(&conn->mtx);
 		RB_REMOVE(cbl_stream_tree, &conn->streams, s);
@@ -292,7 +286,7 @@ cbl_stream_server_open(cbl_req *req, cbl_conn *conn, cbl_msg *msg, bool push)
 		(void)cbl_req_set_err(req, "bad stream id", NULL, 0, -1);
 		return (EPROTO);
 	}
-	credit = fw_uint(msg, CBL_FW_CREDIT, &found);
+	credit = cbl_fw_get_credit(msg, &found);
 	if (!found)
 		credit = conn->lim.v[CBL_LIM_STREAM_WINDOW];
 	if (credit > INT32_MAX) {
@@ -399,7 +393,7 @@ cbl_stream_accept(cbl_stream *s, cbl_msg *accept, uint32_t flags,
 	accept->hdr.flags = CBL_F_S_OPEN;
 	accept->hdr.seq = s->open_seq;
 	accept->hdr.stream = s->id;
-	(void)cbl_msg_put_fw_uint(accept, CBL_FW_CREDIT, s->rx_window);
+	(void)cbl_fw_credit(accept, s->rx_window);
 	if ((error = cbl_conn_enqueue_ctl(conn, accept)) != 0) {
 		/*
 		 * Not sent, so not accepted: the caller keeps what "arg"
@@ -719,15 +713,14 @@ stream_rx(cbl_conn *conn, cbl_msg *msg)
 		return;
 	}
 	if ((f & CBL_F_S_RESET) != 0) {
-		code = msg->err_code != 0 ? msg->err_code :
-		    (int)fw_uint(msg, CBL_FW_CODE, &found);
+		code = msg->err_code;
 		stream_finish(s, code != 0 ? code : ECONNRESET,
 		    cbl_msg_err_str(msg));
 		cbl_msg_free(msg);
 		return;
 	}
 	if ((f & CBL_F_S_CLOSE) != 0) {
-		code = (int)fw_uint(msg, CBL_FW_CODE, &found);
+		code = msg->err_code;
 		if (s->state != CBL_SS_CLOSING)
 			(void)send_ctl(conn, s, s->id, CBL_F_S_CLOSE, 0,
 			    NULL, 0);
@@ -736,7 +729,7 @@ stream_rx(cbl_conn *conn, cbl_msg *msg)
 		return;
 	}
 	if ((f & CBL_F_S_CREDIT) != 0) {
-		v = fw_uint(msg, CBL_FW_CREDIT, &found);
+		v = cbl_fw_get_credit(msg, &found);
 		pthread_mutex_lock(&conn->mtx);
 		if (found)
 			s->tx_credit += v;
@@ -773,7 +766,7 @@ stream_rx(cbl_conn *conn, cbl_msg *msg)
 			cbl_msg_free(msg);
 			return;
 		}
-		v = fw_uint(msg, CBL_FW_CREDIT, &found);
+		v = cbl_fw_get_credit(msg, &found);
 		if (!found)
 			v = conn->lim.v[CBL_LIM_STREAM_WINDOW];
 		if (v > INT32_MAX) {

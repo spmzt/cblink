@@ -71,15 +71,10 @@ typedef struct cbl_tls		cbl_tls;
 #define	CBL_ATTR_MAX		65535
 #define	CBL_ELEM		0	/* "type" of an array element */
 
-/* Framework attribute keys (negative CBOR keys). */
-#define	CBL_FW_CODE		(-1)
-#define	CBL_FW_MSG		(-2)
-#define	CBL_FW_PATH		(-3)
-#define	CBL_FW_COOKIE		(-4)
-#define	CBL_FW_MISS_TYPE	(-5)
-#define	CBL_FW_CREDIT		(-6)
-#define	CBL_FW_MIN		(-64)
-
+/*
+ * Version 2 has no framework keys: errors, credit and closes are the
+ * cblink module's structures, at their SIDs (docs/WIRE-FORMAT.md 6).
+ */
 #define	CBL_ERRMSG_MAX		1024
 #define	CBL_COOKIE_MAX		256
 #define	CBL_PATH_MAX		32

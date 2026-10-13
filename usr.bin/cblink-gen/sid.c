@@ -376,3 +376,120 @@ sid_attach(struct schema *s, const struct sidfile *f, struct diags *d)
 	}
 	return (d->n > errs ? -1 : 0);
 }
+
+/*
+ * Verifying.
+ */
+
+static int
+sid_cmp(const void *a, const void *b)
+{
+	const struct siditem *x = *(const struct siditem *const *)a;
+	const struct siditem *y = *(const struct siditem *const *)b;
+
+	return ((x->sid > y->sid) - (x->sid < y->sid));
+}
+
+static int
+id_cmp(const void *a, const void *b)
+{
+	const struct siditem *x = *(const struct siditem *const *)a;
+	const struct siditem *y = *(const struct siditem *const *)b;
+
+	if (x->ns != y->ns)
+		return ((x->ns > y->ns) - (x->ns < y->ns));
+	return (strcmp(x->id, y->id));
+}
+
+struct missing {
+	const struct smodule	*m;
+	struct diags		*d;
+};
+
+static void
+need_sid(struct snode *n, void *arg)
+{
+	struct missing *ms = arg;
+	struct buf b;
+
+	if (n->module != ms->m || n->sid != 0)
+		return;
+	/* An empty input or output is the compiled schema's, not the
+	 * module's: RFC 9595's own example gives it none. */
+	if ((n->kind == SN_INPUT || n->kind == SN_OUTPUT) && n->child == NULL)
+		return;
+	buf_init(&b);
+	if (snode_sid_path(n, &b))
+		diag_add(ms->d, 0, 0, "data %s: no SID", b.p);
+	buf_free(&b);
+}
+
+int
+sid_verify(struct schema *s, const struct sidfile *f, struct diags *d)
+{
+	const struct siditem **v;
+	struct smodule *m;
+	struct missing ms;
+	size_t errs = d->n, i, j;
+
+	if (f->nitems == 0) {
+		diag_add(d, 0, 0, "no item");
+		return (-1);
+	}
+	v = xcalloc(f->nitems, sizeof(*v));
+	for (i = 0; i < f->nitems; i++)
+		v[i] = &f->items[i];
+
+	/* A SID is one item's, an item has one SID. */
+	qsort(v, f->nitems, sizeof(*v), sid_cmp);
+	for (i = 1; i < f->nitems; i++)
+		if (v[i]->sid == v[i - 1]->sid)
+			diag_add(d, 0, 0, "SID %" PRIu64 " given to %s %s and "
+			    "%s %s", v[i]->sid, sid_ns_name(v[i - 1]->ns),
+			    v[i - 1]->id, sid_ns_name(v[i]->ns), v[i]->id);
+	qsort(v, f->nitems, sizeof(*v), id_cmp);
+	for (i = 1; i < f->nitems; i++)
+		if (id_cmp(&v[i], &v[i - 1]) == 0)
+			diag_add(d, 0, 0, "%s %s has two SIDs, %" PRIu64 " and %"
+			    PRIu64, sid_ns_name(v[i]->ns), v[i]->id,
+			    v[i - 1]->sid, v[i]->sid);
+	free(v);
+
+	/* Inside the ranges the file was given, when it says any. */
+	for (i = 0; f->nranges > 0 && i < f->nitems; i++) {
+		for (j = 0; j < f->nranges; j++)
+			if (f->items[i].sid >= f->ranges[j].entry &&
+			    f->items[i].sid - f->ranges[j].entry <
+			    f->ranges[j].size)
+				break;
+		if (j == f->nranges)
+			diag_add(d, 0, 0, "%s %s: SID %" PRIu64 " outside the "
+			    "file's assignment ranges",
+			    sid_ns_name(f->items[i].ns), f->items[i].id,
+			    f->items[i].sid);
+	}
+
+	/* Every item of the module has one. */
+	if ((m = schema_module(s, f->module, f->revision)) == NULL)
+		return (-1);
+	if (m->sid == 0)
+		diag_add(d, 0, 0, "module %s: no SID", m->name);
+	for (i = 0; i < m->nidents; i++)
+		if (m->idents[i].sid == 0)
+			diag_add(d, 0, 0, "identity %s: no SID",
+			    m->idents[i].name);
+	for (i = 0; i < m->nfeatures; i++)
+		if (m->features[i].sid == 0)
+			diag_add(d, 0, 0, "feature %s: no SID",
+			    m->features[i].name);
+	for (i = 0; i < m->nexts; i++)
+		if (!m->exts[i].inherited && m->exts[i].module == m &&
+		    strcmp(m->exts[i].ext,
+		    "ietf-yang-structure-ext:structure") == 0 &&
+		    m->exts[i].sid == 0)
+			diag_add(d, 0, 0, "data /%s:%s: no SID", m->name,
+			    m->exts[i].arg);
+	ms = (struct missing){ .m = m, .d = d };
+	walk_all(s, need_sid, &ms);
+	return (d->n > errs ? -1 : 0);
+}

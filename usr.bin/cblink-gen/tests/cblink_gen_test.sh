@@ -247,6 +247,25 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	    "$y/ietf-system@2014-08-06.sid" > bad.sid
 	atf_check -s exit:1 -e match:'^bad.sid:.*data /ietf-system:system/kontakt: not in ietf-system' \
 	    $gen -n -s bad.sid "$y/ietf-system@2014-08-06.yang"
+	# Verified: a SID given twice, one outside the file's range, an
+	# item left without one.
+	sed 's|"sid": "1702"|"sid": "1701"|' "$y/ietf-system@2014-08-06.sid" \
+	    > twice.sid
+	atf_check -s exit:1 -e match:'SID 1701 given to identity' \
+	    $gen -n -s twice.sid "$y/ietf-system@2014-08-06.yang"
+	sed 's|"sid": "1702"|"sid": "1900"|' "$y/ietf-system@2014-08-06.sid" \
+	    > outside.sid
+	atf_check -s exit:1 -e match:'SID 1900 outside the file.s assignment ranges' \
+	    $gen -n -s outside.sid "$y/ietf-system@2014-08-06.yang"
+	# (an item's object, its braces alone on their lines, six spaces in,
+	# dropped whole)
+	awk '/^      \{$/ { buf = $0; inb = 1; next }
+	    inb { buf = buf "\n" $0 }
+	    inb && /^      \},?$/ { inb = 0;
+	        if (buf !~ /"\/ietf-system:system\/contact"/) print buf; next }
+	    !inb { print }' "$y/ietf-system@2014-08-06.sid" > missing.sid
+	atf_check -s exit:1 -e match:'data /ietf-system:system/contact: no SID' \
+	    $gen -n -s missing.sid "$y/ietf-system@2014-08-06.yang"
 	echo '{"x": 1}' > notsid.sid
 	atf_check -s exit:1 -e match:'no "ietf-sid-file:sid-file" object' \
 	    $gen -n -s notsid.sid "$y/ietf-system@2014-08-06.yang"

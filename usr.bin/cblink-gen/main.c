@@ -148,7 +148,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		pathcopy = xstrdup(sids[i]);
 		d.file = basename(pathcopy);
 		if ((sf = sid_read(sidtext[i], sidlen[i], &d)) != NULL) {
-			if (sid_attach(s, sf, &d) == 0)
+			if (sid_attach(s, sf, &d) == 0 &&
+			    sid_verify(s, sf, &d) == 0)
 				nattached += sf->nitems;
 			sid_free(sf);
 		}

@@ -75,6 +75,16 @@ void		 sid_free(struct sidfile *f);
 int		 sid_attach(struct schema *s, const struct sidfile *f,
 		    struct diags *d);
 
+/*
+ * Verify f against the schema, after sid_attach(): no SID given twice,
+ * no item named twice, every SID inside the file's assignment ranges,
+ * and every item of the module (itself, its identities and features,
+ * its structures and the data nodes it defines) with a SID.  Problems
+ * are diagnostics; 0 when there are none.
+ */
+int		 sid_verify(struct schema *s, const struct sidfile *f,
+		    struct diags *d);
+
 const char	*sid_ns_name(enum sid_ns ns);
 
 #endif /* !_CBLINK_GEN_SID_H_ */

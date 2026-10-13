@@ -85,6 +85,21 @@ int		 sid_attach(struct schema *s, const struct sidfile *f,
 int		 sid_verify(struct schema *s, const struct sidfile *f,
 		    struct diags *d);
 
+/*
+ * Give SIDs to the module's items that have none (RFC 9595 Appendix B):
+ * sorted by namespace (module, identity, feature, data) and identifier,
+ * each the next SID free in the file's ranges; the file's version goes
+ * up when it had items, and its dependencies become the module's
+ * imports as bound.  The number given, or -1 (diagnostics) when the
+ * ranges are full or the module is not in the schema.
+ */
+int		 sid_assign(struct schema *s, struct sidfile *f,
+		    struct diags *d);
+
+/* The file as JSON, deterministically: items in SID order. */
+struct buf;
+void		 sid_write(const struct sidfile *f, struct buf *b);
+
 const char	*sid_ns_name(enum sid_ns ns);
 
 #endif /* !_CBLINK_GEN_SID_H_ */

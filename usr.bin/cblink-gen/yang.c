@@ -737,6 +737,8 @@ yang_schema(struct ly_ctx *ctx)
 		    (f = lysp_feature_next(f, lm->parsed, &fi)) != NULL) {
 			m->features = xreallocarray(m->features,
 			    m->nfeatures + 1, sizeof(*m->features));
+			memset(&m->features[m->nfeatures], 0,
+			    sizeof(*m->features));
 			m->features[m->nfeatures].name = xstrdup(f->name);
 			m->features[m->nfeatures++].enabled =
 			    (f->flags & LYS_FENABLED) != 0;
@@ -764,6 +766,20 @@ yang_schema(struct ly_ctx *ctx)
 			m->deviated_by[m->ndeviated_by++] =
 			    xstrdup(lm->deviated_by[u]->name);
 		}
+		/* What it imports, at the revision bound. */
+		if (lm->parsed != NULL)
+			LY_ARRAY_FOR(lm->parsed->imports, u) {
+				const struct lysp_import *im =
+				    &lm->parsed->imports[u];
+
+				m->imports = xreallocarray(m->imports,
+				    m->nimports + 1, sizeof(*m->imports));
+				m->imports[m->nimports].name = xstrdup(im->name);
+				m->imports[m->nimports++].revision =
+				    im->module != NULL &&
+				    im->module->revision != NULL ?
+				    xstrdup(im->module->revision) : NULL;
+			}
 	}
 	/* Derived identities, now that every module has its own. */
 	for (i = 0; i < c.s->nmods; i++) {

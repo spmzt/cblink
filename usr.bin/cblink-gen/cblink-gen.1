@@ -18,8 +18,10 @@
 .Ar spec.yaml
 .Nm
 .Fl n | d
+.Op Fl a
 .Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl p Ar dir
+.Op Fl s Ar file.sid
 .Ar module.yang ...
 .Sh DESCRIPTION
 The
@@ -51,6 +53,19 @@ capability mode before it parses anything.
 .Pp
 The options are as follows:
 .Bl -tag -width "-m parts"
+.It Fl a
+For YANG modules: give a SID to each item of the module of every
+.Fl s
+file that has none, and rewrite the file.
+The items are numbered as RFC 9595 Appendix B says: by namespace
+(module, identities, features, data), each in identifier order, every
+one the next SID free in the file's assignment ranges.
+A file that had items gets the next
+.Ql sid-file-version ,
+and its
+.Ql dependency-revision
+becomes the revisions the module's imports are bound to.
+Running it again on a complete file changes nothing.
 .It Fl B
 Allow what is reserved for families built into the library:
 the family names
@@ -118,6 +133,17 @@ For a YANG module, report what was compiled.
 Look for the modules a YANG module imports in
 .Ar dir ,
 as well as in the module's own directory.
+It may be given up to 16 times.
+.It Fl s Ar file.sid
+For YANG modules: attach the YANG Schema Item iDentifiers of a module
+from an RFC 9595
+.Pa .sid
+file, and verify them: no SID given twice, none outside the file's
+assignment ranges, and every item of the module with one, empty
+.Ql input
+and
+.Ql output
+included.
 It may be given up to 16 times.
 .It Fl o Ar dir
 Write the files into

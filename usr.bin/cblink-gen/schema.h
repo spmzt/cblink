@@ -209,6 +209,11 @@ struct smodule {
 	size_t		 nidents;
 	char		**deviated_by;	/* module names */
 	size_t		 ndeviated_by;
+	struct simport {
+		char	*name;
+		char	*revision;	/* the one bound, NULL: none */
+	}		*imports;
+	size_t		 nimports;
 	struct snode	*data;		/* top-level data nodes */
 	struct snode	*rpcs;
 	struct snode	*notifs;

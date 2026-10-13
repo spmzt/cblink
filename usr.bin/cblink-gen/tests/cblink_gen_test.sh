@@ -239,10 +239,45 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	# XPath beyond XPath-lite is refused, at its node.
 	atf_check -s exit:1 -e match:'^beyond@2026-10-13.yang:.*/beyond:item/first: must "position\(\) = 1": outside XPath-lite: the function position\(\)' \
 	    $gen -n "$y/beyond@2026-10-13.yang"
-	# .sid files (RFC 9595): its own example, read and attached whole; an
-	# item the module does not have, refused.
-	atf_check -o match:', 76 SIDs from 1 .sid files$' $gen -n \
-	    -s "$y/ietf-system@2014-08-06.sid" "$y/ietf-system@2014-08-06.yang"
+	# .sid files (RFC 9595): its own example, read and attached whole,
+	# but short of the SIDs Appendix B says empty input and output MUST
+	# have; -a gives them theirs, in its order, after the last SID taken,
+	# and a new version; again, it changes nothing.
+	atf_check -s exit:1 -e match:'data /ietf-system:set-current-datetime/output: no SID' \
+	    $gen -n -s "$y/ietf-system@2014-08-06.sid" \
+	    "$y/ietf-system@2014-08-06.yang"
+	cat "$y/ietf-system@2014-08-06.sid" > full.sid
+	atf_check -o match:'^full.sid: 5 SIDs assigned, version 1$' \
+	    $gen -n -a -s full.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n \
+	    -s full.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check -o match:'"sid-file-version": 1,' cat full.sid
+	atf_check -o match:'"identifier": "/ietf-system:system-restart/input",' \
+	    cat full.sid
+	cp full.sid again.sid
+	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n -a \
+	    -s again.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check cmp full.sid again.sid
+	# From nothing but a range, the module first.
+	cat > empty.sid <<-EOF
+	{"ietf-sid-file:sid-file": {"module-name": "ietf-system",
+	 "module-revision": "2014-08-06",
+	 "assignment-range": [{"entry-point": "60000", "size": "100"}]}}
+	EOF
+	atf_check -o match:'^empty.sid: 81 SIDs assigned, version 0$' \
+	    $gen -n -a -s empty.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check -o match:'"namespace": "module",.*"identifier": "ietf-system",.*"sid": "60000"' \
+	    tr -d '\n' < empty.sid
+	# Ranges too small for the module: refused, the file left alone.
+	cat > small.sid <<-EOF
+	{"ietf-sid-file:sid-file": {"module-name": "ietf-system",
+	 "assignment-range": [{"entry-point": "60000", "size": "10"}]}}
+	EOF
+	cp small.sid small.orig
+	atf_check -s exit:1 -e match:'ranges are full: 71 items left' \
+	    $gen -n -a -s small.sid "$y/ietf-system@2014-08-06.yang"
+	atf_check cmp small.sid small.orig
+	# An item the module does not have, refused.
 	sed 's|/ietf-system:system/contact|/ietf-system:system/kontakt|' \
 	    "$y/ietf-system@2014-08-06.sid" > bad.sid
 	atf_check -s exit:1 -e match:'^bad.sid:.*data /ietf-system:system/kontakt: not in ietf-system' \

@@ -46,7 +46,7 @@ usage(void)
 
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
-	    "       cblink-gen -n | -d [-F module:feature,...] ... "
+	    "       cblink-gen -n | -d [-a] [-F module:feature,...] ... "
 	    "[-p dir] ... [-s file.sid] ...\n"
 	    "                  module.yang ...\n");
 	exit(2);
@@ -95,8 +95,10 @@ read_file(int fd, const char *path, size_t *lenp)
 static int
 yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     const char **feats, size_t nfeats, const char **sids, size_t nsids,
-    bool check, bool dump)
+    bool assign, bool check, bool dump)
 {
+	cap_rights_t rights;
+	int sidfd[16];
 	struct diags d = { 0 };
 	char *sidtext[16];
 	size_t sidlen[16], nattached = 0;
@@ -104,7 +106,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	struct ly_ctx *ctx;
 	char *pathcopy;
 	size_t nodes = 0, nmods = 0, nexprs;
-	int fd;
+	int fd, nassigned;
 
 	const char **dirs;
 	size_t ndirs = 0;
@@ -124,12 +126,23 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		yang_add_dir(paths[i]);
 		dirs[ndirs++] = xstrdup(paths[i]);
 	}
-	/* .sid files, read now, attached once the schema is made. */
+	/*
+	 * .sid files, read now, attached once the schema is made; with -a
+	 * kept open to be rewritten with the SIDs given.
+	 */
 	for (size_t i = 0; i < nsids; i++) {
-		if ((fd = open(sids[i], O_RDONLY | O_CLOEXEC)) == -1)
+		if ((fd = open(sids[i], (assign ? O_RDWR : O_RDONLY) |
+		    O_CLOEXEC)) == -1)
 			err(2, "%s", sids[i]);
 		sidtext[i] = read_file(fd, sids[i], &sidlen[i]);
-		close(fd);
+		if (!assign) {
+			close(fd);
+			continue;
+		}
+		cap_rights_init(&rights, CAP_PWRITE, CAP_FTRUNCATE);
+		if (caph_rights_limit(fd, &rights) != 0)
+			err(2, "%s", sids[i]);
+		sidfd[i] = fd;
 	}
 	ctx = yang_ctx_new(dirs, ndirs);
 
@@ -148,11 +161,27 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		pathcopy = xstrdup(sids[i]);
 		d.file = basename(pathcopy);
 		if ((sf = sid_read(sidtext[i], sidlen[i], &d)) != NULL) {
-			if (sid_attach(s, sf, &d) == 0 &&
-			    sid_verify(s, sf, &d) == 0)
+			if (sid_attach(s, sf, &d) == 0 && assign &&
+			    (nassigned = sid_assign(s, sf, &d)) > 0 &&
+			    sid_attach(s, sf, &d) == 0) {
+				struct buf b;
+
+				buf_init(&b);
+				sid_write(sf, &b);
+				if (ftruncate(sidfd[i], 0) != 0 ||
+				    pwrite(sidfd[i], b.p, b.len, 0) !=
+				    (ssize_t)b.len)
+					err(2, "%s", sids[i]);
+				buf_free(&b);
+				printf("%s: %d SIDs assigned, version %u\n",
+				    d.file, nassigned, sf->version);
+			}
+			if (d.n == 0 && sid_verify(s, sf, &d) == 0)
 				nattached += sf->nitems;
 			sid_free(sf);
 		}
+		if (assign)
+			close(sidfd[i]);
 		free(sidtext[i]);
 		if (d.n > 0) {
 			diag_print(&d);
@@ -192,7 +221,8 @@ static int
 yang_main(int argc __unused, char *argv[], const char **paths __unused,
     size_t npaths __unused, const char **feats __unused,
     size_t nfeats __unused, const char **sids __unused,
-    size_t nsids __unused, bool check __unused, bool dump __unused)
+    size_t nsids __unused, bool assign __unused, bool check __unused,
+    bool dump __unused)
 {
 
 	errx(2, "%s: YANG input needs cblink-gen built with libyang "
@@ -207,14 +237,17 @@ main(int argc, char *argv[])
 	struct diags d = { 0 };
 	struct ynode *root;
 	struct spec *s;
-	bool builtin = false, check = false, dump = false;
+	bool assign = false, builtin = false, check = false, dump = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
 	const char *paths[16], *feats[64], *sids[16];
 	size_t len, npaths = 0, nfeats = 0, nsids = 0;
 	int ch, fd, dirfd, rv;
 
-	while ((ch = getopt(argc, argv, "Bb:dF:m:no:p:s:V")) != -1) {
+	while ((ch = getopt(argc, argv, "aBb:dF:m:no:p:s:V")) != -1) {
 		switch (ch) {
+		case 'a':
+			assign = true;
+			break;
 		case 'B':
 			builtin = true;
 			break;
@@ -260,8 +293,8 @@ main(int argc, char *argv[])
 	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
 	    strcmp(dot, ".yang") == 0)
 		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
-		    sids, nsids, check, dump));
-	if (argc != 1 || dump || nfeats > 0 || nsids > 0)
+		    sids, nsids, assign, check, dump));
+	if (argc != 1 || assign || dump || nfeats > 0 || nsids > 0)
 		usage();
 
 	if ((fd = open(argv[0], O_RDONLY | O_CLOEXEC)) == -1)

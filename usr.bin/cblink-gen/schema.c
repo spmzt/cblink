@@ -127,6 +127,11 @@ schema_free(struct schema *s)
 		for (size_t j = 0; j < m->ndeviated_by; j++)
 			free(m->deviated_by[j]);
 		free(m->deviated_by);
+		for (size_t j = 0; j < m->nimports; j++) {
+			free(m->imports[j].name);
+			free(m->imports[j].revision);
+		}
+		free(m->imports);
 		snode_free(m->data);
 		snode_free(m->rpcs);
 		snode_free(m->notifs);

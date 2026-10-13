@@ -18,6 +18,7 @@
 .Ar spec.yaml
 .Nm
 .Fl n | d
+.Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl p Ar dir
 .Ar module.yang ...
 .Sh DESCRIPTION
@@ -64,6 +65,20 @@ For YANG modules: print the generator's model of the compiled schema,
 a schema node a line (its module, kind, path and flags), for comparison
 with
 .Xr yanglint 1 .
+.It Fl F Ar module : Ns Ar feature , Ns ...
+For YANG modules: the features of
+.Ar module
+to enable,
+.Ql *
+for all of them, none for none.
+It may be given up to 64 times.
+Without
+.Fl F ,
+every feature of every implemented module is on; with it, only those
+named are, as with
+.Xr yanglint 1 .
+What a disabled feature guards is left out, identities, enums and bits
+included; the deviations of the modules loaded are applied.
 .It Fl b Ar base
 Name the output files
 .Ar base Ns .h ,
@@ -130,8 +145,8 @@ Only
 .Fl n
 and
 .Fl d
-are supported yet: the modules are parsed and compiled with every
-feature on, and errors are reported as for a spec.
+are supported yet: the modules are parsed and compiled, and errors are
+reported as for a spec.
 A
 .Nm
 built without libyang refuses YANG modules.

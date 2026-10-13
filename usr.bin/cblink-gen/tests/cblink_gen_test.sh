@@ -215,6 +215,21 @@ good leaf /good:things/thing/name rw key string length 1..63
 	atf_check -o match:'^module good@2026-10-13$' cat dump
 	atf_check -s exit:1 -e match:'^bad@2026-10-13.yang:.*uint33' \
 	    $gen -n "$y/bad@2026-10-13.yang"
+	# Features: all on without -F, as named with it; what a disabled one
+	# guards is left out, identities too.
+	atf_check -o match:'/good:things/thing/extra rw identityref base good:kind$' \
+	    $gen -d "$y/good@2026-10-13.yang"
+	atf_check -o match:'^feature extra off$' -o not-match:'/extra ' \
+	    $gen -d -F good: "$y/good@2026-10-13.yang"
+	atf_check -o match:'^feature extra on$' -o match:'/thing/extra ' \
+	    $gen -d -F good:extra "$y/good@2026-10-13.yang"
+	atf_check -s exit:1 -e match:'Feature "nope" not found' \
+	    $gen -n -F good:nope "$y/good@2026-10-13.yang"
+	atf_check -s exit:1 -e match:"no module nosuch implemented" \
+	    $gen -n -F nosuch:x "$y/good@2026-10-13.yang"
+	# A deviation applied, and said.
+	atf_check -o match:'^deviated-by good-dev$' -o not-match:'/seen ' \
+	    $gen -d "$y/good@2026-10-13.yang" "$y/good-dev@2026-10-13.yang"
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang

@@ -9,6 +9,15 @@ module good {
 
   revision 2026-10-13;
 
+  feature extra;
+
+  identity kind;
+
+  identity extra-kind {
+    if-feature extra;
+    base kind;
+  }
+
   container things {
     list thing {
       key "name";
@@ -19,6 +28,12 @@ module good {
       }
       leaf seen {
         type yang:date-and-time;
+      }
+      leaf extra {
+        if-feature extra;
+        type identityref {
+          base kind;
+        }
       }
     }
   }

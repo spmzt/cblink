@@ -137,16 +137,23 @@ schema_module(struct schema *s, const char *name, const char *revision)
 }
 
 struct sident *
+schema_ident_in(struct smodule *m, const char *name)
+{
+
+	for (size_t i = 0; i < m->nidents; i++)
+		if (strcmp(m->idents[i].name, name) == 0)
+			return (&m->idents[i]);
+	return (NULL);
+}
+
+struct sident *
 schema_ident(struct schema *s, const char *module, const char *name)
 {
 	struct smodule *m;
 
 	if ((m = schema_module(s, module, NULL)) == NULL)
 		return (NULL);
-	for (size_t i = 0; i < m->nidents; i++)
-		if (strcmp(m->idents[i].name, name) == 0)
-			return (&m->idents[i]);
-	return (NULL);
+	return (schema_ident_in(m, name));
 }
 
 const char *

@@ -201,6 +201,7 @@ struct smodule	*schema_module(struct schema *s, const char *name,
 		    const char *revision);
 struct sident	*schema_ident(struct schema *s, const char *module,
 		    const char *name);
+struct sident	*schema_ident_in(struct smodule *m, const char *name);
 const char	*snode_kind_name(enum snode_kind kind);
 const char	*sntype_base_name(enum sntype_base base);
 bool		 sntype_signed(enum sntype_base base);

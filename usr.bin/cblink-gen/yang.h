@@ -24,12 +24,12 @@ void		 yang_add_dir(const char *dir);
 struct ly_ctx	*yang_ctx_new(const char **dirs, size_t ndirs);
 
 /*
- * In capability mode: parse and compile the modules named, with the
- * features named on (NULL-terminated, "*" for all; NULL for none); then
- * the generator's own model of the compiled schema.
+ * In capability mode: parse and compile the modules named, set their
+ * features from yanglint-style specs (module:f1,f2; all on with none);
+ * then the generator's own model of the compiled schema.
  */
 int		 yang_load(struct ly_ctx *ctx, struct diags *d,
-		    const char **features);
+		    const char **specs, size_t nspecs);
 struct schema	*yang_schema(struct ly_ctx *ctx);
 
 #endif /* !_CBLINK_GEN_YANG_H_ */

@@ -45,7 +45,8 @@ usage(void)
 
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
-	    "       cblink-gen -n | -d [-p dir] ... module.yang ...\n");
+	    "       cblink-gen -n | -d [-F module:feature,...] ... "
+	    "[-p dir] ... module.yang ...\n");
 	exit(2);
 }
 
@@ -91,9 +92,8 @@ read_file(int fd, const char *path, size_t *lenp)
  */
 static int
 yang_main(int argc, char *argv[], const char **paths, size_t npaths,
-    bool check, bool dump)
+    const char **feats, size_t nfeats, bool check, bool dump)
 {
-	const char *all[] = { "*", NULL };
 	struct diags d = { 0 };
 	struct schema *s;
 	struct ly_ctx *ctx;
@@ -125,7 +125,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	if (caph_limit_stdio() != 0 || caph_enter() != 0)
 		err(2, "capsicum");
 
-	if (yang_load(ctx, &d, all) != 0) {
+	if (yang_load(ctx, &d, feats, nfeats) != 0) {
 		diag_print(&d);
 		return (1);
 	}
@@ -149,7 +149,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 #else
 static int
 yang_main(int argc __unused, char *argv[], const char **paths __unused,
-    size_t npaths __unused, bool check __unused, bool dump __unused)
+    size_t npaths __unused, const char **feats __unused,
+    size_t nfeats __unused, bool check __unused, bool dump __unused)
 {
 
 	errx(2, "%s: YANG input needs cblink-gen built with libyang "
@@ -166,11 +167,11 @@ main(int argc, char *argv[])
 	struct spec *s;
 	bool builtin = false, check = false, dump = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
-	const char *paths[16];
-	size_t len, npaths = 0;
+	const char *paths[16], *feats[64];
+	size_t len, npaths = 0, nfeats = 0;
 	int ch, fd, dirfd, rv;
 
-	while ((ch = getopt(argc, argv, "Bb:dm:no:p:V")) != -1) {
+	while ((ch = getopt(argc, argv, "Bb:dF:m:no:p:V")) != -1) {
 		switch (ch) {
 		case 'B':
 			builtin = true;
@@ -180,6 +181,11 @@ main(int argc, char *argv[])
 			break;
 		case 'd':
 			dump = true;
+			break;
+		case 'F':
+			if (nfeats == nitems(feats))
+				errx(2, "too many -F specs");
+			feats[nfeats++] = optarg;
 			break;
 		case 'm':
 			parts = optarg;
@@ -206,8 +212,9 @@ main(int argc, char *argv[])
 	argv += optind;
 	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
 	    strcmp(dot, ".yang") == 0)
-		return (yang_main(argc, argv, paths, npaths, check, dump));
-	if (argc != 1 || dump)
+		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
+		    check, dump));
+	if (argc != 1 || dump || nfeats > 0)
 		usage();
 
 	if ((fd = open(argv[0], O_RDONLY | O_CLOEXEC)) == -1)

@@ -216,15 +216,24 @@ yang_ctx_new(const char **dirs, size_t ndirs)
 }
 
 /*
- * Parse and compile the modules named, their imports from the others.
- * d->file is set to each module's file while it is parsed.
+ * Parse and compile the modules named, their imports from the others;
+ * then set the features of every implemented module as yanglint's -F
+ * does: with no spec, all of them on; with specs ("module:f1,f2", or
+ * "module:" for none, "module:*" for all), each module's as its spec
+ * says and those of modules named in no spec off.  libyang then applies
+ * the deviations of the modules loaded and leaves out what a disabled
+ * feature guards.
  */
 int
-yang_load(struct ly_ctx *ctx, struct diags *d, const char **features)
+yang_load(struct ly_ctx *ctx, struct diags *d, const char **specs,
+    size_t nspecs)
 {
-	struct lys_module *mod;
+	const char *all[] = { "*", NULL }, *none[] = { NULL };
+	struct lys_module *mod, **impl = NULL;
 	struct ly_in *in;
-	int rv = 0;
+	const char *file;
+	size_t nimpl = 0;
+	uint32_t idx = 0;
 	LY_ERR e;
 
 	for (size_t i = 0; i < nsrcs; i++) {
@@ -234,7 +243,7 @@ yang_load(struct ly_ctx *ctx, struct diags *d, const char **features)
 		if (ly_in_new_memory(srcs[i].text, &in) != LY_SUCCESS)
 			errx(2, "libyang: no memory");
 		logto = d;
-		e = lys_parse(ctx, in, LYS_IN_YANG, features, &mod);
+		e = lys_parse(ctx, in, LYS_IN_YANG, NULL, &mod);
 		logto = NULL;
 		ly_in_free(in, 0);
 		if (e != LY_SUCCESS) {
@@ -243,7 +252,79 @@ yang_load(struct ly_ctx *ctx, struct diags *d, const char **features)
 			return (-1);
 		}
 	}
-	return (rv);
+
+	file = d->file;
+	d->file = "-F";
+	for (size_t i = 0; i < nspecs; i++) {
+		const char *colon = strchr(specs[i], ':');
+		char *name;
+
+		if (colon == NULL || colon == specs[i]) {
+			diag_add(d, 0, 0, "'%s': expected module:feature,...",
+			    specs[i]);
+			return (-1);
+		}
+		name = xstrndup(specs[i], (size_t)(colon - specs[i]));
+		mod = ly_ctx_get_module_implemented(ctx, name);
+		if (mod == NULL)
+			diag_add(d, 0, 0, "'%s': no module %s implemented",
+			    specs[i], name);
+		free(name);
+		if (mod == NULL)
+			return (-1);
+	}
+	while ((mod = ly_ctx_get_module_iter(ctx, &idx)) != NULL)
+		if (mod->implemented) {
+			impl = xreallocarray(impl, nimpl + 1, sizeof(*impl));
+			impl[nimpl++] = mod;
+		}
+	for (size_t i = 0; i < nimpl; i++) {
+		const char **feats = nspecs == 0 ? all : none;
+		const char **list = NULL;
+		size_t nlist = 0;
+
+		/* The features of the module's specs, together. */
+		for (size_t j = 0; j < nspecs; j++) {
+			size_t len = strlen(impl[i]->name);
+			char *dup, *f, *p;
+
+			if (strncmp(specs[j], impl[i]->name, len) != 0 ||
+			    specs[j][len] != ':')
+				continue;
+			dup = xstrdup(specs[j] + len + 1);
+			for (p = dup; (f = strsep(&p, ",")) != NULL;) {
+				if (*f == '\0')
+					continue;
+				list = xreallocarray(list, nlist + 2,
+				    sizeof(*list));
+				list[nlist++] = xstrdup(f);
+				list[nlist] = NULL;
+			}
+			free(dup);
+		}
+		if (list != NULL)
+			feats = list;
+		/* Every module has its features set: none is not "as before". */
+		if (feats == none && impl[i]->parsed != NULL &&
+		    impl[i]->parsed->features == NULL)
+			continue;
+		logto = d;
+		e = lys_set_implemented(impl[i], feats);
+		logto = NULL;
+		for (size_t j = 0; j < nlist; j++)
+			free(__DECONST(char *, list[j]));
+		free(list);
+		if (e != LY_SUCCESS) {
+			if (d->n == 0)
+				diag_add(d, 0, 0, "%s: its features cannot be "
+				    "set", impl[i]->name);
+			free(impl);
+			return (-1);
+		}
+	}
+	free(impl);
+	d->file = file;
+	return (0);
 }
 
 /*
@@ -435,16 +516,21 @@ conv_type(struct conv *c, const struct lysc_type *lt)
 		break;
 	}
 	if (items != NULL) {
-		t->nitems = LY_ARRAY_COUNT(items);
-		t->items = xcalloc(t->nitems, sizeof(*t->items));
+		/* An enum or a bit a disabled feature guards is left out. */
+		t->items = xcalloc(LY_ARRAY_COUNT(items), sizeof(*t->items));
 		LY_ARRAY_FOR(items, u) {
-			t->items[u].name = xstrdup(items[u].name);
-			t->items[u].value = t->base == ST_BITS ?
+			struct sitem *it;
+
+			if ((items[u].flags & LYS_DISABLED) != 0)
+				continue;
+			it = &t->items[t->nitems++];
+			it->name = xstrdup(items[u].name);
+			it->value = t->base == ST_BITS ?
 			    (int64_t)items[u].position : items[u].value;
 			if ((items[u].flags & LYS_STATUS_DEPRC) != 0)
-				t->items[u].flags |= SNF_DEPRECATED;
+				it->flags |= SNF_DEPRECATED;
 			if ((items[u].flags & LYS_STATUS_OBSLT) != 0)
-				t->items[u].flags |= SNF_OBSOLETE;
+				it->flags |= SNF_OBSOLETE;
 		}
 	}
 	return (t);
@@ -612,15 +698,22 @@ yang_schema(struct ly_ctx *ctx)
 			m->features[m->nfeatures++].enabled =
 			    (f->flags & LYS_FENABLED) != 0;
 		}
-		m->nidents = LY_ARRAY_COUNT(lm->identities);
-		m->idents = xcalloc(m->nidents, sizeof(*m->idents));
+		/* An identity a disabled feature guards is left out. */
+		m->idents = xcalloc(LY_ARRAY_COUNT(lm->identities),
+		    sizeof(*m->idents));
 		LY_ARRAY_FOR(lm->identities, u) {
-			m->idents[u].module = m;
-			m->idents[u].name = xstrdup(lm->identities[u].name);
+			struct sident *ni;
+
+			if (lys_identity_iffeature_value(&lm->identities[u]) !=
+			    LY_SUCCESS)
+				continue;
+			ni = &m->idents[m->nidents++];
+			ni->module = m;
+			ni->name = xstrdup(lm->identities[u].name);
 			if ((lm->identities[u].flags & LYS_STATUS_DEPRC) != 0)
-				m->idents[u].flags |= SNF_DEPRECATED;
+				ni->flags |= SNF_DEPRECATED;
 			if ((lm->identities[u].flags & LYS_STATUS_OBSLT) != 0)
-				m->idents[u].flags |= SNF_OBSOLETE;
+				ni->flags |= SNF_OBSOLETE;
 		}
 		LY_ARRAY_FOR(lm->deviated_by, u) {
 			m->deviated_by = xreallocarray(m->deviated_by,
@@ -633,7 +726,10 @@ yang_schema(struct ly_ctx *ctx)
 	for (i = 0; i < c.s->nmods; i++) {
 		lm = c.lmods[i];
 		LY_ARRAY_FOR(lm->identities, u) {
-			si = &c.s->mods[i]->idents[u];
+			si = schema_ident_in(c.s->mods[i],
+			    lm->identities[u].name);
+			if (si == NULL)
+				continue;	/* disabled */
 			LY_ARRAY_FOR(lm->identities[u].derived, v) {
 				const struct lysc_ident *d =
 				    lm->identities[u].derived[v];

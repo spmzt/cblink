@@ -239,6 +239,17 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	# XPath beyond XPath-lite is refused, at its node.
 	atf_check -s exit:1 -e match:'^beyond@2026-10-13.yang:.*/beyond:item/first: must "position\(\) = 1": outside XPath-lite: the function position\(\)' \
 	    $gen -n "$y/beyond@2026-10-13.yang"
+	# .sid files (RFC 9595): its own example, read and attached whole; an
+	# item the module does not have, refused.
+	atf_check -o match:', 76 SIDs from 1 .sid files$' $gen -n \
+	    -s "$y/ietf-system@2014-08-06.sid" "$y/ietf-system@2014-08-06.yang"
+	sed 's|/ietf-system:system/contact|/ietf-system:system/kontakt|' \
+	    "$y/ietf-system@2014-08-06.sid" > bad.sid
+	atf_check -s exit:1 -e match:'^bad.sid:.*data /ietf-system:system/kontakt: not in ietf-system' \
+	    $gen -n -s bad.sid "$y/ietf-system@2014-08-06.yang"
+	echo '{"x": 1}' > notsid.sid
+	atf_check -s exit:1 -e match:'no "ietf-sid-file:sid-file" object' \
+	    $gen -n -s notsid.sid "$y/ietf-system@2014-08-06.yang"
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang

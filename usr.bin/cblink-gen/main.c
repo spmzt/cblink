@@ -27,6 +27,7 @@
 #include "spec.h"
 #ifdef CBLINK_GEN_LIBYANG
 #include "schema.h"
+#include "sid.h"
 #include "yang.h"
 
 static void
@@ -46,7 +47,8 @@ usage(void)
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
 	    "       cblink-gen -n | -d [-F module:feature,...] ... "
-	    "[-p dir] ... module.yang ...\n");
+	    "[-p dir] ... [-s file.sid] ...\n"
+	    "                  module.yang ...\n");
 	exit(2);
 }
 
@@ -92,9 +94,12 @@ read_file(int fd, const char *path, size_t *lenp)
  */
 static int
 yang_main(int argc, char *argv[], const char **paths, size_t npaths,
-    const char **feats, size_t nfeats, bool check, bool dump)
+    const char **feats, size_t nfeats, const char **sids, size_t nsids,
+    bool check, bool dump)
 {
 	struct diags d = { 0 };
+	char *sidtext[16];
+	size_t sidlen[16], nattached = 0;
 	struct schema *s;
 	struct ly_ctx *ctx;
 	char *pathcopy;
@@ -119,6 +124,13 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		yang_add_dir(paths[i]);
 		dirs[ndirs++] = xstrdup(paths[i]);
 	}
+	/* .sid files, read now, attached once the schema is made. */
+	for (size_t i = 0; i < nsids; i++) {
+		if ((fd = open(sids[i], O_RDONLY | O_CLOEXEC)) == -1)
+			err(2, "%s", sids[i]);
+		sidtext[i] = read_file(fd, sids[i], &sidlen[i]);
+		close(fd);
+	}
 	ctx = yang_ctx_new(dirs, ndirs);
 
 	caph_cache_catpages();
@@ -130,6 +142,24 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		return (1);
 	}
 	s = yang_schema(ctx);
+	for (size_t i = 0; i < nsids; i++) {
+		struct sidfile *sf;
+
+		pathcopy = xstrdup(sids[i]);
+		d.file = basename(pathcopy);
+		if ((sf = sid_read(sidtext[i], sidlen[i], &d)) != NULL) {
+			if (sid_attach(s, sf, &d) == 0)
+				nattached += sf->nitems;
+			sid_free(sf);
+		}
+		free(sidtext[i]);
+		if (d.n > 0) {
+			diag_print(&d);
+			return (1);
+		}
+		free(pathcopy);
+	}
+	d.file = argc == 1 ? basename(argv[0]) : "the modules";
 	nexprs = schema_check_xpath(s, &d);
 	if (d.n > 0) {
 		diag_print(&d);
@@ -143,8 +173,12 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			nmods += s->mods[i]->implemented;
 		schema_walk(s, count_node, &nodes);
 		printf("%s: compiled, %zu modules implemented, %zu schema "
-		    "nodes, %zu XPath expressions\n", argc == 1 ? d.file :
-		    "the modules", nmods, nodes, nexprs);
+		    "nodes, %zu XPath expressions", d.file, nmods, nodes,
+		    nexprs);
+		if (nsids > 0)
+			printf(", %zu SIDs from %zu .sid files", nattached,
+			    nsids);
+		printf("\n");
 	} else
 		errx(2, "generating C from YANG is not written yet; -n "
 		    "checks the modules, -d dumps them");
@@ -156,7 +190,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 static int
 yang_main(int argc __unused, char *argv[], const char **paths __unused,
     size_t npaths __unused, const char **feats __unused,
-    size_t nfeats __unused, bool check __unused, bool dump __unused)
+    size_t nfeats __unused, const char **sids __unused,
+    size_t nsids __unused, bool check __unused, bool dump __unused)
 {
 
 	errx(2, "%s: YANG input needs cblink-gen built with libyang "
@@ -173,11 +208,11 @@ main(int argc, char *argv[])
 	struct spec *s;
 	bool builtin = false, check = false, dump = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
-	const char *paths[16], *feats[64];
-	size_t len, npaths = 0, nfeats = 0;
+	const char *paths[16], *feats[64], *sids[16];
+	size_t len, npaths = 0, nfeats = 0, nsids = 0;
 	int ch, fd, dirfd, rv;
 
-	while ((ch = getopt(argc, argv, "Bb:dF:m:no:p:V")) != -1) {
+	while ((ch = getopt(argc, argv, "Bb:dF:m:no:p:s:V")) != -1) {
 		switch (ch) {
 		case 'B':
 			builtin = true;
@@ -202,6 +237,11 @@ main(int argc, char *argv[])
 		case 'o':
 			outdir = optarg;
 			break;
+		case 's':
+			if (nsids == nitems(sids))
+				errx(2, "too many -s files");
+			sids[nsids++] = optarg;
+			break;
 		case 'p':
 			if (npaths == nitems(paths))
 				errx(2, "too many -p directories");
@@ -219,8 +259,8 @@ main(int argc, char *argv[])
 	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
 	    strcmp(dot, ".yang") == 0)
 		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
-		    check, dump));
-	if (argc != 1 || dump || nfeats > 0)
+		    sids, nsids, check, dump));
+	if (argc != 1 || dump || nfeats > 0 || nsids > 0)
 		usage();
 
 	if ((fd = open(argv[0], O_RDONLY | O_CLOEXEC)) == -1)

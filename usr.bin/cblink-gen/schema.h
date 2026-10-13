@@ -36,6 +36,7 @@ struct sext {
 	struct smodule	*module;	/* where it is written */
 	bool		 inherited;
 	struct snode	*data;		/* the nodes it holds */
+	uint64_t	 sid;		/* a structure's; 0: none */
 };
 
 enum snode_kind {
@@ -177,6 +178,7 @@ struct snode {
 	struct sext	*exts;		/* its extension instances */
 	size_t		 nexts;
 	struct sext	*in;		/* the instance holding it, or NULL */
+	uint64_t	 sid;		/* 0: none (choice, case, or unassigned) */
 };
 
 /* An identity, and those derived from it directly. */
@@ -186,11 +188,13 @@ struct sident {
 	struct sident	**derived;
 	size_t		 nderived;
 	uint32_t	 flags;		/* SNF_DEPRECATED, SNF_OBSOLETE */
+	uint64_t	 sid;
 };
 
 struct sfeature {
 	char		*name;
 	bool		 enabled;
+	uint64_t	 sid;
 };
 
 struct smodule {
@@ -210,6 +214,7 @@ struct smodule {
 	struct snode	*notifs;
 	struct sext	*exts;		/* instances at the top of the module */
 	size_t		 nexts;
+	uint64_t	 sid;
 };
 
 struct schema {
@@ -240,6 +245,15 @@ void		 schema_walk(struct schema *s, snode_visit_t *visit, void *arg);
 struct diags;
 /* Every XPath expression parsed; the count, problems added to d. */
 size_t		 schema_check_xpath(struct schema *s, struct diags *d);
+
+struct buf;
+/*
+ * A node's identifier in a .sid file (RFC 9595): its schema node path
+ * with choices and cases left out, a step naming its module where it
+ * differs from its parent's; a node in a structure starts from
+ * /module:structure.  False for a choice or a case, which have none.
+ */
+bool		 snode_sid_path(const struct snode *n, struct buf *b);
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);

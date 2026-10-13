@@ -282,6 +282,38 @@ path_add(struct buf *b, const struct snode *n)
 
 /* An expression on one line, its runs of white space as one space. */
 static void
+sid_path_add(struct buf *b, const struct snode *n, const struct smodule *pm)
+{
+	const struct snode *p = n->parent;
+
+	/* Choices and cases are not steps. */
+	while (p != NULL && (p->kind == SN_CHOICE || p->kind == SN_CASE))
+		p = p->parent;
+	if (p != NULL) {
+		sid_path_add(b, p, NULL);
+		pm = p->module;
+	} else if (n->in != NULL) {
+		/* The structure: /module:name, its module the instance's. */
+		pm = n->in->module;
+		buf_printf(b, "/%s:%s", pm->name, n->in->arg);
+	}
+	buf_puts(b, "/");
+	if (pm == NULL || pm != n->module)
+		buf_printf(b, "%s:", n->module->name);
+	buf_puts(b, n->name);
+}
+
+bool
+snode_sid_path(const struct snode *n, struct buf *b)
+{
+
+	if (n->kind == SN_CHOICE || n->kind == SN_CASE)
+		return (false);
+	sid_path_add(b, n, NULL);
+	return (true);
+}
+
+static void
 dump_expr(const char *what, const char *x)
 {
 	bool space = false;

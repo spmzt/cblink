@@ -205,4 +205,9 @@ CBLINK_1.0 {
 	cbl_ynode_child;
 	cbl_yschema_ident;
 	cbl_yschema_node;
+	cbl_ybuf_free;
+	cbl_ydecode;
+	cbl_yencode;
+	cbl_yarena_free;
+	cbl_yarena_new;
 };

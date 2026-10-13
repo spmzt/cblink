@@ -11,15 +11,19 @@
 # h,schema over all of them, the two files compiled at -Wall -Werror,
 # and what each module's tables come to printed.  The SIDs are made up
 # for the check: a module's own .sid file, where it has one, is not
-# used.
+# used.  Then every struct, filled by the tables, through YANG-CBOR and
+# back (PLAN-SDN-YANG 1.6.5): three passes, every optional leaf and only
+# what must be, encoded, decoded, encoded again to the same bytes.
 #
-#	tablecheck.sh cblink-gen dir libcblink-dir
+#	tablecheck.sh cblink-gen dir libcblink-src libcblink-obj
 
 set -eu
 
 gen=$1
 dir=$2
 inc=$3
+lib=$4
+fill=$(cd "$(dirname "$0")/../../usr.bin/cblink-gen/tests" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -51,3 +55,25 @@ for c in use.c corpus_schema.c; do
 done
 size "$tmp/corpus_schema.c.o"
 echo "$i modules: structs and tables compiled"
+
+cat > "$tmp/round.c" <<'EOF'
+#include <stdio.h>
+
+#include "corpus.h"
+#include "yfill.h"
+
+int
+main(void)
+{
+	char why[512];
+	size_t n, bad;
+
+	bad = yround_all(&corpus_schema, &n, why, sizeof(why));
+	printf("%zu round trips, %zu not the same\n", n, bad);
+	return (bad != 0);
+}
+EOF
+cc -std=c23 -Wall -Werror -I"$inc" -I"$tmp" -I"$fill" -o "$tmp/round" \
+    "$tmp/round.c" "$fill/yfill.c" "$tmp/corpus_schema.c.o" -L"$lib" \
+    -lcblink
+LD_LIBRARY_PATH="$lib" "$tmp/round"

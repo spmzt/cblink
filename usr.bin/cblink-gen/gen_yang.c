@@ -32,6 +32,7 @@ struct yg {
 	struct buf	 unions;	/* union types, inner ones first */
 	struct buf	 fwd;		/* struct declarations */
 	struct buf	 structs;	/* struct bodies */
+	struct buf	 codec;		/* their encoders and decoders */
 	char		**names;	/* every global name, for collisions */
 	size_t		 nnames;
 };
@@ -463,6 +464,12 @@ emit_struct(struct yg *g, const struct snode *n, const struct snode *first,
 	    sname, b.p != NULL && b.len > 0 ? b.p : "",
 	    ms.n == 0 ? "\tchar\t\t\t _empty;\t/* nothing in it */\n" : "");
 	name_add(g, sname);
+	/* Its value in YANG-CBOR and back, by the schema tables. */
+	if (n != NULL || strcmp(what, "structure") == 0)
+		buf_printf(&g->codec, "int\t%s_encode(const struct %s *,\n"
+		    "\t    struct cbl_ybuf *);\nint\t%s_decode(const void *, "
+		    "size_t, struct %s *,\n\t    cbl_yarena *, int, char *, "
+		    "size_t);\n", sname, sname, sname, sname);
 	for (size_t i = 0; i < ms.n; i++)
 		free(ms.v[i]);
 	free(ms.v);
@@ -489,6 +496,7 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 	buf_init(&g.unions);
 	buf_init(&g.fwd);
 	buf_init(&g.structs);
+	buf_init(&g.codec);
 	for (size_t i = 0; i < s->nmods; i++) {
 		struct smodule *m = s->mods[i];
 
@@ -550,6 +558,10 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 		buf_puts(out, g.unions.p);
 	if (g.structs.len > 0)
 		buf_puts(out, g.structs.p);
+	if (g.codec.len > 0)
+		buf_printf(out, "/*\n * Each struct's value in YANG-CBOR (RFC 9254) "
+		    "and back: cbl_yencode(),\n * cbl_ydecode() with its node "
+		    "(base_schema.c).\n */\n%s\n", g.codec.p);
 	buf_printf(out, "#endif /* !%s */\n", guard.p);
 
 	for (size_t i = 0; i < g.nnames; i++)
@@ -561,5 +573,39 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 	buf_free(&g.unions);
 	buf_free(&g.fwd);
 	buf_free(&g.structs);
+	buf_free(&g.codec);
 	return (d->n > errs ? -1 : 0);
+}
+
+/*
+ * The names above, for the layout the schema tables give of these structs
+ * (gen_yschema.c): one rule for both.
+ */
+void
+yc_mangle(struct buf *b, const char *s)
+{
+
+	mangle(b, s, false);
+}
+
+void
+yc_struct(struct buf *b, const struct snode *n)
+{
+
+	cname(b, n, false);
+}
+
+void
+yc_member(struct buf *b, const struct snode *n)
+{
+
+	member(b, n);
+}
+
+bool
+yc_has_flag(const struct snode *n)
+{
+
+	return (n->kind == SN_LEAF && scalar(n->type) &&
+	    !(n->flags & SNF_KEY));
 }

@@ -68,7 +68,7 @@ YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 YANGH_SID=	-s ${.CURDIR}/yang/shapes@2026-10-13.sid \
 		-s ${.OBJDIR}/ietf-system.sid \
 		-s ${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
-SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c
+SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c yfill.c
 CFLAGS.yang_h_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yang_h_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 CLEANFILES+=	yangh.h yangh_schema.c ietf-system.sid

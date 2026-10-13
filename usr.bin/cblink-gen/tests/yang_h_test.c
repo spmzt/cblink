@@ -18,6 +18,7 @@
 #include <regex.h>
 
 #include "yangh.h"
+#include "yfill.h"
 
 ATF_TC_WITHOUT_HEAD(shapes);
 ATF_TC_BODY(shapes, tc)
@@ -367,6 +368,64 @@ ATF_TC_BODY(lookups, tc)
 	ATF_CHECK(cbl_yschema_node(ys, 1) == NULL);
 }
 
+/*
+ * Every struct of the tables, filled by them, through YANG-CBOR and
+ * back: three passes, every optional and only what must be.  And one
+ * filled by hand, its bytes as RFC 9254 has them.
+ */
+ATF_TC_WITHOUT_HEAD(roundtrip);
+ATF_TC_BODY(roundtrip, tc)
+{
+	/* RFC 9254's encoding, by the SIDs of RFC 9595's ietf-system. */
+	static const uint8_t want[] = {
+		0xa2,			/* system (1717) {		*/
+		0x15, 0xa1,		/*  +21 clock (1738) {		*/
+		0x02, 0x38, 0xd1,	/*   +2 timezone-utc-offset: -210 */
+		0x18, 0x23,		/*  }, +35 hostname (1752):	*/
+		0x65, 'e', 'd', 'g', 'e', '1',	/* "edge1" }		*/
+	};
+	struct ietf_system_system_clock clock = {
+		.timezone = IETF_SYSTEM_SYSTEM_CLOCK_TIMEZONE_TIMEZONE_UTC_OFFSET,
+		.has_timezone_utc_offset = true, .timezone_utc_offset = -210,
+	};
+	struct ietf_system_system sys = { .hostname = "edge1",
+	    .clock = &clock };
+	struct ietf_system_system back;
+	struct cbl_ybuf b = { 0 };
+	cbl_yarena *a;
+	char why[256];
+	size_t n = 0;
+
+	ATF_CHECK_EQ_MSG(0u, yround_all(ys, &n, why, sizeof(why)), "%s", why);
+	ATF_CHECK(n > 100);
+
+	/* system {clock {timezone-utc-offset -210}, hostname "edge1"}. */
+	ATF_REQUIRE_EQ(0, ietf_system_system_encode(&sys, &b));
+	ATF_CHECK_EQ(sizeof(want), b.len);
+	ATF_CHECK(b.len == sizeof(want) && memcmp(want, b.p, b.len) == 0);
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ_MSG(0, ietf_system_system_decode(b.p, b.len, &back,
+	    a, CBL_YD_STRICT, why, sizeof(why)), "%s", why);
+	ATF_CHECK_STREQ("edge1", back.hostname);
+	ATF_REQUIRE(back.clock != NULL);
+	ATF_CHECK(back.clock->timezone ==
+	    IETF_SYSTEM_SYSTEM_CLOCK_TIMEZONE_TIMEZONE_UTC_OFFSET);
+	ATF_CHECK(back.clock->has_timezone_utc_offset);
+	ATF_CHECK_EQ(-210, back.clock->timezone_utc_offset);
+	ATF_CHECK(back.ntp == NULL && back.contact == NULL);
+	/* A key it has no child for: refused strictly, skipped else. */
+	{
+		static const uint8_t extra[] = { 0xa1, 0x18, 0x63, 0xf6 };
+
+		ATF_CHECK(ietf_system_system_decode(extra, sizeof(extra),
+		    &back, a, CBL_YD_STRICT, why, sizeof(why)) != 0);
+		ATF_CHECK_EQ(0, ietf_system_system_decode(extra,
+		    sizeof(extra), &back, a, 0, why, sizeof(why)));
+	}
+	cbl_yarena_free(a);
+	cbl_ybuf_free(&b);
+}
+
 ATF_TC_WITHOUT_HEAD(identities);
 ATF_TC_BODY(identities, tc)
 {
@@ -426,5 +485,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, tables);
 	ATF_TP_ADD_TC(tp, identities);
 	ATF_TP_ADD_TC(tp, lookups);
+	ATF_TP_ADD_TC(tp, roundtrip);
 	return (atf_no_error());
 }

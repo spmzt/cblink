@@ -23,6 +23,12 @@
  * one.  XPath expressions (when, must, a
  * leafref's path) are the schema's, by number, as written: cbl_xpath
  * parses them where they are used.
+ *
+ * And where each node is in the C structs cblink-gen writes of the same
+ * modules (-m h): its member's offset in its parent's struct, its has_
+ * flag's, its own struct's size; a choice's enum member; a value's C
+ * size; so that one codec (cbl_yencode(), cbl_ydecode()) does every
+ * struct.
  */
 
 #include <stdbool.h>
@@ -85,10 +91,15 @@ struct cbl_yitem {
 #define	CBL_YTF_LEAFREF		0x01	/* a leafref: path is its own */
 #define	CBL_YTF_REQUIRE		0x02	/* require-instance */
 
+/* No member: a node that is not in its parent's struct, or no flag. */
+#define	CBL_YOFF_NONE		UINT32_MAX
+
 struct cbl_ytype {
 	uint8_t			 kind;		/* enum cbl_ytype_kind */
 	uint8_t			 flags;		/* CBL_YTF_* */
 	uint8_t			 fdigits;	/* decimal64 */
+	uint32_t		 csize;		/* a value's C size */
+	uint32_t		 voff;		/* union: where v is in its struct */
 	uint16_t		 npatterns;
 	uint16_t		 nmembers;
 	uint16_t		 nbases;
@@ -166,6 +177,7 @@ struct cbl_ychoice {
 	bool			 mandatory;
 	const struct cbl_ywhen	*when;		/* the choice's own */
 	uint16_t		 nwhen;
+	uint32_t		 off;		/* its enum member: case + 1, 0 none */
 };
 
 struct cbl_ymodule;
@@ -190,6 +202,9 @@ struct cbl_ynode {
 	uint32_t		 nmap;
 	uint32_t		 min;		/* list, leaf-list: min-elements */
 	uint32_t		 max;		/* and max-elements; 0: none */
+	uint32_t		 off;		/* its member in its parent's struct */
+	uint32_t		 hoff;		/* its has_ flag's, or NONE */
+	uint32_t		 size;		/* its own struct's: container, ... */
 	const struct cbl_ytype	*type;		/* leaf, leaf-list */
 	const struct cbl_ynode	*const *child;	/* by SID */
 	const uint16_t		*map;
@@ -230,6 +245,7 @@ struct cbl_ymodule {
 	uint64_t		 sid;
 	uint32_t		 ntop;
 	uint32_t		 nfeature;
+	uint32_t		 size;		/* its data's struct, 0: none */
 	/* Its data at the top, rpcs, notifications, structures: by SID. */
 	const struct cbl_ynode	*const *top;
 	const struct cbl_yfeature *feature;	/* by name, as the module */
@@ -266,5 +282,41 @@ const struct cbl_yident *cbl_yschema_ident(const struct cbl_yschema *s,
  */
 bool		 cbl_yderived_from(const struct cbl_yschema *s, uint64_t x,
 		    uint64_t base, bool self);
+
+/*
+ * YANG-CBOR (RFC 9254) of the structs cblink-gen writes, by the tables
+ * (cbl_ycodec.c).  A node's value is a map of its children keyed by
+ * their deltas from it: n is a container, a list entry, an input, an
+ * output, a notification or a structure, p its struct.
+ */
+struct cbl_ybuf {
+	uint8_t		*p;		/* realloc(3)ed */
+	size_t		 len;
+	size_t		 cap;
+};
+
+void		 cbl_ybuf_free(struct cbl_ybuf *b);
+
+/* What a decode allocates, freed in one. */
+typedef struct cbl_yarena cbl_yarena;
+
+cbl_yarena	*cbl_yarena_new(void);
+void		 cbl_yarena_free(cbl_yarena *a);
+
+/* n's value from its struct p, appended to b.  0, or an errno. */
+int		 cbl_yencode(const struct cbl_ynode *n, const void *p,
+		    struct cbl_ybuf *b);
+
+#define	CBL_YD_STRICT		0x01	/* a key of no child is an error */
+
+/*
+ * n's value from len bytes of data into p, zeroed, of n->size bytes;
+ * what it points to is a's.  0, or an errno and why (a's bytes then
+ * hold what was made so far, for cbl_yarena_free()).  It checks what
+ * the CBOR is; what the schema further says is the validator's.
+ */
+int		 cbl_ydecode(const struct cbl_ynode *n, const void *data,
+		    size_t len, void *p, cbl_yarena *a, int flags, char *why,
+		    size_t whylen);
 
 #endif /* !_CBL_SCHEMA_H_ */

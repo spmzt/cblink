@@ -42,6 +42,7 @@ struct ys {
 	struct diags	*d;
 	struct buf	 types;		/* type definitions, members first */
 	struct buf	 body;		/* the rest */
+	struct buf	 codec;		/* each struct's encoder and decoder */
 	struct pmap	 nodes;		/* snode -> its number */
 	struct pmap	 choices;	/* choice snode -> its number */
 	struct pmap	 mods;		/* smodule -> its number */
@@ -63,6 +64,7 @@ struct ys {
 static void	top_add(struct topn **, size_t *, size_t, uint64_t);
 static void	map_emit(struct ys *, size_t, const struct snode **, size_t,
 		    struct buf *);
+static bool	member_of(struct buf *, const struct snode *);
 static int	top_cmp(const void *, const void *);
 
 static size_t
@@ -258,8 +260,71 @@ type_key(struct buf *k, const struct sntype *t)
 }
 
 /* A type's number: made once, its members before it. */
+/*
+ * A value's C type, as gen_yang_h() declares it for a node whose struct
+ * name (the enum's, the union struct's) is cn.
+ */
+static void
+c_type(struct buf *b, const struct sntype *t, const char *cn)
+{
+
+	switch (t->base) {
+	case ST_BINARY:
+	case ST_BITS:
+	case ST_INSTANCEID:
+		buf_puts(b, "struct cbl_bytes");
+		break;
+	case ST_BOOLEAN:
+	case ST_EMPTY:
+		buf_puts(b, "bool");
+		break;
+	case ST_DECIMAL64:
+	case ST_INT64:
+		buf_puts(b, "int64_t");
+		break;
+	case ST_ENUMERATION:
+		buf_printf(b, "enum %s", cn);
+		break;
+	case ST_IDENTITYREF:
+	case ST_UINT64:
+		buf_puts(b, "uint64_t");
+		break;
+	case ST_INT8:
+		buf_puts(b, "int8_t");
+		break;
+	case ST_INT16:
+		buf_puts(b, "int16_t");
+		break;
+	case ST_INT32:
+		buf_puts(b, "int32_t");
+		break;
+	case ST_LEAFREF:
+		if (t->real != NULL)
+			c_type(b, t->real, cn);
+		else
+			buf_puts(b, "int");
+		break;
+	case ST_STRING:
+		buf_puts(b, "const char *");
+		break;
+	case ST_UINT8:
+		buf_puts(b, "uint8_t");
+		break;
+	case ST_UINT16:
+		buf_puts(b, "uint16_t");
+		break;
+	case ST_UINT32:
+		buf_puts(b, "uint32_t");
+		break;
+	case ST_UNION:
+		buf_printf(b, "struct %s", cn);
+		break;
+	}
+}
+
 static size_t
-type_ref(struct ys *y, const struct sntype *t, const char *where)
+type_ref(struct ys *y, const struct sntype *t, const char *where,
+    const char *cn)
 {
 	const struct sntype *real;
 	struct buf key, init, list;
@@ -282,8 +347,12 @@ type_ref(struct ys *y, const struct sntype *t, const char *where)
 	}
 	if (real != NULL && real->nmembers > 0) {
 		mem = xcalloc(real->nmembers, sizeof(*mem));
-		for (size_t i = 0; i < real->nmembers; i++)
-			mem[i] = type_ref(y, real->members[i], where);
+		for (size_t i = 0; i < real->nmembers; i++) {
+			char *mcn = xasprintf("%s_m%zu", cn, i);
+
+			mem[i] = type_ref(y, real->members[i], where, mcn);
+			free(mcn);
+		}
 	}
 	tn = y->ntypes++;
 	y->tkeys = xreallocarray(y->tkeys, y->ntypes, sizeof(*y->tkeys));
@@ -298,6 +367,13 @@ type_ref(struct ys *y, const struct sntype *t, const char *where)
 
 	buf_init(&init);
 	buf_printf(&init, "\t.kind = %s,\n", ytype_name[ytype_kind[real->base]]);
+	/* Its C size, as the structs have it; a union's v. */
+	buf_init(&list);
+	c_type(&list, real, cn);
+	buf_printf(&init, "\t.csize = sizeof(%s),\n", list.p);
+	if (real->base == ST_UNION)
+		buf_printf(&init, "\t.voff = offsetof(%s, v),\n", list.p);
+	buf_free(&list);
 	/* require-instance: a leafref's own, an instance-identifier's. */
 	if (t != real && t->require_instance)
 		buf_puts(&init, "\t.flags = CBL_YTF_LEAFREF | CBL_YTF_REQUIRE,\n");
@@ -517,6 +593,18 @@ choice_ref(struct ys *y, const struct snode *c)
 	}
 	buf_printf(&init, "\t.ncases = %zu,\n\t.cases = c%zu_c,\n"
 	    "\t.dflt = %d,\n", ncases, cn, dflt == SIZE_MAX ? -1 : (int)dflt);
+	/* Its enum, in the struct its nodes are members of. */
+	buf_init(&list);
+	if (member_of(&list, c)) {
+		struct buf mb;
+
+		buf_init(&mb);
+		yc_member(&mb, c);
+		buf_printf(&init, "\t.off = offsetof(%s, %s),\n", list.p, mb.p);
+		buf_free(&mb);
+	} else
+		buf_puts(&init, "\t.off = CBL_YOFF_NONE,\n");
+	buf_free(&list);
 	if (c->flags & SNF_MANDATORY)
 		buf_puts(&init, "\t.mandatory = true,\n");
 	if (c->nwhen > 0)
@@ -639,6 +727,80 @@ map_emit(struct ys *y, size_t nn, const struct snode **v, size_t n,
 	y->nmapped++;
 }
 
+/* The data node above n, past choices and cases; NULL at the top. */
+static const struct snode *
+data_parent(const struct snode *n)
+{
+	const struct snode *p = n->parent;
+
+	while (p != NULL && (p->kind == SN_CHOICE || p->kind == SN_CASE))
+		p = p->parent;
+	return (p);
+}
+
+/*
+ * The struct n is a member of, as gen_yang_h() writes it: its data
+ * parent's, its structure's, its module's data; false for a node that
+ * is in none (an rpc, an action, a notification, an input, an output),
+ * or under an rpc or an action itself.
+ */
+static bool
+member_of(struct buf *b, const struct snode *n)
+{
+	const struct snode *p;
+
+	switch (n->kind) {
+	case SN_CONTAINER:
+	case SN_LEAF:
+	case SN_LEAFLIST:
+	case SN_LIST:
+	case SN_ANYDATA:
+	case SN_ANYXML:
+	case SN_CHOICE:
+		break;
+	default:
+		return (false);
+	}
+	if ((p = data_parent(n)) != NULL) {
+		if (p->kind == SN_RPC || p->kind == SN_ACTION)
+			return (false);
+		buf_puts(b, "struct ");
+		yc_struct(b, p);
+	} else if (n->in != NULL) {
+		buf_puts(b, "struct ");
+		yc_mangle(b, n->in->module->name);
+		buf_puts(b, "_");
+		yc_mangle(b, n->in->arg);
+	} else {
+		buf_puts(b, "struct ");
+		yc_mangle(b, n->module->name);
+	}
+	return (true);
+}
+
+/* Whether n has a struct of its own. */
+static bool
+has_struct(const struct snode *n)
+{
+
+	return (n->kind == SN_CONTAINER || n->kind == SN_LIST ||
+	    n->kind == SN_NOTIF || n->kind == SN_INPUT || n->kind == SN_OUTPUT);
+}
+
+/* A struct's encoder and decoder: the codec with its node, nn. */
+static void
+codec_emit(struct ys *y, const char *sname, size_t nn)
+{
+
+	buf_printf(&y->codec, "int\n%s_encode(const struct %s *p, struct "
+	    "cbl_ybuf *b)\n{\n\n\treturn (cbl_yencode(&n%zu, p, b));\n}\n\n"
+	    "int\n%s_decode(const void *data, size_t len, struct %s *p,\n"
+	    "    cbl_yarena *a, int flags, char *why, size_t whylen)\n{\n\n"
+	    "\tmemset(p, 0, sizeof(*p));\n\treturn (cbl_ydecode(&n%zu, data, "
+	    "len, p, a, flags, why, whylen));\n}\n\n", sname, sname, nn, sname,
+	    sname, nn);
+}
+
 /* The path of n, for what is said about it. */
 static void
 where_of(struct buf *b, const struct snode *n)
@@ -676,9 +838,38 @@ node_ref(struct ys *y, const struct snode *n)
 	buf_printf(&init, ",\n\t.kind = %s,\n", ynode_kind[n->kind]);
 	if ((n->flags & 0x7f) != 0)
 		buf_printf(&init, "\t.flags = 0x%x,\n", n->flags & 0x7f);
-	if (n->type != NULL)
+	/* Where it is in the structs. */
+	buf_init(&list);
+	if (member_of(&list, n)) {
+		buf_init(&w);
+		yc_member(&w, n);
+		buf_printf(&init, "\t.off = offsetof(%s, %s),\n", list.p, w.p);
+		if (yc_has_flag(n))
+			buf_printf(&init, "\t.hoff = offsetof(%s, has_%s),\n",
+			    list.p, w.p);
+		else
+			buf_puts(&init, "\t.hoff = CBL_YOFF_NONE,\n");
+		buf_free(&w);
+	} else
+		buf_puts(&init, "\t.off = CBL_YOFF_NONE,\n"
+		    "\t.hoff = CBL_YOFF_NONE,\n");
+	buf_free(&list);
+	if (has_struct(n)) {
+		buf_init(&list);
+		yc_struct(&list, n);
+		buf_printf(&init, "\t.size = sizeof(struct %s),\n", list.p);
+		codec_emit(y, list.p, nn);
+		buf_free(&list);
+	}
+	if (n->type != NULL) {
+		struct buf cn;
+
+		buf_init(&cn);
+		yc_struct(&cn, n);
 		buf_printf(&init, "\t.type = &t%zu,\n", type_ref(y, n->type,
-		    where.p));
+		    where.p, cn.p));
+		buf_free(&cn);
+	}
 	(void)children_emit(y, nn, n->child, n->kind == SN_LIST ? n : NULL,
 	    &init);
 	if (n->nwhen > 0) {
@@ -904,7 +1095,19 @@ structure_emit(struct ys *y, const struct smodule *m, size_t mn,
 	buf_init(&init);
 	buf_printf(&init, "\t.sid = UINT64_C(%" PRIu64 "),\n\t.name = ", e->sid);
 	cstr(&init, e->arg);
-	buf_puts(&init, ",\n\t.kind = CBL_YN_STRUCTURE,\n");
+	buf_puts(&init, ",\n\t.kind = CBL_YN_STRUCTURE,\n"
+	    "\t.off = CBL_YOFF_NONE,\n\t.hoff = CBL_YOFF_NONE,\n");
+	{
+		struct buf sn;
+
+		buf_init(&sn);
+		yc_mangle(&sn, m->name);
+		buf_puts(&sn, "_");
+		yc_mangle(&sn, e->arg);
+		buf_printf(&init, "\t.size = sizeof(struct %s),\n", sn.p);
+		codec_emit(y, sn.p, nn);
+		buf_free(&sn);
+	}
 	(void)children_emit(y, nn, e->data, NULL, &init);
 	buf_printf(&y->body, "static const struct cbl_ynode n%zu = {\n%s"
 	    "\t.module = &m%zu,\n};\n\n", nn, init.p, mn);
@@ -940,6 +1143,7 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	struct kids k;
 
 	buf_init(&y.types);
+	buf_init(&y.codec);
 	buf_init(&y.body);
 	buf_init(&tops);
 	buf_init(&sizes);
@@ -1008,6 +1212,11 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		buf_puts(&tops, ",\n\t.prefix = ");
 		cstr(&tops, m->prefix);
 		buf_printf(&tops, ",\n\t.sid = UINT64_C(%" PRIu64 "),\n", m->sid);
+		if (m->data != NULL) {
+			buf_puts(&tops, "\t.size = sizeof(struct ");
+			yc_mangle(&tops, m->name);
+			buf_puts(&tops, "),\n");
+		}
 		if (ntop > 0)
 			buf_printf(&tops, "\t.ntop = %zu,\n\t.top = m%zu_t,\n",
 			    ntop, mn);
@@ -1069,9 +1278,11 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	    "search),\n * %zu types, %zu expressions, %zu identities, %zu "
 	    "bytes\n */\n\n"
 	    "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
-	    "#include <cbl_schema.h>\n\n", CBLGEN_VERSION, from,
+	    "#include <string.h>\n\n#include <cbl_schema.h>\n\n"
+	    "#include \"%s.h\"\n\n", CBLGEN_VERSION,
+	    from,
 	    sizes.p != NULL ? sizes.p : "", y.nnodes, y.ndense, y.nmapped,
-	    y.nsearched, y.ntypes, y.nxp, nident, total);
+	    y.nsearched, y.ntypes, y.nxp, nident, total, base);
 	/* Said when the tables are good: the file's comment, its lines. */
 	if (report != NULL && d->n == errs) {
 		for (const char *p = sizes.p; p != NULL && *p != '\0';) {
@@ -1127,6 +1338,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	    "\t.mod = mods,\n\t.node = nodes,\n\t.xpath = xpaths,\n"
 	    "\t.ident = idents,\n};\n",
 	    nm.p + 1, nm.p + 1, mn, y.nxp, nident, y.nall);
+	if (y.codec.len > 0)
+		buf_printf(out, "\n%s", y.codec.p);
 
 	for (i = 0; i < y.ntypes; i++)
 		free(y.tkeys[i]);
@@ -1142,6 +1355,7 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	free(y.mods.k);
 	free(y.mods.v);
 	buf_free(&y.types);
+	buf_free(&y.codec);
 	buf_free(&y.body);
 	buf_free(&tops);
 	buf_free(&idents);

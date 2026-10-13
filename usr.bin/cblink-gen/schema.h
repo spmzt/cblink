@@ -339,6 +339,16 @@ int		 gen_yang_h(struct schema *s, const char *base,
 		    const char *from, struct buf *out, struct diags *d);
 
 /*
+ * The C names gen_yang_h() gives: a name made C's, a node's struct (and
+ * the enum or union struct of its type), its member in its parent's,
+ * and whether a leaf has a has_ flag beside it.
+ */
+void		 yc_mangle(struct buf *b, const char *s);
+void		 yc_struct(struct buf *b, const struct snode *n);
+void		 yc_member(struct buf *b, const struct snode *n);
+bool		 yc_has_flag(const struct snode *n);
+
+/*
  * The schema tables (cbl_schema.h) of the modules gen_yang_h() makes
  * structs of, as base_schema.c (gen_yschema.c); what each module's
  * come to said on report too.  -1 and diagnostics for a node or an

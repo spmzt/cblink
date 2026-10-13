@@ -344,6 +344,21 @@ answers XPath's
 and, with
 .Fa self ,
 .Fn derived-from-or-self .
+.Fn cbl_yencode
+writes a node's value from the struct
+.Xr cblink-gen 1
+made for it as YANG-CBOR
+.Pq RFC 9254 ,
+its children keyed by their SID deltas, into a
+.Vt struct cbl_ybuf ;
+.Fn cbl_ydecode
+reads it back into such a struct, what it points to allocated from a
+.Vt cbl_yarena
+.Pq Fn cbl_yarena_new , Fn cbl_yarena_free ,
+and with
+.Dv CBL_YD_STRICT
+refuses a key the node has no child for.
+It checks what the CBOR is, not what the schema further says.
 .Sh LIMITS
 Every limit has a default, a minimum and a maximum, and applies per
 context, listener or connection

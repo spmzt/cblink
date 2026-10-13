@@ -154,7 +154,18 @@ The header declares
 .Va base Ns _schema ,
 the tables
 .Cm schema
-writes.
+writes, and for each struct but a module's data
+.Ft int
+.Fn struct_encode
+and
+.Fn struct_decode ,
+its value in YANG-CBOR and back, which
+.Cm schema
+defines with
+.Xr cblink 3 Ns 's
+.Fn cbl_yencode
+and
+.Fn cbl_ydecode .
 .It Cm schema
 .Ar base Ns _schema.c :
 the schema tables of the same modules, the structures of
@@ -185,6 +196,15 @@ files are given with
 .Fl s .
 What each module's tables come to, its trees with what other modules
 add to them, is printed and written at the top of the file.
+The tables also say where each node is in the structs of
+.Cm h :
+its member's offset, its
+.Ql has_
+flag's, its struct's size, written with
+.Fn offsetof
+and
+.Fn sizeof ,
+so that the two cannot differ.
 .It Cm md
 .Ar base Ns .md :
 a page of Markdown for each module named: its tree diagram, and a

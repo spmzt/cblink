@@ -155,6 +155,8 @@ scalar(const struct sntype *t)
 	}
 }
 
+static void	proto(void *, enum yc_handler, const struct snode *,
+		    const struct smodule *);
 static void	ctype(struct yg *g, struct buf *b, const struct sntype *t,
 		    const char *name, const char *uname);
 
@@ -548,8 +550,10 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 	    "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
 	    "#include <cbl_schema.h>\n#include <cblink.h>\n\n"
 	    "/* The schema tables, base_schema.c (-m schema). */\n"
-	    "extern const struct cbl_yschema %s_schema;\n\n", CBLGEN_VERSION,
-	    from, guard.p, guard.p, gname.p);
+	    "extern const struct cbl_yschema %s_schema;\n"
+	    "/* The server's handler table, base_server.c (-m server). */\n"
+	    "extern const struct cbl_yserver %s_server;\n\n", CBLGEN_VERSION,
+	    from, guard.p, guard.p, gname.p, gname.p);
 	if (g.fwd.len > 0)
 		buf_printf(out, "%s\n", g.fwd.p);
 	if (g.enums.len > 0)
@@ -562,6 +566,15 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 		buf_printf(out, "/*\n * Each struct's value in YANG-CBOR (RFC 9254) "
 		    "and back: cbl_yencode(),\n * cbl_ydecode() with its node "
 		    "(base_schema.c).\n */\n%s\n", g.codec.p);
+	/* The handlers a server defines, and the notifications' encoders. */
+	buf_init(&scratch);
+	yc_handlers(s, proto, &scratch);
+	if (scratch.len > 0)
+		buf_printf(out, "/*\n * A server's handlers (-m server, "
+		    "cbl_schema.h): the program defines\n * them; and each "
+		    "notification as {SID: value} (base_schema.c).\n */\n%s\n",
+		    scratch.p);
+	buf_free(&scratch);
 	buf_printf(out, "#endif /* !%s */\n", guard.p);
 
 	for (size_t i = 0; i < g.nnames; i++)
@@ -608,4 +621,98 @@ yc_has_flag(const struct snode *n)
 
 	return (n->kind == SN_LEAF && scalar(n->type) &&
 	    !(n->flags & SNF_KEY));
+}
+
+/*
+ * The nodes a server has handlers for, in the emitted modules: each
+ * top-level data node, rpc, action and notification, wherever in the
+ * trees, with the module whose data struct a top-level node is in.
+ */
+static void
+handler_walk(const struct snode *n, const struct smodule *m, bool top,
+    yc_handler_f *cb, void *arg)
+{
+
+	for (; n != NULL; n = n->next) {
+		if (n->flags & SNF_INTERNAL)
+			continue;
+		switch (n->kind) {
+		case SN_CHOICE:
+		case SN_CASE:
+			handler_walk(n->child, m, top, cb, arg);
+			continue;
+		case SN_RPC:
+			cb(arg, YH_RPC, n, m);
+			continue;
+		case SN_ACTION:
+			cb(arg, YH_ACTION, n, m);
+			continue;
+		case SN_NOTIF:
+			cb(arg, YH_NOTIF, n, m);
+			handler_walk(n->child, m, false, cb, arg);
+			continue;
+		default:
+			break;
+		}
+		if (top)
+			cb(arg, YH_DATA, n, m);
+		handler_walk(n->child, m, false, cb, arg);
+	}
+}
+
+void
+yc_handlers(const struct schema *s, yc_handler_f *cb, void *arg)
+{
+
+	for (size_t i = 0; i < s->nmods; i++) {
+		const struct smodule *m = s->mods[i];
+
+		if (!smodule_emitted(m))
+			continue;
+		handler_walk(m->data, m, true, cb, arg);
+		handler_walk(m->rpcs, m, false, cb, arg);
+		handler_walk(m->notifs, m, false, cb, arg);
+	}
+}
+
+/* The handler's prototype, for the program to define (-m server). */
+static void
+proto(void *arg, enum yc_handler kind, const struct snode *n,
+    const struct smodule *m)
+{
+	struct buf *b = arg, fn, in, out, md;
+	const struct snode *c;
+
+	buf_init(&fn);
+	buf_init(&in);
+	buf_init(&out);
+	buf_init(&md);
+	cname(&fn, n, false);
+	switch (kind) {
+	case YH_DATA:
+		mangle(&md, m->name, false);
+		buf_printf(b, "int\t%s_get(cbl_req *, struct %s *, "
+		    "cbl_yarena *);\n", fn.p, md.p);
+		if (n->flags & SNF_CONFIG)
+			buf_printf(b, "int\t%s_edit(cbl_req *, const struct %s "
+			    "*,\n\t    const struct %s *);\n", fn.p, md.p, md.p);
+		break;
+	case YH_RPC:
+	case YH_ACTION:
+		for (c = n->child; c != NULL; c = c->next)
+			cname(c->kind == SN_INPUT ? &in : &out, c, false);
+		buf_printf(b, "int\t%s_%s(cbl_req *, %sconst struct %s *,\n"
+		    "\t    struct %s *, cbl_yarena *);\n", fn.p, kind ==
+		    YH_RPC ? "rpc" : "action", kind == YH_ACTION ?
+		    "const struct cbl_bytes *,\n\t    " : "", in.p, out.p);
+		break;
+	case YH_NOTIF:
+		buf_printf(b, "int\t%s_notification(const struct %s *,\n"
+		    "\t    struct cbl_ybuf *);\n", fn.p, fn.p);
+		break;
+	}
+	buf_free(&fn);
+	buf_free(&in);
+	buf_free(&out);
+	buf_free(&md);
 }

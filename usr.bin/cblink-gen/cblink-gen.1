@@ -20,7 +20,7 @@
 .Op Fl adn
 .Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl b Ar base
-.Op Fl m Cm h , Ns Cm md , Ns Cm schema , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
+.Op Fl m Cm h , Ns Cm md , Ns Cm schema , Ns Cm server , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
 .Op Fl o Ar dir
 .Op Fl p Ar dir
 .Op Fl s Ar file.sid
@@ -166,6 +166,27 @@ defines with
 .Fn cbl_yencode
 and
 .Fn cbl_ydecode .
+.It Cm server
+.Ar base Ns _server.c :
+a server's handler table, the
+.Vt cbl_yserver
+.Va base Ns _server
+.Xr cblink 3
+serves the modules by: for each top-level data node
+.Fn node_get
+and, a configuration node,
+.Fn node_edit ;
+for each rpc
+.Fn rpc_rpc ,
+each action
+.Fn action_action ,
+which the program defines as the header declares them, the names
+those of the nodes' structs; and each notification's
+.Fn notification_notification ,
+which
+.Cm schema
+defines, writes it as
+.Brq SID : value .
 .It Cm schema
 .Ar base Ns _schema.c :
 the schema tables of the same modules, the structures of

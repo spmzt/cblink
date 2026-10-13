@@ -155,7 +155,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     bool check, bool dump)
 {
 	bool cbor = false, json = false, hdr = false, md = false, tree = false;
-	bool tables = false;
+	bool tables = false, server = false;
 	char *bname = NULL;
 	int dirfd = -1;
 	cap_rights_t rights;
@@ -229,16 +229,19 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 				md = true;
 			else if (n == 6 && strncmp(p, "schema", 6) == 0)
 				tables = true;
+			else if (n == 6 && strncmp(p, "server", 6) == 0)
+				server = true;
 			else
 				errx(2, "-m %.*s: not written for YANG yet; "
-				    "-m h,md,schema,sid,sidjson,tree are", (int)n,
-				    p);
+				    "-m h,md,schema,server,sid,sidjson,tree are",
+				    (int)n, p);
 			p += n + (p[n] == ',');
 		}
-		if (!cbor && !json && !hdr && !md && !tree && !tables)
+		if (!cbor && !json && !hdr && !md && !tree && !tables &&
+		    !server)
 			errx(2, "generating C from YANG is not written yet "
-			    "but for -m h,md,schema,sid,sidjson,tree; -n checks "
-			    "the modules, -d dumps them");
+			    "but for -m h,md,schema,server,sid,sidjson,tree; -n "
+			    "checks the modules, -d dumps them");
 		if ((cbor || json) && nsids == 0)
 			errx(2, "-m sid,sidjson: no -s file");
 		/* The outputs' name: -b, or the first module's. */
@@ -339,6 +342,20 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			buf_init(&b);
 			if (gen_yang_schema(s, base, d.file, &b, stdout,
 			    &d) != 0) {
+				diag_print(&d);
+				return (1);
+			}
+			if (write_file(dirfd, name, &b) != 0)
+				return (2);
+			buf_free(&b);
+			free(name);
+		}
+		if (server) {
+			struct buf b;
+			char *name = xasprintf("%s_server.c", base);
+
+			buf_init(&b);
+			if (gen_yang_server(s, base, d.file, &b, &d) != 0) {
 				diag_print(&d);
 				return (1);
 			}

@@ -46,15 +46,15 @@ for f in $mains; do
 	i=$((i + 1))
 done
 # shellcheck disable=SC2086
-"$gen" -m h,schema -b corpus -o "$tmp" -p . $sids $mains
+"$gen" -m h,schema,server -b corpus -o "$tmp" -p . $sids $mains
 printf '#include "corpus.h"\n' > "$tmp/use.c"
-for c in use.c corpus_schema.c; do
+for c in use.c corpus_schema.c corpus_server.c; do
 	cc -std=c23 -Wall -Wextra -Werror -Wshadow -Wcast-qual \
 	    -Wwrite-strings -Wmissing-variable-declarations -I"$inc" \
 	    -I"$tmp" -c "$tmp/$c" -o "$tmp/$c.o"
 done
 size "$tmp/corpus_schema.c.o"
-echo "$i modules: structs and tables compiled"
+echo "$i modules: structs, tables and the server's table compiled"
 
 cat > "$tmp/round.c" <<'EOF'
 #include <stdio.h>

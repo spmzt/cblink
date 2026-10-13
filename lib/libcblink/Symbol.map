@@ -210,4 +210,6 @@ CBLINK_1.0 {
 	cbl_yencode;
 	cbl_yarena_free;
 	cbl_yarena_new;
+	cbl_yencode_sid;
+	cbl_yarena_alloc;
 };

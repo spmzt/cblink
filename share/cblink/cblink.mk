@@ -14,8 +14,19 @@
 #	client	foo_client.c	client wrappers
 #	server	foo_server.c	server registration and reply helpers
 #
+# YANG modules are given instead as CBLINK_YANG, with their .sid files
+# (RFC 9595) as CBLINK_SIDS; cblink-gen(1) writes, named after the first
+# module or CBLINK_YANG_BASE, and adds to SRCS:
+#
+#	base.h		structs, their codec, the handlers' prototypes
+#	base_schema.c	the schema tables, the codec's wrappers
+#	base_server.c	the server's handler table (server in CBLINK_PARTS)
+#
 # Variables:
 #	CBLINK_SPECS	family specs (YAML): absolute, or relative to ${.CURDIR}
+#	CBLINK_YANG	YANG modules, name@revision.yang or name.yang, and
+#	CBLINK_SIDS	their .sid files: absolute, or relative to ${.CURDIR}
+#	CBLINK_YANG_BASE the outputs' name (default: the first module's)
 #	CBLINK_PARTS	comma-separated parts (default: h,c,client,server)
 #	CBLINK_GEN	the generator (default: ${LOCALBASE}/bin/cblink-gen)
 #	CBLINK_DOCS	"yes" to also generate foo.md
@@ -62,5 +73,24 @@ SRCS+=		${_spec:T:R}${_sfx}
 ${_spec:T:R}.h: ${_spec:C,^[^/],${.CURDIR}/&,} ${CBLINK_GEN}
 	${CBLINK_GEN} -m ${_cbl_m} -o ${.OBJDIR} ${.ALLSRC:[1]}
 .endfor
+
+.if !empty(CBLINK_YANG)
+_cbl_yb:=	${CBLINK_YANG_BASE:U${CBLINK_YANG:[1]:T:R:C/@.*//}}
+_cbl_ym:=	h,schema
+SRCS+=		${_cbl_yb}.h ${_cbl_yb}_schema.c
+CLEANFILES+=	${_cbl_yb}.h ${_cbl_yb}_schema.c
+.if ${_cbl_parts:Mserver}
+_cbl_ym:=	h,schema,server
+SRCS+=		${_cbl_yb}_server.c
+CLEANFILES+=	${_cbl_yb}_server.c
+${_cbl_yb}_server.c: ${_cbl_yb}.h
+.endif
+${_cbl_yb}_schema.c: ${_cbl_yb}.h
+_cbl_yang:=	${CBLINK_YANG:C,^[^/],${.CURDIR}/&,}
+_cbl_sids:=	${CBLINK_SIDS:C,^[^/],${.CURDIR}/&,}
+${_cbl_yb}.h: ${_cbl_yang} ${_cbl_sids} ${CBLINK_GEN}
+	${CBLINK_GEN} -m ${_cbl_ym} -b ${_cbl_yb} -o ${.OBJDIR} \
+	    ${_cbl_sids:S/^/-s /} ${_cbl_yang} > /dev/null
+.endif
 
 .endif	# !target(__<cblink.mk>__)

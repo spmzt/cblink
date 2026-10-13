@@ -63,6 +63,18 @@ cbl_yarena_free(cbl_yarena *a)
 	free(a);
 }
 
+void *
+cbl_yarena_alloc(cbl_yarena *a, size_t len)
+{
+	void *p;
+
+	if (a == NULL)
+		return (NULL);
+	if ((p = cbl_arena_alloc(&a->ar, len == 0 ? 1 : len)) != NULL)
+		memset(p, 0, len == 0 ? 1 : len);
+	return (p);
+}
+
 void
 cbl_ybuf_free(struct cbl_ybuf *b)
 {
@@ -396,6 +408,20 @@ cbl_yencode(const struct cbl_ynode *n, const void *p, struct cbl_ybuf *b)
 
 	if (n == NULL || p == NULL || b == NULL)
 		return (EINVAL);
+	return (enc_map(b, n, p, 0));
+}
+
+int
+cbl_yencode_sid(const struct cbl_ynode *n, const void *p, struct cbl_ybuf *b)
+{
+	int error;
+
+	if (n == NULL || p == NULL || b == NULL)
+		return (EINVAL);
+	/* Top-level keys are SIDs themselves (RFC 9254 section 3.2). */
+	if ((error = put_head(b, 5, 1)) != 0 ||
+	    (error = put_head(b, 0, n->sid)) != 0)
+		return (error);
 	return (enc_map(b, n, p, 0));
 }
 

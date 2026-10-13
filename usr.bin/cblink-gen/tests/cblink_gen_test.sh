@@ -311,7 +311,7 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang
 	# Without -m: C generation from YANG is not all written yet.
-	atf_check -s exit:2 -e match:'not written yet but for -m h,md,schema,sid,sidjson,tree' \
+	atf_check -s exit:2 -e match:'not written yet but for -m h,md,schema,server,sid,sidjson,tree' \
 	    $gen -o . "$y/good@2026-10-13.yang"
 }
 

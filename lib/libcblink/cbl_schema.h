@@ -35,6 +35,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <cblink.h>
+
 /* Built-in types, RFC 7950 section 4.2.4; a leafref has its target's. */
 enum cbl_ytype_kind {
 	CBL_YT_BINARY = 1,
@@ -302,9 +304,15 @@ typedef struct cbl_yarena cbl_yarena;
 
 cbl_yarena	*cbl_yarena_new(void);
 void		 cbl_yarena_free(cbl_yarena *a);
+/* len bytes, zeroed, a's until it is freed: for a handler's answer. */
+void		*cbl_yarena_alloc(cbl_yarena *a, size_t len);
 
 /* n's value from its struct p, appended to b.  0, or an errno. */
 int		 cbl_yencode(const struct cbl_ynode *n, const void *p,
+		    struct cbl_ybuf *b);
+
+/* {n's SID: its value}: a top-level node, a notification, on its own. */
+int		 cbl_yencode_sid(const struct cbl_ynode *n, const void *p,
 		    struct cbl_ybuf *b);
 
 #define	CBL_YD_STRICT		0x01	/* a key of no child is an error */
@@ -318,5 +326,35 @@ int		 cbl_yencode(const struct cbl_ynode *n, const void *p,
 int		 cbl_ydecode(const struct cbl_ynode *n, const void *data,
 		    size_t len, void *p, cbl_yarena *a, int flags, char *why,
 		    size_t whylen);
+
+/*
+ * A server's handlers for the nodes of its modules, by SID: cblink-gen
+ * -m server writes the table, the program the handlers, the library
+ * calls them.  data is the module's data struct; get fills its member
+ * for its node, edit makes the change from before to after of it (for
+ * config nodes); an rpc's or an action's in and out are its input's
+ * and output's structs, an action's target the instance-identifier, as
+ * YANG-CBOR, of the node it is on.  What they allocate is a's.  0, or an
+ * errno.
+ */
+typedef int	 cbl_yget_f(cbl_req *, void *data, cbl_yarena *a);
+typedef int	 cbl_yedit_f(cbl_req *, const void *before, const void *after);
+typedef int	 cbl_yrpc_f(cbl_req *, const void *in, void *out, cbl_yarena *a);
+typedef int	 cbl_yaction_f(cbl_req *, const struct cbl_bytes *target,
+		    const void *in, void *out, cbl_yarena *a);
+
+struct cbl_yhandler {
+	uint64_t		 sid;		/* its node's */
+	cbl_yget_f		*get;
+	cbl_yedit_f		*edit;
+	cbl_yrpc_f		*rpc;
+	cbl_yaction_f		*action;
+};
+
+struct cbl_yserver {
+	const struct cbl_yschema *schema;
+	uint32_t		 nhandler;
+	const struct cbl_yhandler *handler;	/* by SID */
+};
 
 #endif /* !_CBL_SCHEMA_H_ */

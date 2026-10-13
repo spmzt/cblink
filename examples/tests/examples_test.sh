@@ -148,10 +148,36 @@ notify_cleanup()
 	servers_stop
 }
 
+atf_test_case kvy
+kvy_head()
+{
+	atf_set "descr" "cbl-kvy: the kv example in YANG, its handlers" \
+	    "through cblink-gen's table, its store in YANG-CBOR and back"
+}
+kvy_body()
+{
+	K="$(atf_get_srcdir)/cbl-kvy"
+
+	[ -x "$K" ] || atf_skip "built without libyang: no cbl-kvy"
+	atf_check -o save:out "$K"
+	atf_check -o match:'^edit: 2 entries$' cat out
+	atf_check -o match:'^get: 2 entries, count 2$' cat out
+	# {+1 count: 2, +2 entry: [{+1 key: "alpha", ...}, ...]}
+	atf_check -o match:'^store: a2 01 02 02 82 a4 01 65 61 6c 70 68 61 ' \
+	    cat out
+	atf_check -o match:'^decoded: alpha ttl 60, beta persistent$' cat out
+	atf_check -o match:'^touch: ttl 300$' cat out
+	atf_check -o match:'^clear al: 1 removed, 1 left$' cat out
+	# {SID of changed: {+1 key: "beta", +2 what: deleted (1)}}
+	atf_check -o match:'^changed: a1 1b .* a2 01 64 62 65 74 61 02 01$' \
+	    cat out
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case echo
 	atf_add_test_case kv
+	atf_add_test_case kvy
 	atf_add_test_case stream
 	atf_add_test_case notify
 }

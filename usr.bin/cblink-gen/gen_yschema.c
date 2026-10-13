@@ -859,6 +859,12 @@ node_ref(struct ys *y, const struct snode *n)
 		yc_struct(&list, n);
 		buf_printf(&init, "\t.size = sizeof(struct %s),\n", list.p);
 		codec_emit(y, list.p, nn);
+		/* A notification as a server sends it: {SID: value}. */
+		if (n->kind == SN_NOTIF)
+			buf_printf(&y->codec, "int\n%s_notification(const struct "
+			    "%s *p, struct cbl_ybuf *b)\n{\n\n\treturn "
+			    "(cbl_yencode_sid(&n%zu, p, b));\n}\n\n", list.p,
+			    list.p, nn);
 		buf_free(&list);
 	}
 	if (n->type != NULL) {

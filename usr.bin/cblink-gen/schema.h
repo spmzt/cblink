@@ -343,6 +343,21 @@ int		 gen_yang_h(struct schema *s, const char *base,
  * the enum or union struct of its type), its member in its parent's,
  * and whether a leaf has a has_ flag beside it.
  */
+/*
+ * The nodes a server has handlers for (-m server): a top-level data
+ * node's get and edit, an rpc's, an action's, a notification's encoder;
+ * m the module whose data struct a top-level node is a member of.
+ */
+enum yc_handler {
+	YH_DATA,
+	YH_RPC,
+	YH_ACTION,
+	YH_NOTIF,
+};
+typedef void	 yc_handler_f(void *arg, enum yc_handler kind,
+		    const struct snode *n, const struct smodule *m);
+void		 yc_handlers(const struct schema *s, yc_handler_f *cb,
+		    void *arg);
 void		 yc_mangle(struct buf *b, const char *s);
 void		 yc_struct(struct buf *b, const struct snode *n);
 void		 yc_member(struct buf *b, const struct snode *n);
@@ -357,6 +372,14 @@ bool		 yc_has_flag(const struct snode *n);
 int		 gen_yang_schema(struct schema *s, const char *base,
 		    const char *from, struct buf *out, FILE *report,
 		    struct diags *d);
+
+/*
+ * The server's handler table (cbl_schema.h) of the same modules, as
+ * base_server.c (gen_yserver.c).  -1 and diagnostics for a node
+ * without a SID.
+ */
+int		 gen_yang_server(struct schema *s, const char *base,
+		    const char *from, struct buf *out, struct diags *d);
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);

@@ -17,7 +17,16 @@
  * (rw), state (ro), empty (an input or output without children, which
  * a compiled rpc or action always has), mandatory, key, presence,
  * user-ordered, deprecated, obsolete.  A node defined in a grouping is
- * listed wherever the grouping is used.  Each module is preceded by its features and the modules
+ * listed wherever the grouping is used.
+ *
+ * Extension instances (step 0.2.3) each get a line,
+ *
+ *	owner extension where module:extension [argument] [inherited]
+ *
+ * where is the node's path, or the module's name for one at the top of
+ * a module; inherited, a copy libyang made from an ancestor's.  The data nodes an instance holds (sx:structure, rc:yang-data;
+ * an sx:augment-structure's nodes, put into the structure it augments)
+ * follow it, their paths prefixed with "{extension argument}".  Each module is preceded by its features and the modules
  * that deviate it.
  *
  *	yangwalk -p dir module.yang ...
@@ -31,8 +40,12 @@
 #include <unistd.h>
 
 #include <libyang/libyang.h>
+#include <libyang/plugins_exts.h>
 
+static void	expr_print(const char *, const char *);
 static void	type_print(const struct lysc_type *);
+static void	exts_print(struct lysc_ext_instance *, const char *,
+		    const char *);
 
 /* The names of LY_DATA_TYPE, which libyang keeps unexported. */
 static const char *const type_names[] = {
@@ -129,8 +142,9 @@ type_print(const struct lysc_type *t)
 			    idr->bases[u]->name);
 		break;
 	case LY_TYPE_LEAFREF:
-		printf(" path '%s'%s -> ", lyxp_get_expr(lr->path),
-		    lr->require_instance ? "" : " (no instance required)");
+		expr_print("path", lyxp_get_expr(lr->path));
+		printf("%s -> ", lr->require_instance ? "" :
+		    " (no instance required)");
 		type_print(lr->realtype);
 		break;
 	case LY_TYPE_INST:
@@ -149,6 +163,26 @@ type_print(const struct lysc_type *t)
 	default:
 		break;
 	}
+}
+
+/* An XPath expression on one line: its runs of white space as one space. */
+static void
+expr_print(const char *what, const char *x)
+{
+	bool space = false;
+
+	printf(" %s \"", what);
+	for (; *x != '\0'; x++) {
+		if (*x == ' ' || *x == '\t' || *x == '\n' || *x == '\r') {
+			space = true;
+			continue;
+		}
+		if (space)
+			putchar(' ');
+		space = false;
+		putchar(*x);
+	}
+	printf("\"");
 }
 
 /* The keyword of a node kind, as YANG writes it. */
@@ -175,8 +209,9 @@ kind_name(uint16_t nodetype)
 }
 
 static LY_ERR
-node_print(struct lysc_node *n, void *arg __unused, ly_bool *cont __unused)
+node_print(struct lysc_node *n, void *arg, ly_bool *cont __unused)
 {
+	const char *in = arg;
 	struct lysc_when **when;
 	struct lysc_must *must;
 	const struct lysc_type *t = NULL;
@@ -185,9 +220,8 @@ node_print(struct lysc_node *n, void *arg __unused, ly_bool *cont __unused)
 
 	if ((path = lysc_path(n, LYSC_PATH_LOG, NULL, 0)) == NULL)
 		err(1, "lysc_path");
-	printf("%s %s %s", n->module->name, kind_name(n->nodetype),
-	    path);
-	free(path);
+	printf("%s %s %s%s", n->module->name, kind_name(n->nodetype),
+	    in != NULL ? in : "", path);
 	if ((n->nodetype & (LYS_RPC | LYS_ACTION | LYS_NOTIF | LYS_INPUT |
 	    LYS_OUTPUT)) == 0)
 		printf(" %s", (n->flags & LYS_CONFIG_W) != 0 ? "rw" : "ro");
@@ -221,12 +255,50 @@ node_print(struct lysc_node *n, void *arg __unused, ly_bool *cont __unused)
 	}
 	when = lysc_node_when(n);
 	LY_ARRAY_FOR(when, u)
-		printf(" when \"%s\"", lyxp_get_expr(when[u]->cond));
+		expr_print("when", lyxp_get_expr(when[u]->cond));
 	must = lysc_node_musts(n);
 	LY_ARRAY_FOR(must, u)
-		printf(" must \"%s\"", lyxp_get_expr(must[u].cond));
+		expr_print("must", lyxp_get_expr(must[u].cond));
 	printf("\n");
+	exts_print(n->exts, n->module->name, path);
+	free(path);
 	return (LY_SUCCESS);
+}
+
+/*
+ * Each extension instance of a node or a module, and the data nodes it
+ * holds, if any.  An instance libyang copied down from an ancestor (the
+ * NACM plugin does, for default-deny-*) has no module of its own: it is
+ * said to be inherited, under the node's module.
+ */
+static void
+exts_print(struct lysc_ext_instance *exts, const char *owner,
+    const char *where)
+{
+	const struct lysc_node *first, *n;
+	char in[256];
+	LY_ARRAY_COUNT_TYPE u;
+
+	LY_ARRAY_FOR(exts, u) {
+		const struct lysc_ext_instance *e = &exts[u];
+
+		printf("%s extension %s %s:%s%s%s%s\n", e->module != NULL ?
+		    e->module->name : owner, where, e->def->module->name,
+		    e->def->name, e->argument != NULL ? " " : "",
+		    e->argument != NULL ? e->argument : "",
+		    e->module == NULL ? " inherited" : "");
+		first = NULL;
+		if (lyplg_ext_get_storage(e, LY_STMT_DATA_NODE_MASK,
+		    sizeof(first), (const void **)&first) != LY_SUCCESS ||
+		    first == NULL)
+			continue;
+		snprintf(in, sizeof(in), "{%s:%s %s}", e->def->module->name,
+		    e->def->name, e->argument != NULL ? e->argument : "");
+		for (n = first; n != NULL; n = n->next)
+			if (lysc_tree_dfs_full(n, node_print, in) !=
+			    LY_SUCCESS)
+				errx(1, "%s: walk failed", in);
+	}
 }
 
 static void
@@ -245,6 +317,7 @@ module_print(const struct lys_module *m)
 		printf("deviated-by %s\n", m->deviated_by[u]->name);
 	if (lysc_module_dfs_full(m, node_print, NULL) != LY_SUCCESS)
 		errx(1, "%s: walk failed", m->name);
+	exts_print(m->compiled->exts, m->name, m->name);
 }
 
 int

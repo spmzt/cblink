@@ -43,7 +43,7 @@ for f in $mains; do
 	n=$((n + 1))
 
 	# The compiled tree of m: by the first step of each path.
-	awk -v m="$m" 'index($3, "/" m ":") == 1 &&
+	awk -v m="$m" '$2 != "extension" && index($3, "/" m ":") == 1 &&
 	    !(($2 == "input" || $2 == "output") && $4 == "empty") {
 	    k = split($3, p, "/");
 	    s = p[k]; sub(/^[^:]*:/, "", s); print $2, s }' "$tmp/walk" |
@@ -68,7 +68,8 @@ for f in $mains; do
 	fi
 
 	# What m defines, by the walk's owner, against the tree.
-	awk -v m="$m" '$1 == m && $3 !~ /^\/ietf-netconf:rpc-error/ {
+	awk -v m="$m" '$1 == m && $2 != "extension" &&
+	    $3 !~ /^\/ietf-netconf:rpc-error/ {
 	    k = split($3, p, "/"); s = p[k];
 	    sub(/^[^:]*:/, "", s); print s }' "$tmp/walk" | sort -u > "$tmp/c"
 	yanglint -i -p . -f tree "$f" | awk '
@@ -84,7 +85,8 @@ for f in $mains; do
 		fail=1
 	fi
 done
-nodes=$(grep -vc '^module \|^feature \|^deviated-by ' "$tmp/walk")
+nodes=$(awk '$2 != "extension" && $3 ~ /^\// && $1 != "module" &&
+    $1 != "feature" && $1 != "deviated-by"' "$tmp/walk" | wc -l)
 [ $fail -eq 0 ] && echo "$n modules, $nodes nodes: the walk agrees with" \
     "yanglint's compiled schema and its trees"
 exit $fail

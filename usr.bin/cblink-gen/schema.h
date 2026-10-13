@@ -237,6 +237,10 @@ bool		 sntype_signed(enum sntype_base base);
 typedef void	snode_visit_t(struct snode *n, void *arg);
 void		 schema_walk(struct schema *s, snode_visit_t *visit, void *arg);
 
+struct diags;
+/* Every XPath expression parsed; the count, problems added to d. */
+size_t		 schema_check_xpath(struct schema *s, struct diags *d);
+
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);
 

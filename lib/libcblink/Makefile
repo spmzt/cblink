@@ -29,7 +29,8 @@ SRCS=		cbl_arena.c \
 		cbl_sock.c \
 		cbl_stream.c \
 		cbl_tls.c \
-		cbl_uri.c
+		cbl_uri.c \
+		cbl_xpath.c
 
 VERSION_DEF=	${.CURDIR}/Versions.def
 SYMBOL_MAPS=	${.CURDIR}/Symbol.map

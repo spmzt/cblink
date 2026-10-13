@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cbl_xpath.h"
 #include "gen.h"
 #include "schema.h"
 
@@ -445,6 +446,75 @@ dump_node(struct snode *n, void *arg __unused)
 	printf("\n");
 	dump_exts(n->exts, n->nexts, n->module->name, b.p);
 	buf_free(&b);
+}
+
+/*
+ * Every XPath expression of the model (when, must, a leafref's path)
+ * parsed; those that do not parse are diagnostics, at the node.
+ */
+struct xpcheck {
+	struct diags	*d;
+	size_t		 n;
+};
+
+static void
+xp_one(struct xpcheck *c, const struct snode *n, const char *what,
+    const char *expr)
+{
+	struct cbl_xp *x;
+	struct buf b;
+	char err[256];
+	size_t pos;
+
+	c->n++;
+	if ((x = cbl_xp_parse(expr, err, sizeof(err), &pos)) != NULL) {
+		cbl_xp_free(x);
+		return;
+	}
+	buf_init(&b);
+	path_add(&b, n);
+	diag_add(c->d, 0, 0, "%s: %s \"%s\": %s at offset %zu", b.p, what,
+	    expr, err, pos);
+	buf_free(&b);
+}
+
+static void
+xp_type(struct xpcheck *c, const struct snode *n, const struct sntype *t)
+{
+
+	if (t == NULL)
+		return;
+	if (t->path != NULL)
+		xp_one(c, n, "path", t->path);
+	xp_type(c, n, t->real);
+	for (size_t i = 0; i < t->nmembers; i++)
+		xp_type(c, n, t->members[i]);
+}
+
+static void
+xp_node(struct snode *n, void *arg)
+{
+	struct xpcheck *c = arg;
+
+	for (size_t i = 0; i < n->nwhen; i++)
+		xp_one(c, n, "when", n->when[i]);
+	for (size_t i = 0; i < n->nmusts; i++)
+		xp_one(c, n, "must", n->musts[i].expr);
+	xp_type(c, n, n->type);
+	for (size_t i = 0; i < n->nexts; i++)
+		walk(n->exts[i].data, xp_node, arg);
+}
+
+size_t
+schema_check_xpath(struct schema *s, struct diags *d)
+{
+	struct xpcheck c = { .d = d };
+
+	schema_walk(s, xp_node, &c);
+	for (size_t i = 0; i < s->nmods; i++)
+		for (size_t j = 0; j < s->mods[i]->nexts; j++)
+			walk(s->mods[i]->exts[j].data, xp_node, &c);
+	return (c.n);
 }
 
 void

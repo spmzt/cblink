@@ -98,7 +98,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	struct schema *s;
 	struct ly_ctx *ctx;
 	char *pathcopy;
-	size_t nodes = 0, nmods = 0;
+	size_t nodes = 0, nmods = 0, nexprs;
 	int fd;
 
 	const char **dirs;
@@ -130,6 +130,12 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		return (1);
 	}
 	s = yang_schema(ctx);
+	nexprs = schema_check_xpath(s, &d);
+	if (d.n > 0) {
+		diag_print(&d);
+		schema_free(s);
+		return (1);
+	}
 	if (dump)
 		schema_dump(s);
 	else if (check) {
@@ -137,8 +143,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			nmods += s->mods[i]->implemented;
 		schema_walk(s, count_node, &nodes);
 		printf("%s: compiled, %zu modules implemented, %zu schema "
-		    "nodes\n", argc == 1 ? d.file : "the modules", nmods,
-		    nodes);
+		    "nodes, %zu XPath expressions\n", argc == 1 ? d.file :
+		    "the modules", nmods, nodes, nexprs);
 	} else
 		errx(2, "generating C from YANG is not written yet; -n "
 		    "checks the modules, -d dumps them");

@@ -24,6 +24,10 @@ CBLINK_GEN_LIBYANG=	no
 .error CBLINK_GEN_LIBYANG=yes, but libyang is not in ${LOCALBASE}: pkg install libyang3
 .endif
 SRCS+=		schema.c yang.c
+# The XPath parser is libcblink's, compiled in.
+.PATH:		${.CURDIR}/../../lib/libcblink
+SRCS+=		cbl_xpath.c
+CFLAGS+=	-I${.CURDIR}/../../lib/libcblink
 CFLAGS+=	-DCBLINK_GEN_LIBYANG -idirafter ${LOCALBASE}/include
 LDADD+=		-L${LOCALBASE}/lib -lyang
 .endif

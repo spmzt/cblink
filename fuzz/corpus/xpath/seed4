@@ -1,0 +1,1 @@
+count(../address) > 0 and re-match(., '[a-z]+')

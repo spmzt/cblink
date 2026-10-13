@@ -1,0 +1,267 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "cblink",
+    "module-revision": "2026-10-13",
+    "sid-file-version": 0,
+    "sid-file-status": "unpublished",
+    "description": "SIDs of cblink, assigned by hand from Arcana's provisional block (2^40, until IANA assigns a mega-range): numbers are forever, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-types",
+        "module-revision": "2013-07-15"
+      },
+      {
+        "module-name": "ietf-yang-structure-ext",
+        "module-revision": "2020-06-17"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "1099511627776",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "cblink",
+        "sid": "1099511627776"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "error-tag",
+        "sid": "1099511627777"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "in-use",
+        "sid": "1099511627778"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "invalid-value",
+        "sid": "1099511627779"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "too-big",
+        "sid": "1099511627780"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "missing-attribute",
+        "sid": "1099511627781"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "bad-attribute",
+        "sid": "1099511627782"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "unknown-attribute",
+        "sid": "1099511627783"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "missing-element",
+        "sid": "1099511627784"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "bad-element",
+        "sid": "1099511627785"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "unknown-element",
+        "sid": "1099511627786"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "unknown-namespace",
+        "sid": "1099511627787"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "access-denied",
+        "sid": "1099511627788"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "lock-denied",
+        "sid": "1099511627789"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "resource-denied",
+        "sid": "1099511627790"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "rollback-failed",
+        "sid": "1099511627791"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "data-exists",
+        "sid": "1099511627792"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "data-missing",
+        "sid": "1099511627793"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "operation-not-supported",
+        "sid": "1099511627794"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "operation-failed",
+        "sid": "1099511627795"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "partial-operation",
+        "sid": "1099511627796"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "malformed-message",
+        "sid": "1099511627797"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error",
+        "sid": "1099511627798"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-type",
+        "sid": "1099511627799"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-tag",
+        "sid": "1099511627800"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-app-tag",
+        "sid": "1099511627801"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-path",
+        "sid": "1099511627802"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-message",
+        "sid": "1099511627803"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/error-info",
+        "sid": "1099511627804"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/errno",
+        "sid": "1099511627805"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:error/cookie",
+        "sid": "1099511627806"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:credit",
+        "sid": "1099511627807"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:credit/increment",
+        "sid": "1099511627808"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello",
+        "sid": "1099511627809"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits",
+        "sid": "1099511627810"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits/max-frame",
+        "sid": "1099511627811"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits/max-depth",
+        "sid": "1099511627812"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits/max-attrs",
+        "sid": "1099511627813"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits/max-streams",
+        "sid": "1099511627814"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/limits/stream-window",
+        "sid": "1099511627815"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/implementation",
+        "sid": "1099511627816"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:hello/content-id",
+        "sid": "1099511627817"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:close",
+        "sid": "1099511627818"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:close/code",
+        "sid": "1099511627819"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:close/message",
+        "sid": "1099511627820"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:notification",
+        "sid": "1099511627821"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:notification/event-time",
+        "sid": "1099511627822"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:notification/event",
+        "sid": "1099511627823"
+      }
+    ]
+  }
+}

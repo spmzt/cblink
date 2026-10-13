@@ -1,0 +1,435 @@
+module cblink {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:cblink";
+  prefix cbl;
+
+  import ietf-yang-types {
+    prefix yang;
+    reference
+      "RFC 6991: Common YANG Data Types";
+  }
+  import ietf-yang-structure-ext {
+    prefix sx;
+    reference
+      "RFC 8791: YANG Data Structure Extensions";
+  }
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "The framework data of cblink's wire version 2.
+
+     A version 2 body is one YANG-CBOR map (RFC 9254) whose top-level
+     keys are absolute SIDs.  What version 1 carried under negative
+     framework keys (CODE, MSG, PATH, COOKIE, MISS_TYPE, CREDIT) and in
+     the control family's hello is defined here as YANG data structures
+     (RFC 8791), so that a frame's framework items are typed and keyed
+     by SID like any other data: an error, the credit of a stream, the
+     limits exchanged at hello, the code and text of a stream's close,
+     and the envelope of a notification.
+
+     The frame header (24 bytes: magic, version, header length, length,
+     family, command, flags, sequence number, stream id) is not YANG
+     and is not modelled here.";
+
+  revision 2026-10-13 {
+    description
+      "Initial revision.";
+    reference
+      "cblink docs/WIRE-FORMAT.md; Arcana docs/PLAN-SDN-YANG.md,
+       'cblink 2: the protocol'.";
+  }
+
+  /*
+   * Error tags
+   */
+
+  identity error-tag {
+    description
+      "The base of the error tags of RFC 6241, Appendix A.  Each
+       names, in its reference, the HTTP status RFC 8040 maps it to,
+       for a console that answers RESTCONF.";
+    reference
+      "RFC 6241: Network Configuration Protocol (NETCONF),
+       Appendix A;
+       RFC 8040: RESTCONF Protocol, Section 7";
+  }
+
+  identity in-use {
+    base error-tag;
+    description
+      "The resource is in use.";
+    reference
+      "RFC 8040, Section 7: 409 Conflict";
+  }
+
+  identity invalid-value {
+    base error-tag;
+    description
+      "A value in the request is not acceptable.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request, 404 Not Found or
+       406 Not Acceptable";
+  }
+
+  identity too-big {
+    base error-tag;
+    description
+      "The request or the reply is too large to handle
+       (max-frame, max-depth or max-attrs).";
+    reference
+      "RFC 8040, Section 7: 413 Request Entity Too Large, or
+       400 Bad Request for a reply";
+  }
+
+  identity missing-attribute {
+    base error-tag;
+    description
+      "An expected attribute is missing.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity bad-attribute {
+    base error-tag;
+    description
+      "An attribute value is not correct.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity unknown-attribute {
+    base error-tag;
+    description
+      "An unexpected attribute is present.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity missing-element {
+    base error-tag;
+    description
+      "An expected element is missing: version 1's MISS_TYPE.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity bad-element {
+    base error-tag;
+    description
+      "An element value is not correct.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity unknown-element {
+    base error-tag;
+    description
+      "An unexpected element is present: an unknown SID in an
+       edit.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity unknown-namespace {
+    base error-tag;
+    description
+      "An unexpected namespace is present: a SID of a module the
+       receiver does not implement.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  identity access-denied {
+    base error-tag;
+    description
+      "Access to the requested data or operation is denied.";
+    reference
+      "RFC 8040, Section 7: 401 Unauthorized or 403 Forbidden";
+  }
+
+  identity lock-denied {
+    base error-tag;
+    description
+      "A lock is held by another connection.";
+    reference
+      "RFC 8040, Section 7: 409 Conflict";
+  }
+
+  identity resource-denied {
+    base error-tag;
+    description
+      "The request could not be completed for lack of resources.";
+    reference
+      "RFC 8040, Section 7: 409 Conflict";
+  }
+
+  identity rollback-failed {
+    base error-tag;
+    description
+      "A rollback was requested and failed.";
+    reference
+      "RFC 8040, Section 7: 500 Internal Server Error";
+  }
+
+  identity data-exists {
+    base error-tag;
+    description
+      "The data to be created exists already.";
+    reference
+      "RFC 8040, Section 7: 409 Conflict";
+  }
+
+  identity data-missing {
+    base error-tag;
+    description
+      "The data to be changed or deleted does not exist.";
+    reference
+      "RFC 8040, Section 7: 409 Conflict";
+  }
+
+  identity operation-not-supported {
+    base error-tag;
+    description
+      "The operation is not supported by this implementation.";
+    reference
+      "RFC 8040, Section 7: 405 Method Not Allowed or
+       501 Not Implemented";
+  }
+
+  identity operation-failed {
+    base error-tag;
+    description
+      "The operation failed for a reason no other tag covers.";
+    reference
+      "RFC 8040, Section 7: 412 Precondition Failed or
+       500 Internal Server Error";
+  }
+
+  identity partial-operation {
+    base error-tag;
+    status obsolete;
+    description
+      "Obsolete in RFC 6241; never sent.";
+    reference
+      "RFC 8040, Section 7: 500 Internal Server Error";
+  }
+
+  identity malformed-message {
+    base error-tag;
+    description
+      "The frame was malformed: bad CBOR, or a body outside the
+       strict profile.";
+    reference
+      "RFC 8040, Section 7: 400 Bad Request";
+  }
+
+  /*
+   * Types
+   */
+
+  typedef errno {
+    type uint32 {
+      range "1..max";
+    }
+    description
+      "An error number of FreeBSD's errno(2), kept beside the error
+       tag for C programs and arcanactl.";
+  }
+
+  typedef text {
+    type string {
+      length "0..1024";
+    }
+    description
+      "A human-readable message, at most CBL_ERRMSG_MAX characters.";
+  }
+
+  /*
+   * Structures
+   */
+
+  sx:structure error {
+    description
+      "The body of an ERROR frame, or of an acknowledgement that
+       carries a cookie: one error with the fields of RFC 8040's
+       'errors' list entry, plus the errno and the cookie that
+       version 1 sent under CODE and COOKIE.";
+    reference
+      "RFC 8040: RESTCONF Protocol, Section 8 (ietf-restconf,
+       yang-errors)";
+    leaf error-type {
+      type enumeration {
+        enum transport {
+          description
+            "The transport layer.";
+        }
+        enum rpc {
+          description
+            "The rpc or notification layer.";
+        }
+        enum protocol {
+          description
+            "The protocol operation layer.";
+        }
+        enum application {
+          description
+            "The server application layer.";
+        }
+      }
+      mandatory true;
+      description
+        "The layer where the error occurred.";
+    }
+    leaf error-tag {
+      type identityref {
+        base error-tag;
+      }
+      mandatory true;
+      description
+        "The error tag.";
+    }
+    leaf error-app-tag {
+      type string;
+      description
+        "The application-specific error tag.";
+    }
+    leaf error-path {
+      type instance-identifier {
+        require-instance false;
+      }
+      description
+        "The node the error is about: version 1's PATH, in the same
+         array shape on the wire (a SID, or a SID with keys).";
+    }
+    leaf error-message {
+      type text;
+      description
+        "The message: version 1's MSG.";
+    }
+    anydata error-info {
+      description
+        "Further, error-specific data.";
+    }
+    leaf errno {
+      type errno;
+      description
+        "The errno(2) value: version 1's CODE.";
+    }
+    leaf cookie {
+      type binary {
+        length "0..256";
+      }
+      description
+        "Opaque data for the requester, as netlink's extended ack
+         allows on success too: version 1's COOKIE.";
+    }
+  }
+
+  sx:structure credit {
+    description
+      "The body of an S_CREDIT frame: more window for the sender of
+       a stream.";
+    reference
+      "cblink docs/STREAMS.md, 'Flow control'";
+    leaf increment {
+      type uint32 {
+        range "1..max";
+      }
+      units "octets";
+      mandatory true;
+      description
+        "The bytes the receiver grants in addition to what is left:
+         version 1's CREDIT.";
+    }
+  }
+
+  sx:structure hello {
+    description
+      "The limits and the implementation each end announces when a
+       connection starts, and the content-id of the YANG library it
+       implements.";
+    container limits {
+      description
+        "Receive limits of the announcing endpoint.";
+      leaf max-frame {
+        type uint64;
+        units "octets";
+        description
+          "The largest frame accepted, header included.";
+      }
+      leaf max-depth {
+        type uint32;
+        description
+          "The deepest nesting of a body accepted.";
+      }
+      leaf max-attrs {
+        type uint32;
+        description
+          "The most values in one body accepted.";
+      }
+      leaf max-streams {
+        type uint32;
+        description
+          "The most streams open at once.";
+      }
+      leaf stream-window {
+        type uint32;
+        units "octets";
+        description
+          "The default window of a stream.";
+      }
+    }
+    leaf implementation {
+      type string {
+        length "1..63";
+      }
+      description
+        "Implementation name and version.";
+    }
+    leaf content-id {
+      type string;
+      description
+        "The content-id of the announcing end's YANG library, which
+         changes when its modules, features or deviations do.";
+      reference
+        "RFC 8525: YANG Library, 'content-id'";
+    }
+  }
+
+  sx:structure close {
+    description
+      "The body of an S_CLOSE or S_RESET frame: why a stream ends.";
+    leaf code {
+      type uint32;
+      description
+        "0 for a normal close, otherwise an errno(2) value.";
+    }
+    leaf message {
+      type text;
+      description
+        "A human-readable reason.";
+    }
+  }
+
+  sx:structure notification {
+    description
+      "The envelope of a NOTIFY frame: when the event happened, and
+       the event itself, the data of a YANG notification.";
+    reference
+      "RFC 8040: RESTCONF Protocol, Section 6.4";
+    leaf event-time {
+      type yang:date-and-time;
+      mandatory true;
+      description
+        "When the event happened.";
+    }
+    anydata event {
+      description
+        "The notification: one YANG notification of a module the
+         sender implements, keyed by its SID.";
+    }
+  }
+}

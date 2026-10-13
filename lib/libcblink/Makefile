@@ -9,9 +9,6 @@ SRCS=		cbl_arena.c \
 		cbl_attr.c \
 		cbl_conn.c \
 		cbl_ctrl.c \
-		cbl_ctrl_gen.c \
-		cbl_ctrl_gen_client.c \
-		cbl_ctrl_gen_server.c \
 		cbl_ctx.c \
 		cbl_decode.c \
 		cbl_dump.c \
@@ -35,6 +32,7 @@ SRCS=		cbl_arena.c \
 		cbl_uri.c \
 		cbl_xpath.c \
 		cbl_ycodec.c \
+		cbl_yctrl_schema.c \
 		cbl_yfamily.c \
 		cbl_ymod_schema.c
 
@@ -56,16 +54,21 @@ beforeinstall: .PHONY
 
 .include <bsd.opts.mk>
 
-# The control family is generated from its spec by cblink-gen and the
-# output is committed, with its reference docs/ctrl.md; "make regen"
-# refreshes both.
+# The cblink module's structures and the control family's module are
+# compiled by cblink-gen and the output is committed, with the control
+# family's reference docs/ctrl.md; "make regen" refreshes them.
 CBLINK_GEN?=	${.OBJDIR:H:H}/usr.bin/cblink-gen/cblink-gen
-CTRL_SPEC?=	${.CURDIR}/../../share/cblink/specs/control.yaml
+YANG_DIR?=	${.CURDIR}/../../share/yang
+FW_YANG=	${YANG_DIR}/cblink@2026-10-13
+CTRL_YANG=	${YANG_DIR}/cblink-ctrl@2026-10-13
 
 regen: .PHONY
-	${CBLINK_GEN} -B -b cbl_ctrl_gen -m h,c,client,server -o ${.CURDIR} \
-	    ${CTRL_SPEC}
-	${CBLINK_GEN} -B -b ctrl -m md -o ${.CURDIR}/../../docs ${CTRL_SPEC}
+	${CBLINK_GEN} -m h,schema -b cbl_ymod -o ${.CURDIR} \
+	    -s ${FW_YANG}.sid ${FW_YANG}.yang
+	${CBLINK_GEN} -m h,schema -b cbl_yctrl -o ${.CURDIR} \
+	    -s ${CTRL_YANG}.sid ${CTRL_YANG}.yang
+	${CBLINK_GEN} -m md -b ctrl -o ${.CURDIR}/../../docs \
+	    -s ${CTRL_YANG}.sid ${CTRL_YANG}.yang
 
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+= tests

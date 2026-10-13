@@ -89,7 +89,7 @@ yangh_schema.c: yangh.h
 .endif
 
 # Test data: the generator itself, golden files, error cases, and the
-# control family spec with the files committed in lib/libcblink.
+# files committed in lib/libcblink and docs from the cblink modules.
 ${PACKAGE}FILES+=	${GEN}
 ${PACKAGE}FILESMODE_${GEN}= 0555
 
@@ -102,11 +102,8 @@ GOLDENKV!=	cd ${.CURDIR} && echo golden/kv/*
 GOLDENKVDIR=	${TESTSDIR}/golden/kv
 ERRORS!=	cd ${.CURDIR} && echo errors/*.yaml errors/*.err
 ERRORSDIR=	${TESTSDIR}/errors
-CTRL=		${.CURDIR}/../../../share/cblink/specs/control.yaml \
-		${LIBCBLINK_SRC}/cbl_ctrl_gen.h \
-		${LIBCBLINK_SRC}/cbl_ctrl_gen.c \
-		${LIBCBLINK_SRC}/cbl_ctrl_gen_client.c \
-		${LIBCBLINK_SRC}/cbl_ctrl_gen_server.c \
+CTRL=		${LIBCBLINK_SRC}/cbl_yctrl.h \
+		${LIBCBLINK_SRC}/cbl_yctrl_schema.c \
 		${LIBCBLINK_SRC}/cbl_ymod.h \
 		${LIBCBLINK_SRC}/cbl_ymod_schema.c \
 		${.CURDIR}/../../../docs/ctrl.md
@@ -126,7 +123,9 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
 		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \
-		${.CURDIR}/../../../share/yang/cblink@2026-10-13.sid
+		${.CURDIR}/../../../share/yang/cblink@2026-10-13.sid \
+		${.CURDIR}/../../../share/yang/cblink-ctrl@2026-10-13.yang \
+		${.CURDIR}/../../../share/yang/cblink-ctrl@2026-10-13.sid
 YANGDIR=	${TESTSDIR}/yang
 
 .for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG

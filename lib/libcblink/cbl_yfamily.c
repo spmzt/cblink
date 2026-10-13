@@ -641,6 +641,19 @@ event_node(void)
 int
 cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n, const void *p)
 {
+
+	if (ctx == NULL)
+		return (EINVAL);
+	if (ctx->yfam == NULL)
+		return (ENOENT);	/* no module served */
+	return (cbl_ynotify_fam(ctx->yfam, 0, CBL_YCMD_NOTIFY, n, p));
+}
+
+/* A YANG notification to a group of a family: family 1's, or ctrl's. */
+int
+cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
+    const struct cbl_ynode *n, const void *p)
+{
 	struct cblink_notification e = { 0 };
 	const struct cbl_ynode *ev = event_node();
 	struct cbl_ybuf c = { 0 };
@@ -652,11 +665,9 @@ cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n, const void *p)
 	size_t hl;
 	int error;
 
-	if (ctx == NULL || n == NULL || p == NULL ||
+	if (fam == NULL || n == NULL || p == NULL ||
 	    n->kind != CBL_YN_NOTIF || ev == NULL)
 		return (EINVAL);
-	if (ctx->yfam == NULL)
-		return (ENOENT);	/* no module served */
 	if ((error = cbl_yencode(n, p, &c)) != 0)
 		return (error);
 	/* event: {delta: content}. */
@@ -676,15 +687,14 @@ cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n, const void *p)
 	(void)snprintf(t + hl, sizeof(t) - hl, ".%06ldZ",
 	    ts.tv_nsec / 1000);
 	e.event_time = t;
-	if ((error = cbl_notify_msg_new(ctx->yfam, CBL_YCMD_NOTIFY,
-	    &msg)) != 0)
+	if ((error = cbl_notify_msg_new(fam, cmd, &msg)) != 0)
 		goto out;
 	if ((error = cbl_msg_put_ynode(msg, cbl_fw_node("notification"),
 	    &e)) != 0) {
 		cbl_msg_free(msg);
 		goto out;
 	}
-	error = cbl_notify(ctx->yfam, 0, msg);
+	error = cbl_notify(fam, group_idx, msg);
 out:
 	cbl_ybuf_free(&c);
 	free(b);

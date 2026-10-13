@@ -123,7 +123,7 @@ void	kv_client_fini(struct kv_client *);
 ```
 
 - **Initialisation.** `kv_client_init()` looks the family up by name
-  (`ctrl getfamily`) and records its id and group ids. A `fixed-id` family
+  (`ctrl get-family`) and records its id and group ids. A `fixed-id` family
   uses its constant. It is a synchronous request, so call it before
   attaching the connection to a loop, or from a thread other than the
   loop's. On the loop thread, resolve with `cbl_resolve_async()` and
@@ -235,12 +235,14 @@ The files are written into the object directory and added to `SRCS`.
 
 ## 5. The control family
 
-Family 0 is described by `share/cblink/specs/control.yaml` and generated
-with `-B`, which allows `fixed-id` and the reserved names. The output is
-committed in `lib/libcblink` (`cbl_ctrl_gen*.{c,h}`), because the library
-cannot depend on its own generator at build time.
+Family 0 is the YANG module `cblink-ctrl`, and the framework's
+structures are the module `cblink` (`share/yang`). Their structs and
+schema tables are committed in `lib/libcblink` (`cbl_yctrl.h`,
+`cbl_yctrl_schema.c`, `cbl_ymod.h`, `cbl_ymod_schema.c`), with the
+control family's reference `docs/ctrl.md`, because the library cannot
+depend on its own generator at build time.
 - `make -C lib/libcblink regen` refreshes the committed files.
-- The `ctrl_regen` test fails if they differ from what the generator now
+- The `ymod_regen` test fails if they differ from what the generator now
   produces.
 
 ## 6. Tests (`usr.bin/cblink-gen/tests`)

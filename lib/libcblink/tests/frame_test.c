@@ -12,6 +12,7 @@
 #include <errno.h>
 
 #include "cbl_test.h"
+#include "cbl_schema.h"
 
 static cbl_msg *
 decode_hex(cbl_ctx *ctx, const char *hex)
@@ -63,45 +64,47 @@ ATF_TC_BODY(wire_error_frame, tc)
 	cbl_ctx_free(ctx);
 }
 
+/*
+ * Section 7.3: get-family (2^40 + 216) by name, and the output the
+ * library's server sends for family "kv".
+ */
 ATF_TC_WITHOUT_HEAD(wire_getfamily);
 ATF_TC_BODY(wire_getfamily, tc)
 {
+	static const uint8_t in[] = { 0xa1, 0x03, 0x62, 'k', 'v' };
+	static const uint8_t out[] = {
+		0xa5,
+		0x05, 0x81, 0xa3, 0x01, 0x40, 0x02, 0x02, 0x03, 0x67, 'c', 'h',
+		'a', 'n', 'g', 'e', 's',
+		0x09, 0x02,
+		0x0a, 0x62, 'k', 'v',
+		0x0b, 0x81, 0xa3, 0x01, 0x01, 0x02, 0x41, 0x01, 0x03, 0x63, 'g',
+		'e', 't',
+		0x0f, 0x01,
+	};
+	uint64_t gf = UINT64_C(1099511627776) + 216;
 	cbl_ctx *ctx = test_ctx();
 	cbl_msg *msg;
 
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 0, 1, CBL_F_REQUEST, &msg));
 	cbl_msg_set_seq(msg, 7);
-	cbl_put_str(msg, 2, "kv");
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, gf, in, sizeof(in)));
 	require_frame(msg,
-	    "CB 4C 02 18 00 00 00 1D 00 00 00 01 00 00 00 01"
-	    "00 00 00 07 00 00 00 00 A1 02 62 6B 76");
+	    "CB 4C 02 18 00 00 00 27 00 00 00 01 00 00 00 01"
+	    "00 00 00 07 00 00 00 00"
+	    "A1 1B 00 00 01 00 00 00 00 D8 A1 03 62 6B 76");
 	cbl_msg_free(msg);
 
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 0, 1, 0, &msg));
 	cbl_msg_set_seq(msg, 7);
-	cbl_put_uint(msg, 1, 17);
-	cbl_put_str(msg, 2, "kv");
-	cbl_put_uint(msg, 3, 1);
-	cbl_array_start(msg, 4);
-	cbl_nest_start(msg, CBL_ELEM);
-	cbl_put_uint(msg, 1, 1);
-	cbl_put_str(msg, 2, "get");
-	cbl_put_uint(msg, 3, 1);
-	cbl_nest_end(msg);
-	cbl_array_end(msg);
-	cbl_array_start(msg, 5);
-	cbl_nest_start(msg, CBL_ELEM);
-	cbl_put_uint(msg, 1, 2);
-	cbl_put_str(msg, 2, "changes");
-	cbl_put_uint(msg, 3, 0);
-	cbl_nest_end(msg);
-	cbl_array_end(msg);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, gf, out, sizeof(out)));
 	require_frame(msg,
-	    "CB 4C 02 18 00 00 00 3D 00 00 00 01 00 00 00 00"
+	    "CB 4C 02 18 00 00 00 48 00 00 00 01 00 00 00 00"
 	    "00 00 00 07 00 00 00 00"
-	    "A5 01 11 02 62 6B 76 03 01"
-	    "04 81 A3 01 01 02 63 67 65 74 03 01"
-	    "05 81 A3 01 02 02 67 63 68 61 6E 67 65 73 03 00");
+	    "A1 1B 00 00 01 00 00 00 00 D8"
+	    "A5 05 81 A3 01 40 02 02 03 67 63 68 61 6E 67 65 73"
+	    "09 02 0A 62 6B 76"
+	    "0B 81 A3 01 01 02 41 01 03 63 67 65 74 0F 01");
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }

@@ -12,7 +12,7 @@ generated from it.
 | Part | What it is |
 |------|------------|
 | name | `[a-z][a-z0-9_.-]{0,62}`, unique on an endpoint. `ctrl` and names starting with `cblink.` are reserved. |
-| version | A number reported to clients (`ctrl getfamily`). It is the family's own; cblink does not interpret it. |
+| version | A number reported to clients (`ctrl get-family`). It is the family's own; cblink does not interpret it. |
 | operations | Commands `1 … 65535`. Each has a request policy and supports any of: `do` (request and reply), `dump` (request and a series of items), opening a stream, or a notification. `auth` restricts it to authenticated peers. |
 | attribute sets | Attribute keys `1 … 65535` with types and checks. Sets nest. |
 | multicast groups | Named groups that notifications are sent to. A group can require an authenticated subscriber. |
@@ -30,7 +30,7 @@ retired numbers unused.
 - Making an attribute required, changing its type, or narrowing its checks
   is not compatible.
 - Bump the family's `version` when clients need to tell the difference.
-  Clients see it in `ctrl getfamily`, and generated clients record it in
+  Clients see it in `ctrl get-family`, and generated clients record it in
   `struct P_client`.
 - An incompatible redesign is better done as a new family with a new
   name.
@@ -66,11 +66,11 @@ Handlers that need finer control read the peer's identity with
   `1 … 65535`.
   - Ids are per endpoint and dynamic. A client must not hard-code them.
   - Every subscriber to the control family's `notify` group is told with a
-    `newfamily` notification.
+    `family-added` notification.
 - **Unregistration.** `cbl_family_unregister()` removes the family at once
-  for new requests, sends `delfamily`, and waits until requests already
+  for new requests, sends `family-removed`, and waits until requests already
   running in it have finished. Its subscriptions end.
-- **Discovery.** Clients resolve a name with `ctrl getfamily`, through
+- **Discovery.** Clients resolve a name with `ctrl get-family`, through
   `cbl_resolve()` or the generated `P_client_init()`. They get:
   - the id and version;
   - the operations, with their flags;
@@ -81,18 +81,19 @@ Handlers that need finer control read the peer's identity with
 
 ## 4. The control family
 
-Family id 0, `ctrl`, is built into every endpoint. Its spec is
-`share/cblink/specs/control.yaml`; `ctrl.md` is its generated reference.
+Family id 0, `ctrl`, is built into every endpoint. It is the YANG module
+`cblink-ctrl` (`share/yang/cblink-ctrl@2026-10-13.yang`), each command one
+of its rpcs; `ctrl.md` is its generated reference.
 
 | Command | Kind | Purpose |
 |---------|------|---------|
-| `getfamily` (1) | do, dump | Resolve one family by name or id, or list all families with their operations and groups. |
+| `get-family` (1) | do, dump | Resolve one family by name or id, or list all families with their operations and groups. |
 | `subscribe` (2) | do | Join a family's multicast group, by global group id. |
 | `unsubscribe` (3) | do | Leave it. |
 | `ping` (4) | do | Liveness: the reply echoes `cookie`. |
-| `hello` (5) | do | Exchange receive limits (`max-frame`, `max-depth`, `max-attrs`, `max-streams`, `stream-window`) and implementation names. A sender that knows its peer's `max-frame` never sends larger frames. |
-| `newfamily` (6) | notification | A family was registered. |
-| `delfamily` (7) | notification | A family was unregistered. |
+| `hello` (5) | do | Exchange the `cblink:hello` structure: receive limits (`max-frame`, `max-depth`, `max-attrs`, `max-streams`, `stream-window`) and implementation names. A sender that knows its peer's `max-frame` never sends larger frames. |
+| `family-added` (6) | notification | A family was registered. |
+| `family-removed` (7) | notification | A family was unregistered. |
 
 Both notifications go to the group `notify` (global id 1). The
 library's client helpers are `cbl_resolve()`, `cbl_family_info_*()`,

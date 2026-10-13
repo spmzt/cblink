@@ -496,7 +496,7 @@ ATF_TC_BODY(dump_backpressure, tc)
 	ATF_REQUIRE_EQ(1, r.finals);
 	ATF_REQUIRE_EQ(EINVAL, r.error);
 
-	/* ctrl getfamily dump lists ctrl and test. */
+	/* ctrl get-family dump lists ctrl and test. */
 	memset(&r, 0, sizeof(r));
 	r.order_ok = true;
 	cbl_msg_new(f.cctx, CBL_CTRL_FAMILY, 1, CBL_F_DUMP, &req);

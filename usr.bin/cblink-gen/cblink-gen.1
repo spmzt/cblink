@@ -343,11 +343,19 @@ See the comment at the top of
 .Pa cblink.mk
 for its variables.
 .Sh FILES
-.Bl -tag -width "${LOCALBASE}/share/cblink/specs/control.yaml" -compact
+.Bl -tag -width "${LOCALBASE}/share/cblink/yang" -compact
 .It Pa ${LOCALBASE}/share/cblink/cblink.mk
-make rules for programs built from specs
-.It Pa ${LOCALBASE}/share/cblink/specs/control.yaml
-the control family's spec, an example of the format
+make rules for programs built from specs and modules
+.It Pa ${LOCALBASE}/share/cblink/yang
+the YANG modules of cblink's wire version 2, with their
+.Pa .sid
+files: the framework's structures
+.Pq Pa cblink ,
+the control family
+.Pq Pa cblink-ctrl
+and
+.Pa ietf-sid-file
+for GET-SID
 .El
 .Sh EXIT STATUS
 .Bl -tag -width "0"

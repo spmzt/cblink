@@ -89,36 +89,11 @@ crlf_body()
 	atf_check -s exit:1 -e inline:"${msg}\n" $gen -n crlf.yaml
 }
 
-atf_test_case ctrl_regen
-ctrl_regen_head()
-{
-	atf_set "descr" "The committed control family matches its spec"
-}
-ctrl_regen_body()
-{
-	setup
-
-	mkdir out
-	atf_check $gen -B -b cbl_ctrl_gen -m h,c,client,server -o out \
-	    "$(atf_get_srcdir)/ctrl/control.yaml"
-	for f in cbl_ctrl_gen.h cbl_ctrl_gen.c cbl_ctrl_gen_client.c \
-	    cbl_ctrl_gen_server.c; do
-		atf_check -o file:"$(atf_get_srcdir)/ctrl/${f}" cat "out/${f}"
-	done
-	# Its reference documentation, committed as docs/ctrl.md.
-	atf_check $gen -B -b ctrl -m md -o out \
-	    "$(atf_get_srcdir)/ctrl/control.yaml"
-	atf_check -o file:"$(atf_get_srcdir)/ctrl/ctrl.md" cat out/ctrl.md
-	# Without -B the reserved name and fixed id are refused.
-	atf_check -s exit:1 -e match:"reserved" $gen -n \
-	    "$(atf_get_srcdir)/ctrl/control.yaml"
-}
-
 atf_test_case ymod_regen
 ymod_regen_head()
 {
-	atf_set "descr" "The committed cblink module's structs and tables" \
-	    "match the module (wire version 2's framework)"
+	atf_set "descr" "The committed structs and tables of the cblink" \
+	    "modules match them: the framework's and the control family's"
 }
 ymod_regen_body()
 {
@@ -132,7 +107,13 @@ ymod_regen_body()
 	mkdir out
 	atf_check -o ignore $gen -m h,schema -b cbl_ymod -o out \
 	    -s "$y/cblink@2026-10-13.sid" "$y/cblink@2026-10-13.yang"
-	for f in cbl_ymod.h cbl_ymod_schema.c; do
+	atf_check -o ignore $gen -m h,schema -b cbl_yctrl -o out \
+	    -s "$y/cblink-ctrl@2026-10-13.sid" "$y/cblink-ctrl@2026-10-13.yang"
+	# The control family's reference, committed as docs/ctrl.md.
+	atf_check $gen -m md -b ctrl -o out \
+	    -s "$y/cblink-ctrl@2026-10-13.sid" "$y/cblink-ctrl@2026-10-13.yang"
+	for f in cbl_ymod.h cbl_ymod_schema.c cbl_yctrl.h cbl_yctrl_schema.c \
+	    ctrl.md; do
 		atf_check -o file:"$(atf_get_srcdir)/ctrl/${f}" cat "out/${f}"
 	done
 }
@@ -559,7 +540,6 @@ atf_init_test_cases()
 	atf_add_test_case determinism
 	atf_add_test_case errors
 	atf_add_test_case crlf
-	atf_add_test_case ctrl_regen
 	atf_add_test_case ymod_regen
 	atf_add_test_case cli
 	atf_add_test_case big_input

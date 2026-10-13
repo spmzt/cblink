@@ -26,6 +26,8 @@
 
 #include "cblink.h"
 
+struct cbl_ynode;
+
 #define	CBL_DEPTH_HARD_MAX	64
 
 /* Per-message arena: a chain of linear buffers, like snl(3). */
@@ -183,6 +185,24 @@ int	cbl_ctx_add_builtin(cbl_ctx *ctx, const struct cbl_family_def *def,
 int	cbl_ctx_add_fixed(cbl_ctx *ctx, const struct cbl_family_def *def,
 	    uint16_t id, void *arg, cbl_family **famp);
 void	cbl_yfamily_free(cbl_ctx *ctx);
+int	cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
+	    const struct cbl_ynode *n, const void *p);
+
+/* The control family's commands (cbl_ctrl.c, cblink-ctrl.yang). */
+enum {
+	CBL_CTRL_CMD_GETFAMILY = 1,
+	CBL_CTRL_CMD_SUBSCRIBE = 2,
+	CBL_CTRL_CMD_UNSUBSCRIBE = 3,
+	CBL_CTRL_CMD_PING = 4,
+	CBL_CTRL_CMD_HELLO = 5,
+	CBL_CTRL_CMD_NEWFAMILY = 6,
+	CBL_CTRL_CMD_DELFAMILY = 7,
+};
+
+int	cbl_ctrl_msg(cbl_conn *conn, uint16_t cmd, const char *rpc,
+	    const void *in, uint32_t flags, cbl_msg **msgp);
+int	cbl_ctrl_sub_msg(cbl_conn *conn, bool subscribe, uint16_t family,
+	    uint32_t group, cbl_msg **msgp);
 void	cbl_ctrl_notify_family(cbl_ctx *ctx, cbl_family *fam, bool added);
 int	cbl_sub_change(cbl_req *req, uint16_t family, uint32_t group,
 	    bool subscribe);

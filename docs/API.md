@@ -453,7 +453,7 @@ struct cbl_dump_state { uint64_t pos[4]; void *priv; void (*priv_free)(void *); 
 struct cbl_op {
 	uint16_t			cmd;
 	uint32_t			flags;		/* CBL_OPF_* */
-	const char			*name;		/* for ctrl getfamily */
+	const char			*name;		/* for ctrl get-family */
 	const struct cbl_policy_set	*policy;	/* request policy; NULL = accept all */
 	cbl_doit_f			*doit;
 	cbl_dumpit_f			*dumpit;

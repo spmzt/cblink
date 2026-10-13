@@ -1,0 +1,250 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "cblink-ctrl",
+    "module-revision": "2026-10-13",
+    "description": "The control family of cblink wire version 2 (Arcana share/yang/SIDS.md: 2^40 + 200, 100).",
+    "assignment-range": [
+      {
+        "entry-point": "1099511627976",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "cblink-ctrl",
+        "sid": "1099511627976"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added",
+        "sid": "1099511627977"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group",
+        "sid": "1099511627978"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/flags",
+        "sid": "1099511627979"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/id",
+        "sid": "1099511627980"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/name",
+        "sid": "1099511627981"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/id",
+        "sid": "1099511627982"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/name",
+        "sid": "1099511627983"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op",
+        "sid": "1099511627984"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/cmd",
+        "sid": "1099511627985"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/flags",
+        "sid": "1099511627986"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/name",
+        "sid": "1099511627987"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/version",
+        "sid": "1099511627988"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed",
+        "sid": "1099511627989"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed/id",
+        "sid": "1099511627990"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed/name",
+        "sid": "1099511627991"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family",
+        "sid": "1099511627992"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input",
+        "sid": "1099511627993"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input/id",
+        "sid": "1099511627994"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input/name",
+        "sid": "1099511627995"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output",
+        "sid": "1099511627996"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group",
+        "sid": "1099511627997"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/flags",
+        "sid": "1099511627998"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/id",
+        "sid": "1099511627999"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/name",
+        "sid": "1099511628000"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/id",
+        "sid": "1099511628001"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/name",
+        "sid": "1099511628002"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op",
+        "sid": "1099511628003"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/cmd",
+        "sid": "1099511628004"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/flags",
+        "sid": "1099511628005"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/name",
+        "sid": "1099511628006"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/version",
+        "sid": "1099511628007"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping",
+        "sid": "1099511628008"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/input",
+        "sid": "1099511628009"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/input/cookie",
+        "sid": "1099511628010"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/output",
+        "sid": "1099511628011"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/output/cookie",
+        "sid": "1099511628012"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe",
+        "sid": "1099511628013"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input",
+        "sid": "1099511628014"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input/family-id",
+        "sid": "1099511628015"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input/group-id",
+        "sid": "1099511628016"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/output",
+        "sid": "1099511628017"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe",
+        "sid": "1099511628018"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input",
+        "sid": "1099511628019"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input/family-id",
+        "sid": "1099511628020"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input/group-id",
+        "sid": "1099511628021"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/output",
+        "sid": "1099511628022"
+      }
+    ]
+  }
+}

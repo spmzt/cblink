@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "cbl_net_test.h"
+#include "cbl_schema.h"
 
 enum { N_PING = 1, N_EVENT };
 enum { NA_SEQ = 1, NA_PAD };
@@ -44,6 +45,7 @@ struct rec {
 	atomic_uint	 group;
 	uint64_t	 next;
 	char		 name[64];
+	uint64_t	 sid;
 	atomic_int	 kind;
 };
 
@@ -301,16 +303,25 @@ ATF_TC_BODY(many_subscribers, tc)
 	fx_teardown(&f);
 }
 
-/* ctrl "notify": families coming and going. */
+/*
+ * ctrl "notify": families coming and going, cblink-ctrl's family-added
+ * (2^40 + 201) and family-removed; the name is in the content.
+ */
 static void
 ctrl_cb(cbl_conn *conn __unused, cbl_msg *msg, void *arg)
 {
 	struct rec *r = arg;
-	const char *name;
+	struct cbl_ynotif nt;
+	cbl_yarena *a;
 
 	r->kind = cbl_msg_cmd(msg);
-	if (cbl_attr_str(msg, cbl_msg_attr(msg, 2), &name) == 0)
-		strlcpy(r->name, name, sizeof(r->name));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	if (cbl_msg_ynotif(msg, &nt, a) == 0) {
+		r->sid = nt.sid;
+		if (memmem(nt.content, nt.len, "latecomer", 9) != NULL)
+			strlcpy(r->name, "latecomer", sizeof(r->name));
+	}
+	cbl_yarena_free(a);
 	r->n++;
 }
 
@@ -334,12 +345,13 @@ ATF_TC_BODY(ctrl_notify, tc)
 	ATF_REQUIRE_EQ(0, cbl_family_register(f.sctx, &other, NULL, &fam));
 	drive(c, &r.n, 1, 3000);
 	ATF_REQUIRE_EQ(1, r.n);
-	ATF_REQUIRE_EQ(6, r.kind);		/* newfamily */
+	ATF_REQUIRE_EQ(6, r.kind);		/* family-added */
+	ATF_REQUIRE_EQ(UINT64_C(1099511627776) + 201, r.sid);
 	ATF_REQUIRE_STREQ("latecomer", r.name);
 	ATF_REQUIRE_EQ(0, cbl_family_unregister(fam));
 	drive(c, &r.n, 2, 3000);
 	ATF_REQUIRE_EQ(2, r.n);
-	ATF_REQUIRE_EQ(7, r.kind);		/* delfamily */
+	ATF_REQUIRE_EQ(7, r.kind);		/* family-removed */
 	cbl_unsubscribe(sub);
 	cbl_conn_free(c);
 	fx_teardown(&f);

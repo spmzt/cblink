@@ -6,17 +6,21 @@
 
 /*
  * libFuzzer: a frame as it arrives from the network.  Decode it, walk
- * every attribute through the accessors, and validate and parse it as a
- * control family message.  Each frame is decoded twice, without and with
- * CBL_CTX_YANG_TAGS: what the strict profile accepts, the one with
- * YANG-CBOR's tags accepts too.
+ * every attribute through the accessors, and read it as each message of
+ * the control family (cblink-ctrl's rpcs' inputs and outputs, the hello
+ * structure), as a notification and as a GET.  Each frame is decoded
+ * twice, without and with CBL_CTX_YANG_TAGS: what the strict profile
+ * accepts, the one with YANG-CBOR's tags accepts too.
  */
 
+#include <stdalign.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "cbl_impl.h"
-#include "cbl_ctrl_gen.h"
+#include "cbl_schema.h"
+#include "cbl_yctrl.h"
 
 int	LLVMFuzzerInitialize(int *argc, char ***argv);
 int	LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
@@ -63,8 +67,10 @@ static int
 one(cbl_ctx *c0, const uint8_t *data, size_t size)
 {
 	struct cbl_path_elem path[8];
-	struct cbl_ctrl_ctrl c;
-	struct cbl_verr ve;
+	alignas(max_align_t) char buf[512];
+	const struct cbl_ymodule *ctl = cbl_yctrl_schema.mod[0];
+	struct cbl_ynotif nt;
+	cbl_yarena *a;
 	const void *ck;
 	size_t cklen;
 	cbl_msg *m;
@@ -78,8 +84,25 @@ one(cbl_ctx *c0, const uint8_t *data, size_t size)
 	(void)cbl_msg_err_path(m, path, 8);
 	(void)cbl_msg_err_miss_type(m);
 	(void)cbl_msg_err_cookie(m, &ck, &cklen);
-	if (cbl_validate(cbl_msg_body(m), &cbl_ctrl_ctrl_policy, &ve) == 0)
-		(void)cbl_ctrl_ctrl_parse(m, cbl_msg_body(m), &c);
+	if ((a = cbl_yarena_new()) == NULL)
+		abort();
+	for (uint32_t i = 0; i < ctl->ntop; i++)
+		for (uint32_t j = 0; j < ctl->top[i]->nchild; j++) {
+			const struct cbl_ynode *io = ctl->top[i]->child[j];
+
+			if (io->kind != CBL_YN_INPUT && io->kind != CBL_YN_OUTPUT)
+				continue;
+			if (io->size > sizeof(buf))
+				abort();
+			(void)cbl_msg_ydecode(m, io, buf, a, CBL_YD_STRICT, NULL,
+			    0);
+		}
+	(void)cbl_msg_ydecode(m, cbl_fw_node("hello"), buf, a, CBL_YD_STRICT,
+	    NULL, 0);
+	(void)cbl_msg_ydecode(m, cbl_fw_node("get"), buf, a, CBL_YD_STRICT,
+	    NULL, 0);
+	(void)cbl_msg_ynotif(m, &nt, a);
+	cbl_yarena_free(a);
 	cbl_msg_free(m);
 	return (0);
 }

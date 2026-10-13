@@ -28,6 +28,7 @@
 #include <libyang/libyang.h>
 
 #include "gen.h"
+#include "schema.h"
 #include "yang.h"
 
 /* A module's text, by the name and revision its file name gives. */
@@ -35,6 +36,8 @@ struct ysrc {
 	char	*name;
 	char	*rev;		/* NULL: the file name has none */
 	char	*text;
+	char	*file;		/* for diagnostics */
+	bool	 given;		/* named by the user, not only found */
 };
 
 static struct ysrc	*srcs;
@@ -85,7 +88,7 @@ split_name(const char *file, char **namep, char **revp)
 }
 
 void
-yang_add_file(int fd, const char *path)
+yang_add_file(int fd, const char *path, bool given)
 {
 	const char *file;
 	struct ysrc *s;
@@ -100,6 +103,8 @@ yang_add_file(int fd, const char *path)
 	s->name = name;
 	s->rev = rev;
 	s->text = read_all(fd, path);
+	s->file = xstrdup(file);
+	s->given = given;
 }
 
 void
@@ -120,7 +125,7 @@ yang_add_dir(const char *dir)
 		path = xasprintf("%s/%s", dir, de->d_name);
 		if ((fd = open(path, O_RDONLY | O_CLOEXEC)) == -1)
 			err(2, "%s", path);
-		yang_add_file(fd, path);
+		yang_add_file(fd, path, false);
 		close(fd);
 		free(path);
 	}
@@ -190,45 +195,245 @@ yang_ctx_new(void)
 	return (ctx);
 }
 
-static LY_ERR
-count(struct lysc_node *n __unused, void *arg, ly_bool *cont __unused)
+/*
+ * Parse and compile the modules named, their imports from the others.
+ * d->file is set to each module's file while it is parsed.
+ */
+int
+yang_load(struct ly_ctx *ctx, struct diags *d, const char **features)
 {
+	struct lys_module *mod;
+	struct ly_in *in;
+	int rv = 0;
+	LY_ERR e;
 
-	(*(size_t *)arg)++;
-	return (LY_SUCCESS);
+	for (size_t i = 0; i < nsrcs; i++) {
+		if (!srcs[i].given)
+			continue;
+		d->file = srcs[i].file;
+		if (ly_in_new_memory(srcs[i].text, &in) != LY_SUCCESS)
+			errx(2, "libyang: no memory");
+		logto = d;
+		e = lys_parse(ctx, in, LYS_IN_YANG, features, &mod);
+		logto = NULL;
+		ly_in_free(in, 0);
+		if (e != LY_SUCCESS) {
+			if (d->n == 0)
+				diag_add(d, 0, 0, "the module does not compile");
+			return (-1);
+		}
+	}
+	return (rv);
 }
 
 /*
- * Parse and compile the first module added; its imports come from the
- * others.  Under -n, say what was compiled.
+ * From libyang's compiled schema to the generator's own (schema.h).
  */
-int
-yang_load(struct ly_ctx *ctx, struct diags *d, bool verbose)
-{
-	const struct lys_module *m;
-	struct lys_module *mod;
-	size_t nodes = 0, nmods = 0;
-	uint32_t i = 0;
-	LY_ERR e;
 
-	if (nsrcs == 0)
-		return (-1);
-	logto = d;
-	e = lys_parse_mem(ctx, srcs[0].text, LYS_IN_YANG, &mod);
-	logto = NULL;
-	if (e != LY_SUCCESS) {
-		if (d->n == 0)
-			diag_add(d, 0, 0, "libyang: the module does not compile");
-		return (-1);
+struct conv {
+	struct schema		 *s;
+	const struct lys_module **lmods;	/* parallel to s->mods */
+};
+
+static struct smodule *
+smod_of(struct conv *c, const struct lys_module *lm)
+{
+
+	for (size_t i = 0; i < c->s->nmods; i++)
+		if (c->lmods[i] == lm)
+			return (c->s->mods[i]);
+	errx(2, "libyang: a node of a module not in the context");
+}
+
+static enum snode_kind
+kind_of(uint16_t nodetype)
+{
+
+	switch (nodetype) {
+	case LYS_CONTAINER:	return (SN_CONTAINER);
+	case LYS_LEAF:		return (SN_LEAF);
+	case LYS_LEAFLIST:	return (SN_LEAFLIST);
+	case LYS_LIST:		return (SN_LIST);
+	case LYS_CHOICE:	return (SN_CHOICE);
+	case LYS_CASE:		return (SN_CASE);
+	case LYS_ANYDATA:	return (SN_ANYDATA);
+	case LYS_ANYXML:	return (SN_ANYXML);
+	case LYS_RPC:		return (SN_RPC);
+	case LYS_ACTION:	return (SN_ACTION);
+	case LYS_NOTIF:		return (SN_NOTIF);
+	case LYS_INPUT:		return (SN_INPUT);
+	case LYS_OUTPUT:	return (SN_OUTPUT);
 	}
-	while ((m = ly_ctx_get_module_iter(ctx, &i)) != NULL)
-		if (m->implemented && m->compiled != NULL) {
-			nmods++;
-			(void)lysc_module_dfs_full(m, count, &nodes);
+	errx(2, "libyang: a schema node of unknown kind %#x", nodetype);
+}
+
+static struct snode *conv_list(struct conv *, const struct lysc_node *,
+    struct snode *);
+
+static struct snode *
+conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
+{
+	struct snode *n, **tail;
+	const struct lysc_node_action *a;
+	const struct lysc_node_notif *no;
+
+	n = xcalloc(1, sizeof(*n));
+	n->kind = kind_of(ln->nodetype);
+	n->name = xstrdup(ln->name);
+	n->module = smod_of(c, ln->module);
+	n->parent = parent;
+	if ((ln->nodetype & (LYS_RPC | LYS_ACTION | LYS_NOTIF | LYS_INPUT |
+	    LYS_OUTPUT)) == 0 && (ln->flags & LYS_CONFIG_W) != 0)
+		n->flags |= SNF_CONFIG;
+	if ((ln->flags & LYS_MAND_TRUE) != 0)
+		n->flags |= SNF_MANDATORY;
+	if (ln->nodetype == LYS_LEAF && (ln->flags & LYS_KEY) != 0)
+		n->flags |= SNF_KEY;
+	if (ln->nodetype == LYS_CONTAINER && (ln->flags & LYS_PRESENCE) != 0)
+		n->flags |= SNF_PRESENCE;
+	if (lysc_is_userordered(ln))
+		n->flags |= SNF_USERORDER;
+	if ((ln->flags & LYS_STATUS_DEPRC) != 0)
+		n->flags |= SNF_DEPRECATED;
+	if ((ln->flags & LYS_STATUS_OBSLT) != 0)
+		n->flags |= SNF_OBSOLETE;
+	if (ln->nodetype == LYS_LIST) {
+		const struct lysc_node_list *l = (const void *)ln;
+
+		n->min = l->min;
+		n->max = l->max;
+	} else if (ln->nodetype == LYS_LEAFLIST) {
+		const struct lysc_node_leaflist *l = (const void *)ln;
+
+		n->min = l->min;
+		n->max = l->max;
+	}
+
+	/* Data children, then actions, then notifications. */
+	n->child = conv_list(c, lysc_node_child(ln), n);
+	for (tail = &n->child; *tail != NULL; tail = &(*tail)->next)
+		;
+	for (a = lysc_node_actions(ln); a != NULL;
+	    a = (const struct lysc_node_action *)a->next) {
+		*tail = conv_node(c, &a->node, n);
+		tail = &(*tail)->next;
+	}
+	for (no = lysc_node_notifs(ln); no != NULL;
+	    no = (const struct lysc_node_notif *)no->next) {
+		*tail = conv_node(c, &no->node, n);
+		tail = &(*tail)->next;
+	}
+
+	if (n->kind == SN_LIST) {
+		for (struct snode *ch = n->child; ch != NULL; ch = ch->next)
+			if ((ch->flags & SNF_KEY) != 0) {
+				n->keys = xreallocarray(n->keys, n->nkeys + 1,
+				    sizeof(*n->keys));
+				n->keys[n->nkeys++] = ch;
+			}
+	}
+	return (n);
+}
+
+static struct snode *
+conv_list(struct conv *c, const struct lysc_node *ln, struct snode *parent)
+{
+	struct snode *first = NULL, **tail = &first;
+
+	for (; ln != NULL; ln = ln->next) {
+		*tail = conv_node(c, ln, parent);
+		tail = &(*tail)->next;
+	}
+	return (first);
+}
+
+struct schema *
+yang_schema(struct ly_ctx *ctx)
+{
+	struct conv c = { 0 };
+	const struct lys_module *lm;
+	const struct lysp_feature *f;
+	struct smodule *m;
+	struct sident *si;
+	LY_ARRAY_COUNT_TYPE u, v;
+	uint32_t idx = 0, fi;
+	size_t i;
+
+	c.s = schema_new();
+	/* Every module, implemented or only imported: identities. */
+	while ((lm = ly_ctx_get_module_iter(ctx, &idx)) != NULL) {
+		m = xcalloc(1, sizeof(*m));
+		m->name = xstrdup(lm->name);
+		m->revision = lm->revision != NULL ? xstrdup(lm->revision) :
+		    NULL;
+		m->ns = xstrdup(lm->ns);
+		m->prefix = xstrdup(lm->prefix);
+		m->implemented = lm->implemented && lm->compiled != NULL;
+		c.s->mods = xreallocarray(c.s->mods, c.s->nmods + 1,
+		    sizeof(*c.s->mods));
+		c.lmods = xreallocarray(c.lmods, c.s->nmods + 1,
+		    sizeof(*c.lmods));
+		c.s->mods[c.s->nmods] = m;
+		c.lmods[c.s->nmods++] = lm;
+		fi = 0;
+		f = NULL;
+		while (lm->parsed != NULL &&
+		    (f = lysp_feature_next(f, lm->parsed, &fi)) != NULL) {
+			m->features = xreallocarray(m->features,
+			    m->nfeatures + 1, sizeof(*m->features));
+			m->features[m->nfeatures].name = xstrdup(f->name);
+			m->features[m->nfeatures++].enabled =
+			    (f->flags & LYS_FENABLED) != 0;
 		}
-	if (verbose)
-		printf("%s: %s@%s compiled, %zu modules implemented, %zu schema "
-		    "nodes\n", d->file, mod->name, mod->revision != NULL ?
-		    mod->revision : "-", nmods, nodes);
-	return (0);
+		m->nidents = LY_ARRAY_COUNT(lm->identities);
+		m->idents = xcalloc(m->nidents, sizeof(*m->idents));
+		LY_ARRAY_FOR(lm->identities, u) {
+			m->idents[u].module = m;
+			m->idents[u].name = xstrdup(lm->identities[u].name);
+			if ((lm->identities[u].flags & LYS_STATUS_DEPRC) != 0)
+				m->idents[u].flags |= SNF_DEPRECATED;
+			if ((lm->identities[u].flags & LYS_STATUS_OBSLT) != 0)
+				m->idents[u].flags |= SNF_OBSOLETE;
+		}
+		LY_ARRAY_FOR(lm->deviated_by, u) {
+			m->deviated_by = xreallocarray(m->deviated_by,
+			    m->ndeviated_by + 1, sizeof(*m->deviated_by));
+			m->deviated_by[m->ndeviated_by++] =
+			    xstrdup(lm->deviated_by[u]->name);
+		}
+	}
+	/* Derived identities, now that every module has its own. */
+	for (i = 0; i < c.s->nmods; i++) {
+		lm = c.lmods[i];
+		LY_ARRAY_FOR(lm->identities, u) {
+			si = &c.s->mods[i]->idents[u];
+			LY_ARRAY_FOR(lm->identities[u].derived, v) {
+				const struct lysc_ident *d =
+				    lm->identities[u].derived[v];
+				struct sident *ds;
+
+				ds = schema_ident(c.s, d->module->name, d->name);
+				if (ds == NULL)
+					continue;	/* of a module not loaded */
+				si->derived = xreallocarray(si->derived,
+				    si->nderived + 1, sizeof(*si->derived));
+				si->derived[si->nderived++] = ds;
+			}
+		}
+	}
+	/* The data trees of the implemented modules. */
+	for (i = 0; i < c.s->nmods; i++) {
+		lm = c.lmods[i];
+		if (!c.s->mods[i]->implemented)
+			continue;
+		c.s->mods[i]->data = conv_list(&c, lm->compiled->data, NULL);
+		c.s->mods[i]->rpcs = conv_list(&c,
+		    lm->compiled->rpcs != NULL ? &lm->compiled->rpcs->node :
+		    NULL, NULL);
+		c.s->mods[i]->notifs = conv_list(&c,
+		    lm->compiled->notifs != NULL ? &lm->compiled->notifs->node :
+		    NULL, NULL);
+	}
+	free(c.lmods);
+	return (c.s);
 }

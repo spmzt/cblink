@@ -201,8 +201,16 @@ yang_frontend_body()
 		return
 	fi
 	# Its import, ietf-yang-types, is libyang's own.
-	atf_check -o match:'^good@2026-10-13.yang: good@2026-10-13 compiled' \
+	atf_check -o match:'^good@2026-10-13.yang: compiled, .* schema nodes' \
 	    $gen -n "$y/good@2026-10-13.yang"
+	# The generator's model of it, a node a line.
+	atf_check -o save:dump $gen -d "$y/good@2026-10-13.yang"
+	atf_check -o inline:"good container /good:things rw
+good list /good:things/thing rw min 0 max 4294967295
+good leaf /good:things/thing/name rw key
+good leaf /good:things/thing/seen rw
+" grep '^good ' dump
+	atf_check -o match:'^module good@2026-10-13$' cat dump
 	atf_check -s exit:1 -e match:'^bad@2026-10-13.yang:.*uint33' \
 	    $gen -n "$y/bad@2026-10-13.yang"
 	# A module file's name says its module.

@@ -13,13 +13,23 @@
 
 struct ly_ctx;
 struct diags;
+struct schema;
 
-/* Before capability mode: the modules, and the context. */
-void		 yang_add_file(int fd, const char *path);
+/*
+ * Before capability mode: the modules, those named (given) and those
+ * found in the search directories, and the context.
+ */
+void		 yang_add_file(int fd, const char *path, bool given);
 void		 yang_add_dir(const char *dir);
 struct ly_ctx	*yang_ctx_new(void);
 
-/* In capability mode: parse and compile the first module added. */
-int		 yang_load(struct ly_ctx *ctx, struct diags *d, bool verbose);
+/*
+ * In capability mode: parse and compile the modules named, with the
+ * features named on (NULL-terminated, "*" for all; NULL for none); then
+ * the generator's own model of the compiled schema.
+ */
+int		 yang_load(struct ly_ctx *ctx, struct diags *d,
+		    const char **features);
+struct schema	*yang_schema(struct ly_ctx *ctx);
 
 #endif /* !_CBLINK_GEN_YANG_H_ */

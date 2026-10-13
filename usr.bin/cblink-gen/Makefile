@@ -23,7 +23,7 @@ CBLINK_GEN_LIBYANG=	no
 .if !exists(${LOCALBASE}/include/libyang/libyang.h)
 .error CBLINK_GEN_LIBYANG=yes, but libyang is not in ${LOCALBASE}: pkg install libyang3
 .endif
-SRCS+=		yang.c
+SRCS+=		schema.c yang.c
 CFLAGS+=	-DCBLINK_GEN_LIBYANG -idirafter ${LOCALBASE}/include
 LDADD+=		-L${LOCALBASE}/lib -lyang
 .endif

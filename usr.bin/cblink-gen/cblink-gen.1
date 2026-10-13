@@ -17,9 +17,9 @@
 .Op Fl o Ar dir
 .Ar spec.yaml
 .Nm
-.Fl n
+.Fl n | d
 .Op Fl p Ar dir
-.Ar module.yang
+.Ar module.yang ...
 .Sh DESCRIPTION
 The
 .Nm
@@ -59,6 +59,11 @@ and
 and a
 .Ql fixed-id .
 Only the control family uses this.
+.It Fl d
+For YANG modules: print the generator's model of the compiled schema,
+a schema node a line (its module, kind, path and flags), for comparison
+with
+.Xr yanglint 1 .
 .It Fl b Ar base
 Name the output files
 .Ar base Ns .h ,
@@ -120,10 +125,13 @@ Every module it may import is read before capability mode is entered,
 from its own directory and each
 .Fl p
 directory; a module imported without a revision is the latest found.
+Several may be named.
 Only
 .Fl n
-is supported yet: the module is parsed and compiled, and errors are
-reported as for a spec.
+and
+.Fl d
+are supported yet: the modules are parsed and compiled with every
+feature on, and errors are reported as for a spec.
 A
 .Nm
 built without libyang refuses YANG modules.

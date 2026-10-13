@@ -220,6 +220,19 @@ cbl_attr_bool(const cbl_attr *a, bool *vp)
 	return (0);
 }
 
+/* The CBOR tag on a value; ENOENT when it has none. */
+int
+cbl_attr_tag(const cbl_attr *a, uint64_t *tagp)
+{
+
+	if (a == NULL || tagp == NULL)
+		return (EINVAL);
+	if (a->tag == 0)
+		return (ENOENT);
+	*tagp = a->tag;
+	return (0);
+}
+
 int
 cbl_attr_double(const cbl_attr *a, double *vp)
 {

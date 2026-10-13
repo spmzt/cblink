@@ -276,6 +276,90 @@ ATF_TC_BODY(error_frame_sanity, tc)
 }
 
 /* Deterministic random mutation of a valid frame; must never crash. */
+/* The body's first value, decoded with YANG-CBOR's tags allowed. */
+static const cbl_attr *
+yang_value(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
+{
+
+	ATF_REQUIRE_EQ_MSG(0, decode_body(ctx, bodyhex, msgp), "body %s",
+	    bodyhex);
+	return (cbl_attr_first(cbl_msg_body(*msgp)));
+}
+
+ATF_TC_WITHOUT_HEAD(yang_tags);
+ATF_TC_BODY(yang_tags, tc)
+{
+	static const char *const accepted[] = {
+		"A1 01 C4 82 21 19 0C 5D",	/* 4: decimal64 31.65 */
+		"A1 01 D8 2B 42 05 01",		/* 43: bits */
+		"A1 01 D8 2B 82 01 02",		/* 43: sparse bits */
+		"A1 01 D8 2C 63 75 70 30",	/* 44: enumeration */
+		"A1 01 D8 2D 19 07 14",		/* 45: identityref SID */
+		"A1 01 D8 2D 61 78",		/* 45: identityref name */
+		"A1 01 D8 2E 19 05 DE",		/* 46: instance-id SID */
+		"A1 01 D8 2E 82 19 05 DE 63 65 6D 30",	/* with a key */
+		"A1 01 D8 2F 19 05 DC",		/* 47: absolute SID */
+	};
+	static const uint64_t tags[] = { 4, 43, 43, 44, 45, 45, 46, 46, 47 };
+	cbl_ctx *ctx = test_ctx();
+	const cbl_attr *a;
+	uint32_t flags;
+	uint64_t tag;
+	cbl_msg *msg;
+
+	/* Off by default: every tag refused, as profile_violations has. */
+	ATF_REQUIRE_EQ(0, cbl_ctx_get_flags(ctx, &flags));
+	ATF_REQUIRE_EQ(0, flags);
+	for (size_t i = 0; i < nitems(accepted); i++)
+		require_body_error(ctx, accepted[i], EPROTO);
+	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_flags(ctx, 0x2));
+	ATF_REQUIRE_EQ(0, cbl_ctx_set_flags(ctx, CBL_CTX_YANG_TAGS));
+
+	for (size_t i = 0; i < nitems(accepted); i++) {
+		a = yang_value(ctx, accepted[i], &msg);
+		ATF_REQUIRE(a != NULL);
+		ATF_CHECK_EQ_MSG(0, cbl_attr_tag(a, &tag), "%s", accepted[i]);
+		ATF_CHECK_EQ_MSG(tags[i], tag, "%s", accepted[i]);
+		cbl_msg_free(msg);
+	}
+	/* An untagged value says so; a nested one keeps its tag. */
+	a = yang_value(ctx, "A2 01 01 02 82 D8 2F 01 02", &msg);
+	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(a, &tag));
+	a = cbl_attr_next(a);
+	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(a, &tag));
+	ATF_REQUIRE_EQ(0, cbl_attr_tag(cbl_attr_index(a, 0), &tag));
+	ATF_CHECK_EQ(47, tag);
+	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(cbl_attr_index(a, 1), &tag));
+	cbl_msg_free(msg);
+
+	/* Every other tag is still refused. */
+	require_body_error(ctx, "A1 01 C0 61 78", EPROTO);	/* 0 */
+	require_body_error(ctx, "A1 01 C1 01", EPROTO);		/* 1 */
+	require_body_error(ctx, "A1 01 C2 41 01", EPROTO);	/* 2: bignum */
+	require_body_error(ctx, "A1 01 C5 82 01 01", EPROTO);	/* 5 */
+	require_body_error(ctx, "A1 01 D8 2A 01", EPROTO);	/* 42 */
+	require_body_error(ctx, "A1 01 D8 30 01", EPROTO);	/* 48 */
+	require_body_error(ctx, "A1 01 D9 01 2F 01", EPROTO);	/* 303 */
+	require_body_error(ctx, "A1 01 D9 D9 F7 01", EPROTO);	/* 55799 */
+	require_body_error(ctx, "A1 01 DB 00 00 00 01 00 00 00 2F 01",
+	    EPROTO);					/* 2^32 + 47 */
+	/* Not on the body, a key, or twice; nor on the wrong kind. */
+	require_body_error(ctx, "D8 2F A1 01 01", EPROTO);
+	require_body_error(ctx, "A1 D8 2F 01 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F D8 2F 01", EPROTO);
+	require_body_error(ctx, "A1 01 C4 83 21 01 01", EPROTO);
+	require_body_error(ctx, "A1 01 C4 19 0C 5D", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2C 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F 61 78", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F 20", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2D A0", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2B F6", EPROTO);
+	/* A tag with nothing after it. */
+	require_body_error(ctx, "A1 01 D8 2F", EBADMSG);
+	require_body_error(ctx, "A1 01 01 D8 2F", EBADMSG);
+	cbl_ctx_free(ctx);
+}
+
 ATF_TC_WITHOUT_HEAD(mutations);
 ATF_TC_BODY(mutations, tc)
 {
@@ -318,6 +402,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, too_many_attrs);
 	ATF_TP_ADD_TC(tp, unknown_attrs_ignored);
 	ATF_TP_ADD_TC(tp, error_frame_sanity);
+	ATF_TP_ADD_TC(tp, yang_tags);
 	ATF_TP_ADD_TC(tp, mutations);
 	return (atf_no_error());
 }

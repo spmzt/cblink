@@ -107,6 +107,10 @@ enum cbl_limit {
 int	cbl_ctx_set_limit(cbl_ctx *, enum cbl_limit, uint64_t);	/* EINVAL out of range */
 int	cbl_ctx_get_limit(const cbl_ctx *, enum cbl_limit, uint64_t *);
 
+#define	CBL_CTX_YANG_TAGS 0x1	/* accept YANG-CBOR's tags 4 and 43-47 */
+int	cbl_ctx_set_flags(cbl_ctx *, uint32_t);	/* EINVAL unknown flag; EBUSY in use */
+int	cbl_ctx_get_flags(cbl_ctx *, uint32_t *);
+
 int	cbl_tls_new(cbl_tls **);
 void	cbl_tls_free(cbl_tls *);
 int	cbl_tls_set_cert(cbl_tls *, const char *certfile, const char *keyfile);
@@ -312,6 +316,7 @@ int	cbl_attr_uint(const cbl_attr *, uint64_t *);	/* EINVAL wrong kind */
 int	cbl_attr_int(const cbl_attr *, int64_t *);	/* ERANGE out of range */
 int	cbl_attr_bool(const cbl_attr *, bool *);
 int	cbl_attr_double(const cbl_attr *, double *);
+int	cbl_attr_tag(const cbl_attr *, uint64_t *);	/* ENOENT untagged */
 int	cbl_attr_bytes(const cbl_attr *, const void **, size_t *);	/* zero-copy */
 int	cbl_attr_str(cbl_msg *, const cbl_attr *, const char **);	/* NUL-terminated arena copy */
 

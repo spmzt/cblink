@@ -97,6 +97,15 @@ in one process.
 changes a limit before the first listener or connection uses the
 context
 .Pq see Sx LIMITS .
+.Fn cbl_ctx_set_flags
+sets the decoder flags, likewise before first use.
+.Dv CBL_CTX_YANG_TAGS
+accepts the CBOR tags of YANG-CBOR (RFC 9254): 4, and 43 to 47, one on a
+value of the kind the tag belongs to; every other tag is still refused.
+.Fn cbl_attr_tag
+returns a decoded value's tag, or
+.Er ENOENT
+when it has none.
 .Fn cbl_ctx_free
 fails with
 .Er EBUSY
@@ -403,7 +412,8 @@ Complete servers and clients are installed by the port under
 Every frame is untrusted input: headers are checked before any
 allocation, CBOR bodies are decoded with fixed limits on size, depth and
 item count, and only definite-length, tag-free CBOR with integer keys is
-accepted.
+accepted
+.Pq YANG-CBOR's tags under Dv CBL_CTX_YANG_TAGS .
 .Pp
 Plaintext must be requested explicitly.
 A

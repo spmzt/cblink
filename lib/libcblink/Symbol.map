@@ -12,6 +12,7 @@ CBLINK_1.0 {
 	cbl_attr_kind;
 	cbl_attr_next;
 	cbl_attr_str;
+	cbl_attr_tag;
 	cbl_attr_type;
 	cbl_attr_uint;
 	cbl_conn_attach;
@@ -35,9 +36,11 @@ CBLINK_1.0 {
 	cbl_conn_transport;
 	cbl_conn_udata;
 	cbl_ctx_free;
+	cbl_ctx_get_flags;
 	cbl_ctx_get_limit;
 	cbl_ctx_new;
 	cbl_ctx_set_conn_cbs;
+	cbl_ctx_set_flags;
 	cbl_ctx_set_limit;
 	cbl_ctx_set_tls;
 	cbl_dump_error;

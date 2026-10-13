@@ -13,6 +13,10 @@
  * (max_depth, max_attrs), and counts the values.  Only then does pass 2
  * allocate the exact node array from the message arena and fill it in.
  * Strings are not copied: nodes point into the frame buffer.
+ *
+ * Tags are refused, except under CBL_CTX_YANG_TAGS the tags of YANG-CBOR
+ * (RFC 9254): one tag on a value, never on a key or the body, and the
+ * value of the kind its tag says.
  */
 
 #include <errno.h>
@@ -40,6 +44,8 @@ struct dec {
 	struct dec_level	 st[CBL_DEPTH_HARD_MAX];
 	int			 depth;
 	bool			 root_done;
+	bool			 yang_tags;
+	uint8_t			 tag;		/* on the next value */
 	uint32_t		 nvalues;
 	int			 error;
 	const char		*why;
@@ -164,6 +170,34 @@ dec_keyval(const cbl_attr *t)
 	return ((t->nflags & CBL_NF_NEGBIG) != 0 ? INT64_MIN : t->v.i);
 }
 
+/*
+ * What each YANG-CBOR tag may stand on (RFC 9254 sections 6 and 9):
+ * decimal64 is [exponent, mantissa]; bits a byte string, or an array
+ * when sparse; an enumeration its name; an identityref a SID or a name;
+ * an instance-identifier a SID, a SID with keys, or a name; tag 47 a SID.
+ */
+static bool
+tag_fits(uint8_t tag, const cbl_attr *t, uint64_t n)
+{
+
+	switch (tag) {
+	case 4:
+		return (t->kind == CBL_K_ARRAY && n == 2);
+	case 43:
+		return (t->kind == CBL_K_BYTES || t->kind == CBL_K_ARRAY);
+	case 44:
+		return (t->kind == CBL_K_TEXT);
+	case 45:
+		return (t->kind == CBL_K_UINT || t->kind == CBL_K_TEXT);
+	case 46:
+		return (t->kind == CBL_K_UINT || t->kind == CBL_K_TEXT ||
+		    t->kind == CBL_K_ARRAY);
+	case 47:
+		return (t->kind == CBL_K_UINT);
+	}
+	return (false);
+}
+
 /* One decoded item.  "t" carries kind and value; containers carry "n". */
 static void
 dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
@@ -171,11 +205,18 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 	struct dec_level *top;
 	cbl_attr *node = NULL;
 	bool container = t->kind == CBL_K_NEST || t->kind == CBL_K_ARRAY;
+	uint8_t tag;
 
 	if (d->error != 0)
 		return;
 	if (d->root_done) {
 		dec_fail(d, EBADMSG, "trailing data after body");
+		return;
+	}
+	tag = d->tag;
+	d->tag = 0;
+	if (tag != 0 && !tag_fits(tag, t, n)) {
+		dec_fail(d, EPROTO, "tagged value of the wrong kind");
 		return;
 	}
 	if (d->depth == 0) {
@@ -214,6 +255,7 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 		*node = *t;
 		node->inmap = top->is_map;
 		node->key = top->is_map ? top->key : 0;
+		node->tag = tag;
 	}
 	if (container)
 		dec_push(d, node, t->kind == CBL_K_NEST, n);
@@ -331,10 +373,39 @@ cb_indef(void *ctx)
 }
 
 static void
-cb_tag(void *ctx, uint64_t v __unused)
+cb_tag(void *ctx, uint64_t v)
 {
+	struct dec *d = ctx;
+	struct dec_level *top;
 
-	dec_fail(ctx, EPROTO, "CBOR tags are not allowed");
+	if (d->error != 0)
+		return;
+	if (!d->yang_tags) {
+		dec_fail(d, EPROTO, "CBOR tags are not allowed");
+		return;
+	}
+	if (v != 4 && (v < 43 || v > 47)) {
+		dec_fail(d, EPROTO, "CBOR tag not of YANG-CBOR");
+		return;
+	}
+	if (d->root_done) {
+		dec_fail(d, EBADMSG, "trailing data after body");
+		return;
+	}
+	if (d->depth == 0) {
+		dec_fail(d, EPROTO, "body must be a CBOR map");
+		return;
+	}
+	top = &d->st[d->depth - 1];
+	if (top->is_map && top->want_key) {
+		dec_fail(d, EPROTO, "map keys must be integers");
+		return;
+	}
+	if (d->tag != 0) {
+		dec_fail(d, EPROTO, "a value has one tag at most");
+		return;
+	}
+	d->tag = (uint8_t)v;
 }
 
 static void
@@ -461,6 +532,7 @@ cbl_msg_decode_body(cbl_msg *msg)
 
 	d->lim = &msg->lim;
 	d->bodylen = bodylen;
+	d->yang_tags = (msg->lim.flags & CBL_CTX_YANG_TAGS) != 0;
 
 	d->pass = 1;
 	if ((error = dec_run(d, body, bodylen)) != 0)
@@ -477,6 +549,7 @@ cbl_msg_decode_body(cbl_msg *msg)
 	d->pass = 2;
 	d->depth = 0;
 	d->root_done = false;
+	d->tag = 0;
 	d->nvalues = 0;
 	if ((error = dec_run(d, body, bodylen)) != 0)
 		goto out;

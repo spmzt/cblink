@@ -219,7 +219,7 @@ Restrictions (a strict profile of RFC 8949):
 | Item                             | Rule |
 |----------------------------------|------|
 | Indefinite-length items (any)    | MUST NOT be sent; receivers MUST reject. Every collection's size is then known before its contents are read, so limits can be checked before allocation. |
-| Tags (major type 6)              | MUST NOT be sent; receivers MUST reject. |
+| Tags (major type 6)              | MUST NOT be sent; receivers MUST reject. A context with `CBL_CTX_YANG_TAGS` accepts the tags of YANG-CBOR (RFC 9254), the ground for wire version 2: 4 on a two-element array, 43 on a byte string or array, 44 on a text string, 45 on an unsigned integer or text string, 46 on an unsigned integer, text string or array, 47 on an unsigned integer; one tag per value, never on a key or the body. Every other tag is still rejected. |
 | Simple values                    | Only `false` (`0xF4`), `true` (`0xF5`) and `null` (`0xF6`). `undefined` and other simple values are rejected. |
 | Floats                           | Half, single and double precision are accepted. |
 | Map keys                         | MUST be integers (major type 0 or 1). Any other key type is rejected. |

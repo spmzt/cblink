@@ -64,9 +64,13 @@ int	cbl_tls_prepare(cbl_tls *tls, enum cbl_tls_kind kind, char *err,
 	    size_t errlen);
 int	cbl_peer_from_x509(struct cbl_peer *peer, struct x509_st *x);
 
-/* Effective limits, copied into objects so hot paths take no locks. */
+/*
+ * Effective limits and decoder flags, copied into objects so hot paths
+ * take no locks.
+ */
 struct cbl_limits {
 	uint64_t	v[CBL_LIM__COUNT];
+	uint32_t	flags;		/* CBL_CTX_* */
 };
 
 void	cbl_limits_default(struct cbl_limits *lim);
@@ -241,6 +245,7 @@ struct cbl_attr {
 	uint8_t		 kind;		/* enum cbl_kind */
 	uint8_t		 nflags;
 	uint8_t		 inmap;		/* 1: child of a map */
+	uint8_t		 tag;		/* CBOR tag, 0: none (CBL_CTX_YANG_TAGS) */
 	uint32_t	 count;		/* containers: number of children */
 	cbl_attr	*child;		/* containers: first child */
 	const cbl_attr	*parent;	/* NULL for the body root */

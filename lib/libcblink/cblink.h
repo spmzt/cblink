@@ -101,6 +101,14 @@ enum cbl_limit {
 	CBL_LIM__COUNT
 };
 
+/*
+ * Decoder flags of a context.  CBL_CTX_YANG_TAGS accepts the CBOR tags
+ * of YANG-CBOR (RFC 9254): 4 (decimal64), 43 to 46 (bits, enumeration,
+ * identityref and instance-identifier in a union) and 47 (an absolute
+ * SID); every other tag is still refused.
+ */
+#define	CBL_CTX_YANG_TAGS	0x00000001u
+
 /* Kinds of decoded values and of policy entries. */
 enum cbl_kind {
 	CBL_K_ANY,
@@ -136,6 +144,8 @@ int		 cbl_ctx_set_limit(cbl_ctx *ctx, enum cbl_limit lim,
 		    uint64_t v);
 int		 cbl_ctx_get_limit(cbl_ctx *ctx, enum cbl_limit lim,
 		    uint64_t *vp);
+int		 cbl_ctx_set_flags(cbl_ctx *ctx, uint32_t flags);
+int		 cbl_ctx_get_flags(cbl_ctx *ctx, uint32_t *flagsp);
 
 /* Messages: building. */
 int		 cbl_msg_new(cbl_ctx *ctx, uint16_t family, uint16_t cmd,
@@ -200,6 +210,7 @@ int		 cbl_attr_uint(const cbl_attr *a, uint64_t *vp);
 int		 cbl_attr_int(const cbl_attr *a, int64_t *vp);
 int		 cbl_attr_bool(const cbl_attr *a, bool *vp);
 int		 cbl_attr_double(const cbl_attr *a, double *vp);
+int		 cbl_attr_tag(const cbl_attr *a, uint64_t *tagp);
 int		 cbl_attr_bytes(const cbl_attr *a, const void **pp,
 		    size_t *lenp);
 int		 cbl_attr_str(cbl_msg *msg, const cbl_attr *a,

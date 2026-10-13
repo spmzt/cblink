@@ -450,7 +450,8 @@ dump_node(struct snode *n, void *arg __unused)
 
 /*
  * Every XPath expression of the model (when, must, a leafref's path)
- * parsed; those that do not parse are diagnostics, at the node.
+ * parsed and held to XPath-lite, which is what cblink evaluates; one
+ * that does not parse, or goes beyond it, is a diagnostic at its node.
  */
 struct xpcheck {
 	struct diags	*d;
@@ -468,7 +469,16 @@ xp_one(struct xpcheck *c, const struct snode *n, const char *what,
 
 	c->n++;
 	if ((x = cbl_xp_parse(expr, err, sizeof(err), &pos)) != NULL) {
+		if (cbl_xp_lite(x, err, sizeof(err), &pos)) {
+			cbl_xp_free(x);
+			return;
+		}
 		cbl_xp_free(x);
+		buf_init(&b);
+		path_add(&b, n);
+		diag_add(c->d, 0, 0, "%s: %s \"%s\": outside XPath-lite: %s "
+		    "at offset %zu", b.p, what, expr, err, pos);
+		buf_free(&b);
 		return;
 	}
 	buf_init(&b);

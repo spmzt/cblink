@@ -409,6 +409,28 @@ expect(struct xp_parser *p, enum tok_kind kind, const char *what)
 	return (true);
 }
 
+/* Set x's height from its children's; false, and failed, when too tall. */
+static bool
+heighten(struct xp_parser *p, struct cbl_xp *x)
+{
+	unsigned h = 0;
+
+	for (size_t i = 0; i < x->nargs; i++)
+		if (x->args[i]->height + 1 > h)
+			h = x->args[i]->height + 1;
+	for (size_t i = 0; i < x->npreds; i++)
+		if (x->preds[i]->height + 1 > h)
+			h = x->preds[i]->height + 1;
+	if (x->base != NULL && x->base->height + 1 > h)
+		h = x->base->height + 1;
+	x->height = h;
+	if (h > CBL_XP_MAX_HEIGHT) {
+		fail(p, x->pos, "too many operators or steps in a row");
+		return (false);
+	}
+	return (true);
+}
+
 static struct cbl_xp *
 node(struct xp_parser *p, enum cbl_xp_kind kind, size_t pos)
 {
@@ -560,7 +582,7 @@ step(struct xp_parser *p)
 		fail(p, t->pos, "a node test expected");
 		goto bad;
 	}
-	if (!predicates(p, s))
+	if (!predicates(p, s) || !heighten(p, s))
 		goto bad;
 	return (s);
 bad:
@@ -633,7 +655,7 @@ primary(struct xp_parser *p)
 				p->i++;
 			}
 		}
-		if (!expect(p, T_RPAR, "')'"))
+		if (!expect(p, T_RPAR, "')'") || !heighten(p, x))
 			goto bad;
 		return (x);
 	bad:
@@ -666,12 +688,14 @@ path_expr(struct xp_parser *p)
 				goto bad;
 		} else if (step_start(peek(p)) && !rel_path(p, path))
 			goto bad;
+		if (!heighten(p, path))
+			goto bad;
 		return (path);
 	}
 	if (step_start(t)) {
 		if ((path = node(p, CBL_XP_PATH, t->pos)) == NULL)
 			return (NULL);
-		if (!rel_path(p, path))
+		if (!rel_path(p, path) || !heighten(p, path))
 			goto bad;
 		return (path);
 	}
@@ -693,7 +717,7 @@ path_expr(struct xp_parser *p)
 		f->args[0] = x;
 		f->nargs = 1;
 		x = f;
-		if (!predicates(p, x)) {
+		if (!predicates(p, x) || !heighten(p, x)) {
 			cbl_xp_free(x);
 			return (NULL);
 		}
@@ -710,7 +734,7 @@ path_expr(struct xp_parser *p)
 	    anynode_step(p, CBL_XA_DESCENDANT_OR_SELF, pos)))
 		goto bad;
 	p->i++;
-	if (!rel_path(p, path))
+	if (!rel_path(p, path) || !heighten(p, path))
 		goto bad;
 	return (path);
 bad:
@@ -734,6 +758,10 @@ binary(struct xp_parser *p, enum cbl_xp_kind kind, struct cbl_xp *l,
 	x->args[0] = l;
 	x->args[1] = r;
 	x->nargs = 2;
+	if (!heighten(p, x)) {
+		cbl_xp_free(x);
+		return (NULL);
+	}
 	return (x);
 bad:
 	cbl_xp_free(l);
@@ -783,6 +811,10 @@ unary_expr(struct xp_parser *p)
 	}
 	n->args[0] = x;
 	n->nargs = 1;
+	if (!heighten(p, n)) {
+		cbl_xp_free(n);
+		return (NULL);
+	}
 	return (n);
 }
 
@@ -929,6 +961,167 @@ op_name(enum cbl_xp_kind k)
 	case CBL_XP_UNION:	return ("|");
 	default:		return ("?");
 	}
+}
+
+/*
+ * XPath-lite (cbl_xpath.h).
+ */
+
+static const struct {
+	const char	*name;
+	int		 min, max;	/* arguments; max -1: any number */
+	bool		 boolean;	/* returns a boolean */
+} lite_funcs[] = {
+	{ "bit-is-set", 2, 2, true },
+	{ "boolean", 1, 1, true },
+	{ "concat", 2, -1, false },
+	{ "contains", 2, 2, true },
+	{ "count", 1, 1, false },
+	{ "current", 0, 0, false },
+	{ "deref", 1, 1, false },
+	{ "derived-from", 2, 2, true },
+	{ "derived-from-or-self", 2, 2, true },
+	{ "enum-value", 1, 1, false },
+	{ "false", 0, 0, true },
+	{ "normalize-space", 0, 1, false },
+	{ "not", 1, 1, true },
+	{ "number", 0, 1, false },
+	{ "re-match", 2, 2, true },
+	{ "starts-with", 2, 2, true },
+	{ "string", 0, 1, false },
+	{ "string-length", 0, 1, false },
+	{ "substring", 2, 3, false },
+	{ "substring-after", 2, 2, false },
+	{ "substring-before", 2, 2, false },
+	{ "translate", 3, 3, false },
+	{ "true", 0, 0, true },
+};
+
+static int
+lite_func(const struct cbl_xp *x)
+{
+
+	if (x->kind != CBL_XP_FUNC || x->prefix != NULL)
+		return (-1);
+	for (size_t i = 0; i < sizeof(lite_funcs) / sizeof(lite_funcs[0]); i++)
+		if (strcmp(x->s, lite_funcs[i].name) == 0)
+			return ((int)i);
+	return (-1);
+}
+
+/* A predicate is a condition: a comparison, a boolean, or a path. */
+static bool
+condition(const struct cbl_xp *x)
+{
+	int f;
+
+	switch (x->kind) {
+	case CBL_XP_OR: case CBL_XP_AND:
+	case CBL_XP_EQ: case CBL_XP_NE:
+	case CBL_XP_LT: case CBL_XP_LE:
+	case CBL_XP_GT: case CBL_XP_GE:
+	case CBL_XP_PATH:
+	case CBL_XP_UNION:
+		return (true);
+	case CBL_XP_FUNC:
+		return ((f = lite_func(x)) >= 0 && lite_funcs[f].boolean);
+	default:
+		return (false);
+	}
+}
+
+struct lite {
+	char	*why;
+	size_t	 whylen;
+	size_t	 pos;
+	bool	 refused;
+};
+
+static bool
+refuse(struct lite *l, const struct cbl_xp *x, const char *fmt, ...)
+{
+	va_list ap;
+
+	l->refused = true;
+	l->pos = x->pos;
+	if (l->why != NULL && l->whylen > 0) {
+		va_start(ap, fmt);
+		vsnprintf(l->why, l->whylen, fmt, ap);
+		va_end(ap);
+	}
+	return (false);
+}
+
+static bool
+lite(struct lite *l, const struct cbl_xp *x)
+{
+	int f;
+
+	switch (x->kind) {
+	case CBL_XP_VAR:
+		return (refuse(l, x, "a variable ($%s)", x->s));
+	case CBL_XP_FILTER:
+		return (refuse(l, x, "a predicate on an expression"));
+	case CBL_XP_FUNC:
+		if ((f = lite_func(x)) < 0)
+			return (refuse(l, x, "the function %s%s%s()",
+			    x->prefix != NULL ? x->prefix : "",
+			    x->prefix != NULL ? ":" : "", x->s));
+		if ((int)x->nargs < lite_funcs[f].min ||
+		    (lite_funcs[f].max >= 0 && (int)x->nargs >
+		    lite_funcs[f].max))
+			return (refuse(l, x, "%s() with %zu arguments", x->s,
+			    x->nargs));
+		break;
+	case CBL_XP_PATH:
+		if (x->base != NULL && (x->base->kind != CBL_XP_FUNC ||
+		    x->base->prefix != NULL ||
+		    (strcmp(x->base->s, "current") != 0 &&
+		    strcmp(x->base->s, "deref") != 0)))
+			return (refuse(l, x->base, "a path from an expression "
+			    "other than current() or deref()"));
+		if (x->base != NULL && !lite(l, x->base))
+			return (false);
+		break;
+	case CBL_XP_STEP:
+		if (x->axis != CBL_XA_CHILD && x->axis != CBL_XA_PARENT &&
+		    x->axis != CBL_XA_SELF &&
+		    x->axis != CBL_XA_DESCENDANT_OR_SELF)
+			return (refuse(l, x, "the axis %s",
+			    cbl_xp_axis_name(x->axis)));
+		if (x->test != CBL_XT_NAME && x->test != CBL_XT_ANY &&
+		    x->test != CBL_XT_NODE)
+			return (refuse(l, x, "a node test other than a name, "
+			    "* or node()"));
+		for (size_t i = 0; i < x->npreds; i++)
+			if (!condition(x->preds[i]))
+				return (refuse(l, x->preds[i], "a predicate "
+				    "that is not a condition (a position?)"));
+		break;
+	default:
+		break;
+	}
+	for (size_t i = 0; i < x->nargs; i++)
+		if (!lite(l, x->args[i]))
+			return (false);
+	for (size_t i = 0; i < x->npreds; i++)
+		if (!lite(l, x->preds[i]))
+			return (false);
+	return (true);
+}
+
+bool
+cbl_xp_lite(const struct cbl_xp *x, char *why, size_t whylen, size_t *pos)
+{
+	struct lite l = { .why = why, .whylen = whylen };
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (lite(&l, x))
+		return (true);
+	if (pos != NULL)
+		*pos = l.pos;
+	return (false);
 }
 
 /*

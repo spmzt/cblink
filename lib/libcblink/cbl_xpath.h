@@ -84,11 +84,17 @@ struct cbl_xp {
 	enum cbl_xp_test test;
 	bool		 absolute;	/* path: starts with / or // */
 	bool		 abbrev;	/* step: written as . or .. or @x */
+	unsigned	 height;	/* 0 for a leaf, else 1 + its tallest */
 };
 
-/* Bounds against hostile input: nesting depth and length. */
+/*
+ * Bounds against hostile input: nesting depth, length, and the tree's
+ * height, which a long chain of operators makes tall without nesting
+ * (whatever walks the tree recurses).
+ */
 #define	CBL_XP_MAX_DEPTH	64
 #define	CBL_XP_MAX_LEN		65536
+#define	CBL_XP_MAX_HEIGHT	256
 
 /*
  * Parse expr.  On error, NULL, and err (of errlen bytes) says why and
@@ -106,5 +112,18 @@ void		 cbl_xp_free(struct cbl_xp *x);
 void		 cbl_xp_print(const struct cbl_xp *x, FILE *fp);
 
 const char	*cbl_xp_axis_name(enum cbl_xp_axis axis);
+
+/*
+ * Is the tree within XPath-lite, what cblink evaluates?  The axes child,
+ * parent, self and descendant-or-self; name tests, "*" and node(); the
+ * functions current(), deref(), derived-from(), derived-from-or-self(),
+ * enum-value(), bit-is-set(), re-match(), count(), not(), true(),
+ * false(), boolean(), number() and the string functions, each with its
+ * number of arguments; paths from current() or deref() only; predicates
+ * that are conditions, never positions; no variables.  On refusal,
+ * false, why (of whylen bytes) and *pos, the offset of the construct.
+ */
+bool		 cbl_xp_lite(const struct cbl_xp *x, char *why, size_t whylen,
+		    size_t *pos);
 
 #endif /* !_CBL_XPATH_H_ */

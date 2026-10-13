@@ -236,6 +236,9 @@ good leaf /good:things/thing/name rw key string length 1..63
 ext extension ext ietf-yang-structure-ext:structure note
 ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 " grep '^ext .*\(extension\|{\)' ext
+	# XPath beyond XPath-lite is refused, at its node.
+	atf_check -s exit:1 -e match:'^beyond@2026-10-13.yang:.*/beyond:item/first: must "position\(\) = 1": outside XPath-lite: the function position\(\)' \
+	    $gen -n "$y/beyond@2026-10-13.yang"
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang

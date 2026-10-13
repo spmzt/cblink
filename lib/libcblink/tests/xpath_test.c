@@ -235,6 +235,60 @@ ATF_TC_BODY(errors, tc)
 	check_error("a)", 1, "unexpected text");
 }
 
+static void
+check_lite(const char *expr, bool want, const char *wantwhy)
+{
+	struct cbl_xp *x;
+	char why[128];
+	size_t pos;
+	bool ok;
+
+	ATF_REQUIRE_MSG((x = cbl_xp_parse(expr, NULL, 0, NULL)) != NULL,
+	    "%s", expr);
+	ok = cbl_xp_lite(x, why, sizeof(why), &pos);
+	ATF_CHECK_MSG(ok == want, "%s: %s", expr, ok ? "within" : why);
+	if (!ok && wantwhy != NULL)
+		ATF_CHECK_MSG(strstr(why, wantwhy) != NULL, "%s: %s", expr,
+		    why);
+	cbl_xp_free(x);
+}
+
+ATF_TC_WITHOUT_HEAD(lite);
+ATF_TC_BODY(lite, tc)
+{
+
+	/* What the IETF modules write. */
+	check_lite("derived-from-or-self(../type, 'rt:static')", true, NULL);
+	check_lite("/nw:networks/nw:network[nw:network-id = "
+	    "current()/../network-ref]/nw:node/nw:node-id", true, NULL);
+	check_lite(". = 'pre-shared' or . = 'eap'", true, NULL);
+	check_lite("count(../address) > 0 and not(../x)", true, NULL);
+	check_lite("deref(.)/../interface", true, NULL);
+	check_lite("re-match(., '[a-z]+') and string-length(.) < 64 and "
+	    "concat(a, b, c) != substring(d, 1, 2)", true, NULL);
+	check_lite("enum-value(../s) + 1 >= 2 and bit-is-set(../f, 'up')",
+	    true, NULL);
+	check_lite("//x[y] | ../z[not(w)]", true, NULL);
+	check_lite("-1 * 2 div 3 mod 4", true, NULL);
+	/* Outside. */
+	check_lite("position() = 1", false, "the function position()");
+	check_lite("x[1]", false, "not a condition");
+	check_lite("x[last() - 1]", false, "not a condition");
+	check_lite("ancestor::x", false, "the axis ancestor");
+	check_lite("following-sibling::x", false, "the axis");
+	check_lite("@id", false, "the axis attribute");
+	check_lite("x/text()", false, "node test");
+	check_lite("$USER = 'a'", false, "a variable");
+	check_lite("(a | b)[x]", false, "a predicate on an expression");
+	check_lite("concat(a)", false, "concat() with 1 arguments");
+	check_lite("not()", false, "not() with 0 arguments");
+	check_lite("rt:foo(.)", false, "the function rt:foo()");
+	check_lite("string(.)/x", false, "a path from an expression");
+	check_lite("sum(x) > 1", false, "the function sum()");
+	/* Deep inside, still found. */
+	check_lite("a[b[c[position() = 1]]]", false, "position()");
+}
+
 ATF_TC_WITHOUT_HEAD(bounds);
 ATF_TC_BODY(bounds, tc)
 {
@@ -269,6 +323,15 @@ ATF_TC_BODY(bounds, tc)
 	ATF_CHECK_EQ(1000, x->nargs);
 	cbl_xp_free(x);
 	free(e);
+	/* A chain of operators taller than the height bound. */
+	e = calloc(4 * (CBL_XP_MAX_HEIGHT + 10) + 2, 1);
+	ATF_REQUIRE(e != NULL);
+	strcpy(e, "1");
+	for (size_t i = 0; i < CBL_XP_MAX_HEIGHT + 10; i++)
+		strcat(e, " + 1");
+	ATF_CHECK(cbl_xp_parse(e, err, sizeof(err), NULL) == NULL);
+	ATF_CHECK(strstr(err, "in a row") != NULL);
+	free(e);
 	/* Longer than the length bound. */
 	e = calloc(CBL_XP_MAX_LEN + 2, 1);
 	ATF_REQUIRE(e != NULL);
@@ -286,6 +349,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, shape);
 	ATF_TP_ADD_TC(tp, paths);
 	ATF_TP_ADD_TC(tp, errors);
+	ATF_TP_ADD_TC(tp, lite);
 	ATF_TP_ADD_TC(tp, bounds);
 	return (atf_no_error());
 }

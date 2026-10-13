@@ -1,7 +1,11 @@
-# cblink wire format, version 1
+# cblink wire format, version 2
 
-Status: version 1, as implemented by cblink 0.1.0. This document is
-normative. The key words MUST, MUST NOT, SHOULD and MAY are used as in
+Status: version 2, under way (PLAN-SDN-YANG Y-1): the frame and its
+header are version 2's; the body is still described here as version 1
+had it, and becomes one YANG-CBOR map (RFC 9254) whose top-level keys
+are absolute SIDs as the steps of 1.7 land.  Version 1 is not spoken:
+a version 1 frame is refused like any other unknown version.  This
+document is normative. The key words MUST, MUST NOT, SHOULD and MAY are used as in
 RFC 2119.
 
 cblink is a netlink-style protocol for userland applications. A connection
@@ -54,7 +58,7 @@ All multi-byte integers are big-endian (network byte order).
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-------------------------------+---------------+---------------+
-|         magic (0xCB4C)        |  version (1)  | hdrlen (24)   |  0
+|         magic (0xCB4C)        |  version (2)  | hdrlen (24)   |  0
 +-------------------------------+---------------+---------------+
 |                       length (total frame)                    |  4
 +-------------------------------+-------------------------------+
@@ -72,8 +76,8 @@ All multi-byte integers are big-endian (network byte order).
 | Off | Size | Field     | Description |
 |----:|-----:|-----------|-------------|
 | 0   | 2    | `magic`   | `0xCB 0x4C`. The first byte is not printable ASCII and is not a TLS record type (`0x14`–`0x18`), so HTTP or TLS traffic sent to a plaintext cblink port is rejected immediately. |
-| 2   | 1    | `version` | Protocol version. This document defines `1`. |
-| 3   | 1    | `hdrlen`  | Header length in bytes. Version 1 senders MUST send `24`. Receivers MUST accept any multiple of 4 in `[24, 64]` and MUST ignore header bytes past offset 24. This is the extension point for future versions. |
+| 2   | 1    | `version` | Protocol version. This document defines `2`. |
+| 3   | 1    | `hdrlen`  | Header length in bytes. Version 2 senders MUST send `24`. Receivers MUST accept any multiple of 4 in `[24, 64]` and MUST ignore header bytes past offset 24. This is the extension point for future versions. |
 | 4   | 4    | `length`  | Total frame length in bytes, including the header. `hdrlen <= length <= max_frame`. |
 | 8   | 2    | `family`  | Family id. `0` is the control family; other ids are assigned dynamically per server (section 7). |
 | 10  | 2    | `cmd`     | Command within the family. `0` is reserved and MUST NOT be used. |
@@ -92,8 +96,8 @@ Receivers MUST perform these checks, in this order, on the first
 1. `magic == 0xCB4C`. Otherwise: protocol error. On byte-stream transports
    the connection is closed without a reply. On message transports (plain
    SCTP) the message is dropped.
-2. `version == 1`. Otherwise the receiver sends an `ERROR` frame with code
-   `EPROTONOSUPPORT` (formatted as version 1), then closes (byte-stream
+2. `version == 2`. Otherwise the receiver sends an `ERROR` frame with code
+   `EPROTONOSUPPORT` (formatted as version 2), then closes (byte-stream
    transports) or drops the message (message transports).
 3. `hdrlen` is a multiple of 4 in `[24, 64]`. Otherwise: protocol error.
 4. `hdrlen <= length <= max_frame` (default 1 MiB, section 11).
@@ -346,7 +350,7 @@ The request was a `kv` (family 17) `get` (cmd 1) with seq 1. It failed with
 `ENOENT`, the message `"no such key"`, and path `[1]`:
 
 ```
-CB 4C 01 18  00 00 00 2B  00 11 00 01  00 00 00 20  magic,v1,hdrlen=24 len=43 fam=17 cmd=1 flags=ERROR
+CB 4C 02 18  00 00 00 2B  00 11 00 01  00 00 00 20  magic,v1,hdrlen=24 len=43 fam=17 cmd=1 flags=ERROR
 00 00 00 01  00 00 00 00                            seq=1 stream=0
 A3                                                  map(3)
    20 02                                            -1 (CODE): 2 (ENOENT)
@@ -420,7 +424,7 @@ Request: `ctrl` (0), `getfamily` (1), flags `REQUEST`, seq 7, body
 `{2: "kv"}`:
 
 ```
-CB 4C 01 18  00 00 00 1D  00 00 00 01  00 00 00 01   len=29 fam=0 cmd=1 flags=REQUEST
+CB 4C 02 18  00 00 00 1D  00 00 00 01  00 00 00 01   len=29 fam=0 cmd=1 flags=REQUEST
 00 00 00 07  00 00 00 00                             seq=7 stream=0
 A1 02 62 6B 76                                       {2: "kv"}
 ```
@@ -429,7 +433,7 @@ Reply: flags `0`, seq 7. Body
 `{1: 17, 2: "kv", 3: 1, 4: [{1: 1, 2: "get", 3: 1}], 5: [{1: 2, 2: "changes", 3: 0}]}`:
 
 ```
-CB 4C 01 18  00 00 00 3D  00 00 00 01  00 00 00 00   len=61 fam=0 cmd=1 flags=0
+CB 4C 02 18  00 00 00 3D  00 00 00 01  00 00 00 00   len=61 fam=0 cmd=1 flags=0
 00 00 00 07  00 00 00 00                             seq=7 stream=0
 A5                                                   map(5)
    01 11                                             1: 17
@@ -444,7 +448,7 @@ A5                                                   map(5)
 `kv` (17) `get` (1), flags `REQUEST|ACK`, seq 1, body `{1: "foo"}`:
 
 ```
-CB 4C 01 18  00 00 00 1E  00 11 00 01  00 00 00 03   len=30 fam=17 cmd=1 flags=REQUEST|ACK
+CB 4C 02 18  00 00 00 1E  00 11 00 01  00 00 00 03   len=30 fam=17 cmd=1 flags=REQUEST|ACK
 00 00 00 01  00 00 00 00                             seq=1
 A1 01 63 66 6F 6F                                    {1: "foo"}
 ```
@@ -453,7 +457,7 @@ The reply follows with flags `0`, seq 1, body `{1: "foo", 2: h'0102'}`.
 Then comes the acknowledgement, a header-only frame:
 
 ```
-CB 4C 01 18  00 00 00 18  00 11 00 01  00 00 00 02   len=24 flags=ACK
+CB 4C 02 18  00 00 00 18  00 11 00 01  00 00 00 02   len=24 flags=ACK
 00 00 00 01  00 00 00 00                             seq=1, empty body
 ```
 
@@ -538,23 +542,23 @@ open one.
 initiator), opener window 65536, acceptor window 32768:
 
 ```
-CB 4C 01 18  00 00 00 26  00 11 00 03  00 01 00 01   len=38 fam=17 cmd=3 flags=REQUEST|S_OPEN
+CB 4C 02 18  00 00 00 26  00 11 00 03  00 01 00 01   len=38 fam=17 cmd=3 flags=REQUEST|S_OPEN
 00 00 00 08  00 00 00 01                             seq=8 stream=1
 A2 25 1A 00 01 00 00  01 65 75 73 65 72 2F           {-6: 65536, 1: "user/"}
 
-CB 4C 01 18  00 00 00 1D  00 11 00 03  00 01 00 00   len=29 flags=S_OPEN (accept)
+CB 4C 02 18  00 00 00 1D  00 11 00 03  00 01 00 00   len=29 flags=S_OPEN (accept)
 00 00 00 08  00 00 00 01                             seq=8 stream=1
 A1 25 19 80 00                                       {-6: 32768}
 
-CB 4C 01 18  00 00 00 21  00 11 00 03  00 02 00 00   len=33 flags=S_DATA
+CB 4C 02 18  00 00 00 21  00 11 00 03  00 02 00 00   len=33 flags=S_DATA
 00 00 00 00  00 00 00 01                             seq=0 stream=1
 A1 01 66 75 73 65 72 2F 61                           {1: "user/a"}     costs 33 credit
 
-CB 4C 01 18  00 00 00 1C  00 11 00 03  00 20 00 00   len=28 flags=S_CREDIT
+CB 4C 02 18  00 00 00 1C  00 11 00 03  00 20 00 00   len=28 flags=S_CREDIT
 00 00 00 00  00 00 00 01                             seq=0 stream=1
 A1 25 18 21                                          {-6: 33}
 
-CB 4C 01 18  00 00 00 18  00 11 00 03  00 04 00 00   len=24 flags=S_HCLOSE
+CB 4C 02 18  00 00 00 18  00 11 00 03  00 04 00 00   len=24 flags=S_HCLOSE
 00 00 00 00  00 00 00 01                             stream=1, empty body
 ```
 
@@ -586,7 +590,7 @@ Example: `kv` (17) notification `changed` (cmd 4), group 2, body
 `{1: "k"}`:
 
 ```
-CB 4C 01 18  00 00 00 1C  00 11 00 04  00 00 00 40   len=28 flags=NOTIFY
+CB 4C 02 18  00 00 00 1C  00 11 00 04  00 00 00 40   len=28 flags=NOTIFY
 00 00 00 00  00 00 00 02                             seq=0 group=2
 A1 01 61 6B                                          {1: "k"}
 ```

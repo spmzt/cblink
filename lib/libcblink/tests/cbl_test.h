@@ -86,7 +86,7 @@ mkframe(unsigned char *out, size_t max, uint16_t family, uint16_t cmd,
 	len = CBL_HDRLEN + blen;
 	out[0] = 0xCB;
 	out[1] = 0x4C;
-	out[2] = 1;
+	out[2] = CBL_PROTO_VERSION;
 	out[3] = CBL_HDRLEN;
 	out[4] = len >> 24;
 	out[5] = (len >> 16) & 0xff;

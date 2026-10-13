@@ -29,7 +29,7 @@ decode_hex(cbl_ctx *ctx, const char *hex)
 }
 
 #define	ERR_FRAME \
-	"CB 4C 01 18 00 00 00 2B 00 11 00 01 00 00 00 20" \
+	"CB 4C 02 18 00 00 00 2B 00 11 00 01 00 00 00 20" \
 	"00 00 00 01 00 00 00 00" \
 	"A3 20 02 21 6B 6E 6F 20 73 75 63 68 20 6B 65 79 22 81 01"
 
@@ -70,7 +70,7 @@ ATF_TC_BODY(wire_getfamily, tc)
 	cbl_msg_set_seq(msg, 7);
 	cbl_put_str(msg, 2, "kv");
 	require_frame(msg,
-	    "CB 4C 01 18 00 00 00 1D 00 00 00 01 00 00 00 01"
+	    "CB 4C 02 18 00 00 00 1D 00 00 00 01 00 00 00 01"
 	    "00 00 00 07 00 00 00 00 A1 02 62 6B 76");
 	cbl_msg_free(msg);
 
@@ -94,7 +94,7 @@ ATF_TC_BODY(wire_getfamily, tc)
 	cbl_nest_end(msg);
 	cbl_array_end(msg);
 	require_frame(msg,
-	    "CB 4C 01 18 00 00 00 3D 00 00 00 01 00 00 00 00"
+	    "CB 4C 02 18 00 00 00 3D 00 00 00 01 00 00 00 00"
 	    "00 00 00 07 00 00 00 00"
 	    "A5 01 11 02 62 6B 76 03 01"
 	    "04 81 A3 01 01 02 63 67 65 74 03 01"
@@ -114,14 +114,14 @@ ATF_TC_BODY(wire_do_and_ack, tc)
 	cbl_msg_set_seq(msg, 1);
 	cbl_put_str(msg, 1, "foo");
 	require_frame(msg,
-	    "CB 4C 01 18 00 00 00 1E 00 11 00 01 00 00 00 03"
+	    "CB 4C 02 18 00 00 00 1E 00 11 00 01 00 00 00 03"
 	    "00 00 00 01 00 00 00 00 A1 01 63 66 6F 6F");
 	cbl_msg_free(msg);
 
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 17, 1, CBL_F_ACK, &msg));
 	cbl_msg_set_seq(msg, 1);
 	require_frame(msg,
-	    "CB 4C 01 18 00 00 00 18 00 11 00 01 00 00 00 02"
+	    "CB 4C 02 18 00 00 00 18 00 11 00 01 00 00 00 02"
 	    "00 00 00 01 00 00 00 00");
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
@@ -137,7 +137,7 @@ ATF_TC_BODY(wire_notify, tc)
 	cbl_msg_set_stream(msg, 2);
 	cbl_put_str(msg, 1, "k");
 	require_frame(msg,
-	    "CB 4C 01 18 00 00 00 1C 00 11 00 04 00 00 00 40"
+	    "CB 4C 02 18 00 00 00 1C 00 11 00 04 00 00 00 40"
 	    "00 00 00 00 00 00 00 02 A1 01 61 6B");
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
@@ -148,16 +148,16 @@ ATF_TC_WITHOUT_HEAD(wire_stream_frames);
 ATF_TC_BODY(wire_stream_frames, tc)
 {
 	static const char *frames[] = {
-		"CB 4C 01 18 00 00 00 26 00 11 00 03 00 01 00 01"
+		"CB 4C 02 18 00 00 00 26 00 11 00 03 00 01 00 01"
 		"00 00 00 08 00 00 00 01"
 		"A2 25 1A 00 01 00 00 01 65 75 73 65 72 2F",
-		"CB 4C 01 18 00 00 00 1D 00 11 00 03 00 01 00 00"
+		"CB 4C 02 18 00 00 00 1D 00 11 00 03 00 01 00 00"
 		"00 00 00 08 00 00 00 01 A1 25 19 80 00",
-		"CB 4C 01 18 00 00 00 21 00 11 00 03 00 02 00 00"
+		"CB 4C 02 18 00 00 00 21 00 11 00 03 00 02 00 00"
 		"00 00 00 00 00 00 00 01 A1 01 66 75 73 65 72 2F 61",
-		"CB 4C 01 18 00 00 00 1C 00 11 00 03 00 20 00 00"
+		"CB 4C 02 18 00 00 00 1C 00 11 00 03 00 20 00 00"
 		"00 00 00 00 00 00 00 01 A1 25 18 21",
-		"CB 4C 01 18 00 00 00 18 00 11 00 03 00 04 00 00"
+		"CB 4C 02 18 00 00 00 18 00 11 00 03 00 04 00 00"
 		"00 00 00 00 00 00 00 01",
 	};
 	static const uint32_t flags[] = {
@@ -209,6 +209,30 @@ ATF_TC_BODY(header_fields, tc)
 	cbl_ctx_free(ctx);
 }
 
+/* Version 1, cblink's first, is not spoken: refused as unknown. */
+ATF_TC_WITHOUT_HEAD(version_1_refused);
+ATF_TC_BODY(version_1_refused, tc)
+{
+	cbl_ctx *ctx = test_ctx();
+	unsigned char buf[64];
+	cbl_msg *msg = NULL;
+	size_t len;
+
+	len = mkframe(buf, sizeof(buf), 17, 1, 0, 5, 0, NULL);
+	ATF_REQUIRE_EQ(CBL_PROTO_VERSION, buf[2]);
+	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, buf, len, NULL, &msg));
+	cbl_msg_free(msg);
+	buf[2] = 1;
+	msg = NULL;
+	ATF_REQUIRE_EQ(EPROTONOSUPPORT, cbl_frame_decode(ctx, buf, len, NULL,
+	    &msg));
+	ATF_REQUIRE(msg == NULL);
+	buf[2] = 3;
+	ATF_REQUIRE_EQ(EPROTONOSUPPORT, cbl_frame_decode(ctx, buf, len, NULL,
+	    &msg));
+	cbl_ctx_free(ctx);
+}
+
 /* hdrlen > 24: extension bytes are skipped (section 2). */
 ATF_TC_WITHOUT_HEAD(header_extension);
 ATF_TC_BODY(header_extension, tc)
@@ -217,7 +241,7 @@ ATF_TC_BODY(header_extension, tc)
 	unsigned char buf[64];
 	cbl_msg *msg;
 
-	hex2bin("CB 4C 01 20 00 00 00 23 00 11 00 01 00 00 00 00"
+	hex2bin("CB 4C 02 20 00 00 00 23 00 11 00 01 00 00 00 00"
 	    "00 00 00 05 00 00 00 00 EE EE EE EE EE EE EE EE"
 	    "A1 01 01", buf, sizeof(buf));
 	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, buf, 35, NULL, &msg));
@@ -353,6 +377,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, wire_stream_frames);
 	ATF_TP_ADD_TC(tp, header_fields);
 	ATF_TP_ADD_TC(tp, header_extension);
+	ATF_TP_ADD_TC(tp, version_1_refused);
 	ATF_TP_ADD_TC(tp, flag_combinations);
 	ATF_TP_ADD_TC(tp, encode_invalid_flags);
 	ATF_TP_ADD_TC(tp, frame_sequence);

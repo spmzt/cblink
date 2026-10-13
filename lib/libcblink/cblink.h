@@ -46,7 +46,7 @@ typedef struct cbl_tls		cbl_tls;
 
 /* Wire constants (docs/WIRE-FORMAT.md). */
 #define	CBL_MAGIC		0xCB4C
-#define	CBL_PROTO_VERSION	1
+#define	CBL_PROTO_VERSION	2
 #define	CBL_HDRLEN		24
 #define	CBL_HDRLEN_MAX		64
 

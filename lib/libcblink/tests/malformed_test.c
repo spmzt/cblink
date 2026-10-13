@@ -48,10 +48,14 @@ ATF_TC_BODY(bad_header, tc)
 	buf[1] = 'G';
 	ATF_REQUIRE_EQ(EPROTO, cbl_frame_decode(ctx, buf, len, NULL, &msg));
 	buf[1] = 0x4C;
-	buf[2] = 2;
+	/* Version 1, cblink's first, and one to come. */
+	buf[2] = 1;
 	ATF_REQUIRE_EQ(EPROTONOSUPPORT,
 	    cbl_frame_decode(ctx, buf, len, NULL, &msg));
-	buf[2] = 1;
+	buf[2] = CBL_PROTO_VERSION + 1;
+	ATF_REQUIRE_EQ(EPROTONOSUPPORT,
+	    cbl_frame_decode(ctx, buf, len, NULL, &msg));
+	buf[2] = CBL_PROTO_VERSION;
 	static const uint8_t bad_hdrlen[] = { 0, 20, 23, 25, 26, 68, 255 };
 	for (size_t i = 0; i < nitems(bad_hdrlen); i++) {
 		buf[3] = bad_hdrlen[i];

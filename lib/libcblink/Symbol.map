@@ -30,6 +30,7 @@ CBLINK_1.0 {
 	cbl_conn_process;
 	cbl_conn_send;
 	cbl_conn_stats;
+	cbl_conn_subscribed;
 	cbl_conn_set_limit;
 	cbl_conn_set_tls;
 	cbl_conn_set_udata;

@@ -518,6 +518,7 @@ cbl_conn *cbl_req_conn(const cbl_req *);
 
 int	cbl_notify(cbl_family *, uint32_t group_idx, cbl_msg *);	/* thread-safe broadcast */
 int	cbl_conn_notify(cbl_conn *, cbl_family *, uint32_t group_idx, cbl_msg *); /* unicast */
+bool	cbl_conn_subscribed(cbl_conn *, cbl_family *, uint32_t group_idx); /* thread-safe */
 ```
 
 ## 10. Peer identity (same for every transport)

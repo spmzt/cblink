@@ -606,6 +606,8 @@ void		*cbl_sub_arg(const cbl_sub *sub);
 int		 cbl_notify(cbl_family *fam, uint32_t group_idx, cbl_msg *msg);
 int		 cbl_conn_notify(cbl_conn *conn, cbl_family *fam,
 		    uint32_t group_idx, cbl_msg *msg);
+bool		 cbl_conn_subscribed(cbl_conn *conn, cbl_family *fam,
+		    uint32_t group_idx);
 int		 cbl_notify_msg_new(cbl_family *fam, uint16_t cmd,
 		    cbl_msg **msgp);
 

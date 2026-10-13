@@ -405,6 +405,12 @@ ATF_TC_BODY(unicast, tc)
 	    &s2));
 	ATF_REQUIRE_EQ(2, f.sc.n);
 	pthread_mutex_lock(&f.sc.mtx);
+	/* Each asked for events, neither for audit. */
+	ATF_CHECK(cbl_conn_subscribed(f.sc.c[0], f.fam, G_EVENTS));
+	ATF_CHECK(cbl_conn_subscribed(f.sc.c[1], f.fam, G_EVENTS));
+	ATF_CHECK(!cbl_conn_subscribed(f.sc.c[1], f.fam, G_AUDIT));
+	ATF_CHECK(!cbl_conn_subscribed(f.sc.c[1], f.fam, 99));
+	ATF_CHECK(!cbl_conn_subscribed(NULL, f.fam, G_EVENTS));
 	ATF_REQUIRE_EQ(0, cbl_notify_msg_new(f.fam, N_EVENT, &m));
 	cbl_put_uint(m, NA_SEQ, 0);
 	ATF_REQUIRE_EQ(0, cbl_conn_notify(f.sc.c[1], f.fam, G_EVENTS, m));

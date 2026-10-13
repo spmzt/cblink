@@ -279,6 +279,28 @@ cbl_conn_notify(cbl_conn *conn, cbl_family *fam, uint32_t group_idx,
 	return (error);
 }
 
+/*
+ * Whether conn has subscribed to the family's group: so that a server
+ * sends what a peer asked to be told on its own connection only to one
+ * that asked.  Thread-safe.
+ */
+bool
+cbl_conn_subscribed(cbl_conn *conn, cbl_family *fam, uint32_t group_idx)
+{
+	struct cbl_member *m;
+	uint32_t gid;
+
+	if (conn == NULL || fam == NULL || group_idx >= fam->def->nmcgrps)
+		return (false);
+	gid = fam->group_base + group_idx;
+	pthread_mutex_lock(&conn->ctx->submtx);
+	LIST_FOREACH(m, &conn->memberships, clink)
+		if (m->g->gid == gid)
+			break;
+	pthread_mutex_unlock(&conn->ctx->submtx);
+	return (m != NULL);
+}
+
 /* newfamily/delfamily on the control family's "notify" group. */
 void
 cbl_ctrl_notify_family(cbl_ctx *ctx, cbl_family *fam, bool added)

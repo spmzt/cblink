@@ -3,7 +3,7 @@
 .\"
 .\" Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
 .\"
-.Dd October 2, 2026
+.Dd October 13, 2026
 .Dt CBLINK-GEN 1
 .Os
 .Sh NAME
@@ -16,6 +16,10 @@
 .Op Fl m Ar parts
 .Op Fl o Ar dir
 .Ar spec.yaml
+.Nm
+.Fl n
+.Op Fl p Ar dir
+.Ar module.yang
 .Sh DESCRIPTION
 The
 .Nm
@@ -89,6 +93,12 @@ The default is
 .Ql h,c,client,server,md .
 .It Fl n
 Check the spec and report problems without writing anything.
+For a YANG module, report what was compiled.
+.It Fl p Ar dir
+Look for the modules a YANG module imports in
+.Ar dir ,
+as well as in the module's own directory.
+It may be given up to 16 times.
 .It Fl o Ar dir
 Write the files into
 .Ar dir
@@ -96,6 +106,27 @@ instead of the current directory.
 .It Fl V
 Print the version and exit.
 .El
+.Ss YANG modules
+A file named
+.Ar name Ns .yang
+or
+.Ar name Ns @ Ns Ar revision Ns .yang
+is a YANG module, read through libyang when
+.Nm
+is built with it
+.Pq Va CBLINK_GEN_LIBYANG ,
+which it is when libyang 3 is installed.
+Every module it may import is read before capability mode is entered,
+from its own directory and each
+.Fl p
+directory; a module imported without a revision is the latest found.
+Only
+.Fl n
+is supported yet: the module is parsed and compiled, and errors are
+reported as for a spec.
+A
+.Nm
+built without libyang refuses YANG modules.
 .Ss Building with make
 .Pa ${LOCALBASE}/share/cblink/cblink.mk
 runs

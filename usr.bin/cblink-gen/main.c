@@ -6,7 +6,9 @@
 
 /*
  * cblink-gen: generate C code and documentation from a cblink family
- * spec.  See cblink-gen(1) and docs/GENERATOR.md.
+ * spec.  See cblink-gen(1) and docs/GENERATOR.md.  A YANG module
+ * (name.yang or name@revision.yang) is read through libyang when the
+ * generator is built with it (CBLINK_GEN_LIBYANG).
  */
 
 #include <sys/capsicum.h>
@@ -23,6 +25,9 @@
 #include <unistd.h>
 
 #include "spec.h"
+#ifdef CBLINK_GEN_LIBYANG
+#include "yang.h"
+#endif
 
 #define	DEFAULT_PARTS	"h,c,client,server,md"
 
@@ -31,7 +36,8 @@ usage(void)
 {
 
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
-	    "[-o dir] spec.yaml\n");
+	    "[-o dir] spec.yaml\n"
+	    "       cblink-gen -n [-p dir] ... module.yang\n");
 	exit(2);
 }
 
@@ -69,6 +75,60 @@ read_file(int fd, const char *path, size_t *lenp)
 	return (data);
 }
 
+#ifdef CBLINK_GEN_LIBYANG
+/*
+ * A YANG module: the modules it may import are read, from -p and from
+ * its own directory, before capability mode.
+ */
+static int
+yang_main(int fd, const char *path, const char **paths, size_t npaths,
+    bool check)
+{
+	struct diags d = { 0 };
+	struct ly_ctx *ctx;
+	char *pathcopy, *file;
+	int rv;
+
+	pathcopy = xstrdup(path);
+	file = xstrdup(basename(pathcopy));
+	free(pathcopy);
+	yang_add_file(fd, path);
+	close(fd);
+	pathcopy = xstrdup(path);
+	yang_add_dir(dirname(pathcopy));
+	free(pathcopy);
+	for (size_t i = 0; i < npaths; i++)
+		yang_add_dir(paths[i]);
+	ctx = yang_ctx_new();
+
+	caph_cache_catpages();
+	if (caph_limit_stdio() != 0 || caph_enter() != 0)
+		err(2, "capsicum");
+
+	d.file = file;
+	rv = yang_load(ctx, &d, check);
+	if (rv != 0) {
+		diag_print(&d);
+		return (1);
+	}
+	if (!check)
+		errx(2, "%s: generating C from YANG is not written yet; -n "
+		    "checks the module", file);
+	diag_free(&d);
+	free(file);
+	return (0);
+}
+#else
+static int
+yang_main(int fd __unused, const char *path, const char **paths __unused,
+    size_t npaths __unused, bool check __unused)
+{
+
+	errx(2, "%s: YANG input needs cblink-gen built with libyang "
+	    "(CBLINK_GEN_LIBYANG=yes, net/libyang3)", path);
+}
+#endif
+
 int
 main(int argc, char *argv[])
 {
@@ -78,10 +138,11 @@ main(int argc, char *argv[])
 	struct spec *s;
 	bool builtin = false, check = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
-	size_t len;
+	const char *paths[16];
+	size_t len, npaths = 0;
 	int ch, fd, dirfd, rv;
 
-	while ((ch = getopt(argc, argv, "Bb:m:no:V")) != -1) {
+	while ((ch = getopt(argc, argv, "Bb:m:no:p:V")) != -1) {
 		switch (ch) {
 		case 'B':
 			builtin = true;
@@ -98,6 +159,11 @@ main(int argc, char *argv[])
 		case 'o':
 			outdir = optarg;
 			break;
+		case 'p':
+			if (npaths == nitems(paths))
+				errx(2, "too many -p directories");
+			paths[npaths++] = optarg;
+			break;
 		case 'V':
 			printf("cblink-gen %s\n", CBLGEN_VERSION);
 			return (0);
@@ -112,6 +178,8 @@ main(int argc, char *argv[])
 
 	if ((fd = open(argv[0], O_RDONLY | O_CLOEXEC)) == -1)
 		err(2, "%s", argv[0]);
+	if ((dot = strrchr(argv[0], '.')) != NULL && strcmp(dot, ".yang") == 0)
+		return (yang_main(fd, argv[0], paths, npaths, check));
 	dirfd = -1;
 	if (!check && (dirfd = open(outdir, O_DIRECTORY | O_SEARCH |
 	    O_CLOEXEC)) == -1)

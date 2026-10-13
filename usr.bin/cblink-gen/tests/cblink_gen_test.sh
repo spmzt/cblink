@@ -4,8 +4,8 @@
 # Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
 #
 # cblink-gen: golden files, determinism, every validation error with its
-# exact location, malformed YAML, the committed control family, and
-# cblink.mk.
+# exact location, malformed YAML, the committed control family,
+# cblink.mk, and the YANG front end.
 #
 
 # The generator under test is installed next to this script.
@@ -183,6 +183,36 @@ EOF
 	done
 }
 
+atf_test_case yang_frontend
+yang_frontend_head()
+{
+	atf_set "descr" "A YANG module is compiled through libyang, or" \
+	    "refused by a generator built without it"
+}
+yang_frontend_body()
+{
+	setup
+	y="$(atf_get_srcdir)/yang"
+
+	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
+	    grep -q 'needs cblink-gen built with libyang'; then
+		atf_check -s exit:2 -e match:'CBLINK_GEN_LIBYANG=yes' \
+		    $gen -n "$y/good@2026-10-13.yang"
+		return
+	fi
+	# Its import, ietf-yang-types, is libyang's own.
+	atf_check -o match:'^good@2026-10-13.yang: good@2026-10-13 compiled' \
+	    $gen -n "$y/good@2026-10-13.yang"
+	atf_check -s exit:1 -e match:'^bad@2026-10-13.yang:.*uint33' \
+	    $gen -n "$y/bad@2026-10-13.yang"
+	# A module file's name says its module.
+	cp "$y/good@2026-10-13.yang" ".yang"
+	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang
+	# Code generation from YANG is not written yet.
+	atf_check -s exit:2 -e match:'not written yet' \
+	    $gen -o . "$y/good@2026-10-13.yang"
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case golden
@@ -193,4 +223,5 @@ atf_init_test_cases()
 	atf_add_test_case cli
 	atf_add_test_case big_input
 	atf_add_test_case cblink_mk
+	atf_add_test_case yang_frontend
 }

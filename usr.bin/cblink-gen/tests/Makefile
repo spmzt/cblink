@@ -53,7 +53,7 @@ ${_m}.c ${_m}_client.c ${_m}_server.c: ${_m}.h
 ${PACKAGE}FILES+=	${GEN}
 ${PACKAGE}FILESMODE_${GEN}= 0555
 
-FILESGROUPS+=	GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK
+FILESGROUPS+=	GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG
 GOLDEN=		golden/types.yaml golden/kv.yaml
 GOLDENDIR=	${TESTSDIR}/golden
 GOLDENTYPES!=	cd ${.CURDIR} && echo golden/types/*
@@ -72,8 +72,11 @@ CTRLDIR=	${TESTSDIR}/ctrl
 # cblink.mk, to build from specs given in each form of path.
 CBLMK=		${.CURDIR}/../../../share/cblink/cblink.mk
 CBLMKDIR=	${TESTSDIR}
+# YANG modules for the front end.
+YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang
+YANGDIR=	${TESTSDIR}/yang
 
-.for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK
+.for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG
 ${g}PACKAGE=	${PACKAGE}
 .endfor
 

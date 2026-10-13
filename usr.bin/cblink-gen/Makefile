@@ -7,6 +7,27 @@ SRCS=		main.c \
 		yaml.c
 MAN=		cblink-gen.1
 
+# The YANG front end needs libyang 3 (net/libyang3), a developer's
+# dependency only: without it the generator reads YAML specs and refuses
+# YANG modules.  CBLINK_GEN_LIBYANG is yes when libyang is found, unless
+# set; set to yes, it must be found.
+LOCALBASE?=	/usr/local
+.if !defined(CBLINK_GEN_LIBYANG)
+.if exists(${LOCALBASE}/include/libyang/libyang.h)
+CBLINK_GEN_LIBYANG=	yes
+.else
+CBLINK_GEN_LIBYANG=	no
+.endif
+.endif
+.if ${CBLINK_GEN_LIBYANG} == "yes"
+.if !exists(${LOCALBASE}/include/libyang/libyang.h)
+.error CBLINK_GEN_LIBYANG=yes, but libyang is not in ${LOCALBASE}: pkg install libyang3
+.endif
+SRCS+=		yang.c
+CFLAGS+=	-DCBLINK_GEN_LIBYANG -idirafter ${LOCALBASE}/include
+LDADD+=		-L${LOCALBASE}/lib -lyang
+.endif
+
 CSTD?=		c23
 WARNS?=		6
 

@@ -184,7 +184,8 @@ tag_fits(uint8_t tag, const cbl_attr *t, uint64_t n)
 	case 4:
 		return (t->kind == CBL_K_ARRAY && n == 2);
 	case 43:
-		return (t->kind == CBL_K_BYTES || t->kind == CBL_K_ARRAY);
+		/* Bits in a union: their names (RFC 9254 section 6.7). */
+		return (t->kind == CBL_K_TEXT);
 	case 44:
 		return (t->kind == CBL_K_TEXT);
 	case 45:

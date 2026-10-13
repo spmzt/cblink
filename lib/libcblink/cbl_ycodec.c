@@ -273,6 +273,62 @@ put_simple(struct cbl_ybuf *b, uint8_t v)
 static int	enc_map(struct cbl_ybuf *, const struct cbl_ynode *,
 		    const void *, int);
 
+/* The highest position a bits type has, and so how many bytes it needs. */
+static size_t
+bits_bytes(const struct cbl_ytype *t)
+{
+	int64_t max = -1;
+
+	for (uint32_t i = 0; i < t->nitems; i++)
+		if (t->items[i].value > max)
+			max = t->items[i].value;
+	return (max < 0 ? 0 : (size_t)(max / 8 + 1));
+}
+
+/*
+ * Bits (RFC 9254 section 6.7): their bytes, bit n in byte n / 8, the
+ * least significant first, with no trailing zero byte; in a union tag 43
+ * and the names of those set, by position, a space between.
+ */
+static int
+enc_bits(struct cbl_ybuf *b, const struct cbl_ytype *t,
+    const struct cbl_bytes *by, bool inunion)
+{
+	const uint8_t *p = by->p;
+	size_t len = by->len, tlen = 0;
+	char *names;
+	int error;
+
+	while (len > 0 && p[len - 1] == 0)
+		len--;
+	if (!inunion) {
+		if ((error = put_head(b, 2, len)) != 0)
+			return (error);
+		return (put(b, p, len));
+	}
+	for (uint32_t i = 0; i < t->nitems; i++)
+		tlen += strlen(t->items[i].name) + 1;
+	if ((names = calloc(1, tlen + 1)) == NULL)
+		return (ENOMEM);
+	/* By position: the items as written need not be in its order. */
+	for (int64_t pos = 0; (size_t)pos < len * 8; pos++) {
+		if ((p[pos / 8] & (1u << (pos % 8))) == 0)
+			continue;
+		for (uint32_t i = 0; i < t->nitems; i++)
+			if (t->items[i].value == pos) {
+				if (names[0] != '\0')
+					strcat(names, " ");
+				strcat(names, t->items[i].name);
+				break;
+			}
+	}
+	if ((error = put_head(b, 6, 43)) == 0 &&
+	    (error = put_head(b, 3, strlen(names))) == 0)
+		error = put(b, names, strlen(names));
+	free(names);
+	return (error);
+}
+
 static int
 enc_value(struct cbl_ybuf *b, const struct cbl_ytype *t, const void *v,
     bool inunion)
@@ -315,12 +371,10 @@ enc_value(struct cbl_ybuf *b, const struct cbl_ytype *t, const void *v,
 		if ((error = put_head(b, 3, strlen(s))) != 0)
 			return (error);
 		return (put(b, s, strlen(s)));
-	case CBL_YT_BINARY:
 	case CBL_YT_BITS:
+		return (enc_bits(b, t, v, inunion));
+	case CBL_YT_BINARY:
 		by = v;
-		if (inunion && t->kind == CBL_YT_BITS &&
-		    (error = put_head(b, 6, 43)) != 0)
-			return (error);
 		if ((error = put_head(b, 2, by->len)) != 0)
 			return (error);
 		return (put(b, by->p, by->len));
@@ -458,7 +512,12 @@ struct yrd {
 	int		 flags;
 	char		*why;
 	size_t		 whylen;
+	const struct cbl_ymodule *leafmod;	/* an identityref's, by name */
 };
+
+static int	dec_bits(struct yrd *, const struct cbl_ytype *,
+		    struct cbl_bytes *, bool);
+static int	ident_named(struct yrd *, uint64_t *);
 
 static int
 fail(struct yrd *r, int error, const char *fmt, ...)
@@ -845,9 +904,7 @@ dec_value(struct yrd *r, const struct cbl_ytype *t, void *v, bool inunion)
 	case CBL_YT_STRING:
 		return (dec_text(r, (const char **)v, NULL));
 	case CBL_YT_BITS:
-		if (inunion && !tag(r, 43))
-			return (fail(r, EINVAL, "bits (tag 43) expected"));
-		return (dec_bytes(r, v));
+		return (dec_bits(r, t, v, inunion));
 	case CBL_YT_BINARY:
 		return (dec_bytes(r, v));
 	case CBL_YT_ENUMERATION:
@@ -878,6 +935,11 @@ dec_value(struct yrd *r, const struct cbl_ytype *t, void *v, bool inunion)
 		if (inunion && !tag(r, 45))
 			return (fail(r, EINVAL, "an identityref (tag 45) "
 			    "expected"));
+		/* By SID, or by name (RFC 9254 section 6.10). */
+		if ((error = peek(r, &major, &arg, &hlen)) != 0)
+			return (error);
+		if (major == 3)
+			return (ident_named(r, (uint64_t *)v));
 		if ((error = dec_int(r, 0, UINT64_MAX, false, &u, &s)) != 0)
 			return (error);
 		*(uint64_t *)v = u;
@@ -898,6 +960,154 @@ dec_value(struct yrd *r, const struct cbl_ytype *t, void *v, bool inunion)
 }
 
 static int	dec_map(struct yrd *, const struct cbl_ynode *, void *, int);
+
+/* A set bit, its byte grown to in a buffer of len bytes. */
+static void
+set_bit(uint8_t *p, int64_t pos)
+{
+
+	p[pos / 8] |= (uint8_t)(1u << (pos % 8));
+}
+
+/*
+ * Bits read: their bytes, or the sparse array of byte strings that do not
+ * end in a zero byte and counts of zero bytes between, alternating, two
+ * elements at least; or in a union tag 43 and names.  No more bytes than
+ * the type's highest position needs: what a count asks is bounded.
+ */
+static int
+dec_bits(struct yrd *r, const struct cbl_ytype *t, struct cbl_bytes *out,
+    bool inunion)
+{
+	struct yrd look;
+	unsigned major, prev;
+	uint64_t arg, k, total = 0;
+	size_t hlen, max = bits_bytes(t), len, at;
+	const char *names, *w, *e;
+	uint8_t *p;
+	int error;
+
+	if (inunion) {
+		if (!tag(r, 43))
+			return (fail(r, EINVAL, "bits (tag 43) expected"));
+		if ((error = dec_text(r, &names, &len)) != 0)
+			return (error);
+		if ((p = ralloc(r, max)) == NULL)
+			return (fail(r, ENOMEM, NOMEM));
+		for (w = names; *w != '\0'; w = *e == ' ' ? e + 1 : e) {
+			uint32_t i;
+
+			e = strchr(w, ' ') != NULL ? strchr(w, ' ') : w +
+			    strlen(w);
+			for (i = 0; i < t->nitems; i++)
+				if (strlen(t->items[i].name) == (size_t)(e - w) &&
+				    memcmp(t->items[i].name, w, (size_t)(e - w))
+				    == 0)
+					break;
+			if (i == t->nitems)
+				return (fail(r, EINVAL, "no bit %.*s",
+				    (int)(e - w), w));
+			set_bit(p, t->items[i].value);
+		}
+		while (max > 0 && p[max - 1] == 0)
+			max--;
+		out->p = p;
+		out->len = max;
+		return (0);
+	}
+	if ((error = peek(r, &major, &arg, &hlen)) != 0)
+		return (error);
+	if (major == 2) {
+		if ((error = dec_bytes(r, out)) != 0)
+			return (error);
+		/* A receiver may take trailing zero bytes: dropped. */
+		while (out->len > 0 &&
+		    ((const uint8_t *)out->p)[out->len - 1] == 0)
+			out->len--;
+		return (0);
+	}
+	if (major != 4)
+		return (fail(r, EINVAL, "bits expected"));
+	/* The array: checked and measured, then copied. */
+	look = *r;
+	look.why = NULL;
+	(void)head(&look, 4, &k, "an array");
+	if (k < 2)
+		return (fail(r, EINVAL, "bits as an array of one: sent bare"));
+	if ((error = count(r, k, 1)) != 0)
+		return (error);
+	prev = 7;
+	for (uint64_t i = 0; i < k; i++) {
+		if (peek(&look, &major, &arg, &hlen) != 0 ||
+		    (major != 0 && major != 2) || major == prev)
+			return (fail(r, EINVAL, "bits: byte strings and counts "
+			    "alternate"));
+		look.p += hlen;
+		if (major == 2) {
+			if (arg == 0 || arg > (uint64_t)(look.end - look.p) ||
+			    look.p[arg - 1] == 0)
+				return (fail(r, EINVAL, "bits: a byte string "
+				    "ends in a zero byte"));
+			look.p += arg;
+		}
+		prev = major;
+		if (arg > max || total > max - arg)
+			return (fail(r, EINVAL, "bits past the type's "
+			    "highest position"));
+		total += arg;
+	}
+	if ((p = ralloc(r, (size_t)total)) == NULL)
+		return (fail(r, ENOMEM, NOMEM));
+	(void)head(r, 4, &k, "an array");
+	for (at = 0; k > 0; k--) {
+		(void)peek(r, &major, &arg, &hlen);
+		r->p += hlen;
+		if (major == 2) {
+			memcpy(p + at, r->p, (size_t)arg);
+			r->p += arg;
+		}
+		at += (size_t)arg;
+	}
+	len = (size_t)total;
+	while (len > 0 && p[len - 1] == 0)
+		len--;
+	out->p = p;
+	out->len = len;
+	return (0);
+}
+
+/* An identityref by name: module:identity, or the leaf's module's. */
+static int
+ident_named(struct yrd *r, uint64_t *sid)
+{
+	const struct cbl_yschema *s;
+	const char *name, *colon, *mod;
+	size_t len, mlen;
+	int error;
+
+	if ((error = dec_text(r, &name, &len)) != 0)
+		return (error);
+	if (r->leafmod == NULL || (s = r->leafmod->schema) == NULL)
+		return (fail(r, EINVAL, "an identity by name, no schema to "
+		    "know it by"));
+	if ((colon = strchr(name, ':')) != NULL) {
+		mod = name;
+		mlen = (size_t)(colon - name);
+		name = colon + 1;
+	} else {
+		mod = r->leafmod->name;
+		mlen = strlen(mod);
+	}
+	for (uint32_t i = 0; i < s->nident; i++)
+		if (strcmp(s->ident[i].name, name) == 0 &&
+		    strlen(s->ident[i].module->name) == mlen &&
+		    memcmp(s->ident[i].module->name, mod, mlen) == 0) {
+			*sid = s->ident[i].sid;
+			return (0);
+		}
+	return (fail(r, EINVAL, "no identity %.*s:%s", (int)mlen, mod,
+	    name));
+}
 
 /* Child n's value into struct p. */
 static int
@@ -927,6 +1137,7 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 		a = (struct yarr *)WAT(p, n->off);
 		a->n = (size_t)k;
 		a->v = q;
+		r->leafmod = n->module;
 		for (uint64_t i = 0; i < k; i++) {
 			error = n->kind == CBL_YN_LIST ? dec_map(r, n,
 			    WAT(q, i * n->size), depth + 1) : dec_value(r,
@@ -936,6 +1147,7 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 		}
 		return (0);
 	case CBL_YN_LEAF:
+		r->leafmod = n->module;
 		if ((error = dec_value(r, n->type, WAT(p, n->off), false)) != 0)
 			return (error);
 		if (n->hoff != CBL_YOFF_NONE)
@@ -1016,7 +1228,7 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
     void *p, cbl_yarena *a, int flags, char *why, size_t whylen)
 {
 	struct yrd r = { data, (const uint8_t *)data + len, data, a, flags,
-	    why, whylen };
+	    why, whylen, NULL };
 	int error;
 
 	if (why != NULL && whylen > 0)

@@ -51,6 +51,32 @@ module shapes {
     leaf level {
       type level;
     }
+    leaf wide {
+      type bits {
+        bit low;
+        bit high {
+          position 17;
+        }
+      }
+      description
+        "Far apart: the sparse form of RFC 9254 section 6.7.";
+    }
+    leaf pointer {
+      type union {
+        type instance-identifier;
+        type bits {
+          bit a;
+          bit b {
+            position 9;
+          }
+        }
+        type identityref {
+          base colour;
+        }
+      }
+      description
+        "Members told apart by their tags: 46, 43, 45.";
+    }
     leaf colour {
       type identityref {
         base colour;

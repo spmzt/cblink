@@ -2,6 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "shapes",
     "module-revision": "2026-10-13",
+    "sid-file-version": 1,
     "description": "SIDs of a test module, numbered by cblink-gen -a.",
     "dependency-revision": [
       {
@@ -220,6 +221,16 @@
         "namespace": "data",
         "identifier": "/shapes:shapes/tuned/max",
         "sid": "1099511727816"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/pointer",
+        "sid": "1099511727817"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/wide",
+        "sid": "1099511727818"
       }
     ]
   }

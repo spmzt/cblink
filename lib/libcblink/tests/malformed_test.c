@@ -291,8 +291,7 @@ ATF_TC_BODY(yang_tags, tc)
 {
 	static const char *const accepted[] = {
 		"A1 01 C4 82 21 19 0C 5D",	/* 4: decimal64 31.65 */
-		"A1 01 D8 2B 42 05 01",		/* 43: bits */
-		"A1 01 D8 2B 82 01 02",		/* 43: sparse bits */
+		"A1 01 D8 2B 64 72 65 61 64",	/* 43: bits, by name */
 		"A1 01 D8 2C 63 75 70 30",	/* 44: enumeration */
 		"A1 01 D8 2D 19 07 14",		/* 45: identityref SID */
 		"A1 01 D8 2D 61 78",		/* 45: identityref name */
@@ -300,7 +299,7 @@ ATF_TC_BODY(yang_tags, tc)
 		"A1 01 D8 2E 82 19 05 DE 63 65 6D 30",	/* with a key */
 		"A1 01 D8 2F 19 05 DC",		/* 47: absolute SID */
 	};
-	static const uint64_t tags[] = { 4, 43, 43, 44, 45, 45, 46, 46, 47 };
+	static const uint64_t tags[] = { 4, 43, 44, 45, 45, 46, 46, 47 };
 	cbl_ctx *ctx = test_ctx();
 	const cbl_attr *a;
 	uint32_t flags;
@@ -332,6 +331,9 @@ ATF_TC_BODY(yang_tags, tc)
 	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(cbl_attr_index(a, 1), &tag));
 	cbl_msg_free(msg);
 
+	/* Bits in a union are their names (RFC 9254 section 6.7). */
+	require_body_error(ctx, "A1 01 D8 2B 42 05 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2B 82 01 02", EPROTO);
 	/* Every other tag is still refused. */
 	require_body_error(ctx, "A1 01 C0 61 78", EPROTO);	/* 0 */
 	require_body_error(ctx, "A1 01 C1 01", EPROTO);		/* 1 */

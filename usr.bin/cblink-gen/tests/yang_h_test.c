@@ -475,6 +475,167 @@ ATF_TC_BODY(arena_limit, tc)
 	cbl_yarena_free(a);
 }
 
+/*
+ * One kind at a time (PLAN-SDN-YANG 1.7.3), as RFC 9254 section 6 has it:
+ * the bytes of {the leaf's delta: its value} written, and those the RFC
+ * allows besides read.
+ */
+
+/* A map's key: a delta, as CBOR (all of shapes' are below 256). */
+static size_t
+key_bytes(uint8_t *p, uint64_t delta)
+{
+
+	if (delta < 24) {
+		p[0] = (uint8_t)delta;
+		return (1);
+	}
+	p[0] = 0x18;
+	p[1] = (uint8_t)delta;
+	return (2);
+}
+
+/* shapes with this leaf alone: its encoding, {delta: value}. */
+static void
+check_leaf(const struct shapes_shapes *sh, const char *leaf,
+    const uint8_t *value, size_t vlen)
+{
+	const struct cbl_ynode *s = top(module("shapes"), "shapes");
+	struct cbl_ybuf b = { 0 };
+	uint8_t want[64];
+	size_t n;
+
+	want[0] = 0xa1;
+	n = 1 + key_bytes(want + 1, child(s, leaf)->sid - s->sid);
+	memcpy(want + n, value, vlen);
+	n += vlen;
+	ATF_REQUIRE_EQ(0, shapes_shapes_encode(sh, &b));
+	ATF_CHECK_EQ_MSG(n, b.len, "%s: %zu bytes, %zu wanted", leaf, b.len,
+	    n);
+	ATF_CHECK_MSG(b.len == n && memcmp(b.p, want, n) == 0, "%s: not the "
+	    "bytes wanted", leaf);
+	cbl_ybuf_free(&b);
+}
+
+/* {leaf's delta: value} read into out; 0 or the error. */
+static int
+read_leaf(const char *leaf, const uint8_t *value, size_t vlen,
+    struct shapes_shapes *out, cbl_yarena *a)
+{
+	const struct cbl_ynode *s = top(module("shapes"), "shapes");
+	uint8_t in[64];
+	char why[256];
+	size_t n;
+
+	in[0] = 0xa1;
+	n = 1 + key_bytes(in + 1, child(s, leaf)->sid - s->sid);
+	memcpy(in + n, value, vlen);
+	return (shapes_shapes_decode(in, n + vlen, out, a, CBL_YD_STRICT, why,
+	    sizeof(why)));
+}
+
+ATF_TC_WITHOUT_HEAD(kinds);
+ATF_TC_BODY(kinds, tc)
+{
+	static uint8_t perms[] = { 0x11, 0x00 };
+	struct shapes_shapes sh, got;
+	uint64_t red;
+	cbl_yarena *a;
+
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	red = UINT64_C(1099511727778);
+
+	/* decimal64: 2.57 of two fraction digits is 4([-2, 257]). */
+	memset(&sh, 0, sizeof(sh));
+	sh.has_ratio = true;
+	sh.ratio = 257;
+	check_leaf(&sh, "ratio", (const uint8_t *)"\xc4\x82\x21\x19\x01\x01",
+	    6);
+	ATF_CHECK_EQ(EINVAL, read_leaf("ratio", (const uint8_t *)
+	    "\xc4\x82\x22\x19\x01\x01", 6, &got, a));	/* three digits */
+
+	/* empty: null. */
+	memset(&sh, 0, sizeof(sh));
+	sh.flag = true;
+	check_leaf(&sh, "flag", (const uint8_t *)"\xf6", 1);
+
+	/* bits: bytes, a trailing zero byte never sent. */
+	memset(&sh, 0, sizeof(sh));
+	sh.perms.p = perms;
+	sh.perms.len = sizeof(perms);
+	check_leaf(&sh, "perms", (const uint8_t *)"\x41\x11", 2);
+	/* The sparse form: h'01', two zero bytes, h'02': 0 and 17. */
+	ATF_REQUIRE_EQ(0, read_leaf("wide", (const uint8_t *)
+	    "\x83\x41\x01\x01\x41\x02", 6, &got, a));
+	ATF_REQUIRE_EQ(3u, got.wide.len);
+	ATF_CHECK(memcmp(got.wide.p, "\x01\x00\x02", 3) == 0);
+	ATF_CHECK_EQ(EINVAL, read_leaf("wide", (const uint8_t *)
+	    "\x81\x41\x01", 3, &got, a));	/* one byte string: bare */
+	ATF_CHECK_EQ(EINVAL, read_leaf("wide", (const uint8_t *)
+	    "\x82\x41\x00\x01", 4, &got, a));	/* ends in a zero byte */
+	ATF_CHECK_EQ(EINVAL, read_leaf("wide", (const uint8_t *)
+	    "\x82\x41\x01\x41\x02", 5, &got, a));	/* two strings at once */
+	ATF_CHECK_EQ(EINVAL, read_leaf("wide", (const uint8_t *)
+	    "\x83\x41\x01\x1a\x7f\xff\xff\xff\x41\x02", 10, &got, a));
+
+	/* identityref: its SID; read by name too, qualified or not. */
+	memset(&sh, 0, sizeof(sh));
+	sh.has_colour = true;
+	sh.colour = red;
+	check_leaf(&sh, "colour", (const uint8_t *)
+	    "\x1b\x00\x00\x01\x00\x00\x01\x86\xa2", 9);
+	ATF_REQUIRE_EQ(0, read_leaf("colour", (const uint8_t *)"\x63red", 4,
+	    &got, a));
+	ATF_CHECK_EQ(red, got.colour);
+	ATF_REQUIRE_EQ(0, read_leaf("colour", (const uint8_t *)
+	    "\x6ashapes:red", 11, &got, a));
+	ATF_CHECK_EQ(red, got.colour);
+	ATF_CHECK_EQ(EINVAL, read_leaf("colour", (const uint8_t *)
+	    "\x65x:red", 6, &got, a));
+
+	/* instance-identifier: the CBOR it is, a SID with a key here. */
+	memset(&sh, 0, sizeof(sh));
+	sh.target.p = "\x82\x19\x06\xa4\x61k";
+	sh.target.len = 6;
+	check_leaf(&sh, "target", (const uint8_t *)"\x82\x19\x06\xa4\x61k", 6);
+
+	/* union: as its member, an enumeration tagged 44 by name. */
+	memset(&sh, 0, sizeof(sh));
+	sh.has_either = true;
+	sh.either.which = 0;
+	sh.either.v.m0 = -5;
+	check_leaf(&sh, "either", (const uint8_t *)"\x24", 1);
+	sh.either.which = 1;
+	sh.either.v.m1 = SHAPES_SHAPES_EITHER_M1_LOW;
+	check_leaf(&sh, "either", (const uint8_t *)"\xd8\x2c\x63low", 6);
+	sh.either.which = 2;
+	sh.either.v.m2 = "x";
+	check_leaf(&sh, "either", (const uint8_t *)"\x61x", 2);
+	/* And 46, 43 by name, 45. */
+	memset(&sh, 0, sizeof(sh));
+	sh.has_pointer = true;
+	sh.pointer.which = 1;
+	sh.pointer.v.m1.p = "\x01\x02";		/* a and b */
+	sh.pointer.v.m1.len = 2;
+	check_leaf(&sh, "pointer", (const uint8_t *)"\xd8\x2b\x63\x61\x20\x62",
+	    6);
+	ATF_REQUIRE_EQ(0, read_leaf("pointer", (const uint8_t *)
+	    "\xd8\x2b\x63\x61\x20\x62", 6, &got, a));
+	ATF_CHECK_EQ(1u, got.pointer.which);
+	ATF_CHECK(got.pointer.v.m1.len == 2 &&
+	    memcmp(got.pointer.v.m1.p, "\x01\x02", 2) == 0);
+	ATF_REQUIRE_EQ(0, read_leaf("pointer", (const uint8_t *)
+	    "\xd8\x2e\x19\x06\xa4", 5, &got, a));
+	ATF_CHECK_EQ(0u, got.pointer.which);
+	ATF_REQUIRE_EQ(0, read_leaf("pointer", (const uint8_t *)
+	    "\xd8\x2d\x63red", 6, &got, a));
+	ATF_CHECK_EQ(2u, got.pointer.which);
+	ATF_CHECK_EQ(red, got.pointer.v.m2);
+	ATF_CHECK_EQ(EINVAL, read_leaf("pointer", (const uint8_t *)
+	    "\xd8\x2b\x61\x63", 4, &got, a));	/* no bit c */
+	cbl_yarena_free(a);
+}
+
 ATF_TC_WITHOUT_HEAD(identities);
 ATF_TC_BODY(identities, tc)
 {
@@ -536,5 +697,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, lookups);
 	ATF_TP_ADD_TC(tp, roundtrip);
 	ATF_TP_ADD_TC(tp, arena_limit);
+	ATF_TP_ADD_TC(tp, kinds);
 	return (atf_no_error());
 }

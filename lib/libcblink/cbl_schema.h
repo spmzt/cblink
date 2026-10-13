@@ -239,7 +239,10 @@ struct cbl_yfeature {
 	bool			 enabled;
 };
 
+struct cbl_yschema;
+
 struct cbl_ymodule {
+	const struct cbl_yschema *schema;	/* the tables it is in */
 	const char		*name;
 	const char		*revision;	/* NULL: none */
 	const char		*ns;

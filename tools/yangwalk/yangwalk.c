@@ -16,8 +16,9 @@
  * target's), path the schema path with prefixes, flags any of config
  * (rw), state (ro), empty (an input or output without children, which
  * a compiled rpc or action always has), mandatory, key, presence,
- * user-ordered, deprecated, obsolete.  A node defined in a grouping is
- * listed wherever the grouping is used.
+ * user-ordered, deprecated, obsolete; then the type, units, defaults
+ * (canonical) or a choice's default case, when and must.  A node defined
+ * in a grouping is listed wherever the grouping is used.
  *
  * Extension instances (step 0.2.3) each get a line,
  *
@@ -253,6 +254,26 @@ node_print(struct lysc_node *n, void *arg, ly_bool *cont __unused)
 		printf(" ");
 		type_print(t);
 	}
+	if (n->nodetype == LYS_LEAF) {
+		const struct lysc_node_leaf *l = (const void *)n;
+
+		if (l->units != NULL)
+			printf(" units \"%s\"", l->units);
+		if (l->dflt != NULL)
+			printf(" default \"%s\"", lyd_value_get_canonical(
+			    n->module->ctx, l->dflt));
+	} else if (n->nodetype == LYS_LEAFLIST) {
+		const struct lysc_node_leaflist *l = (const void *)n;
+
+		if (l->units != NULL)
+			printf(" units \"%s\"", l->units);
+		LY_ARRAY_FOR(l->dflts, u)
+			printf(" default \"%s\"", lyd_value_get_canonical(
+			    n->module->ctx, l->dflts[u]));
+	} else if (n->nodetype == LYS_CHOICE &&
+	    ((const struct lysc_node_choice *)(const void *)n)->dflt != NULL)
+		printf(" default-case %s", ((const struct lysc_node_choice *)
+		    (const void *)n)->dflt->name);
 	when = lysc_node_when(n);
 	LY_ARRAY_FOR(when, u)
 		expr_print("when", lyxp_get_expr(when[u]->cond));

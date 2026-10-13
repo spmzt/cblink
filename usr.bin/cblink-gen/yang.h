@@ -21,7 +21,7 @@ struct schema;
  */
 void		 yang_add_file(int fd, const char *path, bool given);
 void		 yang_add_dir(const char *dir);
-struct ly_ctx	*yang_ctx_new(void);
+struct ly_ctx	*yang_ctx_new(const char **dirs, size_t ndirs);
 
 /*
  * In capability mode: parse and compile the modules named, with the

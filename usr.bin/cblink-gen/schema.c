@@ -25,6 +25,45 @@ schema_new(void)
 }
 
 static void
+range_free(struct srange *r)
+{
+
+	if (r == NULL)
+		return;
+	free(r->parts);
+	free(r->emsg);
+	free(r->eapptag);
+	free(r);
+}
+
+static void
+type_free(struct sntype *t)
+{
+
+	if (t == NULL)
+		return;
+	free(t->name);
+	range_free(t->range);
+	range_free(t->length);
+	for (size_t i = 0; i < t->npatterns; i++) {
+		free(t->patterns[i].expr);
+		free(t->patterns[i].emsg);
+		free(t->patterns[i].eapptag);
+	}
+	free(t->patterns);
+	for (size_t i = 0; i < t->nitems; i++)
+		free(t->items[i].name);
+	free(t->items);
+	free(t->bases);
+	free(t->path);
+	type_free(t->real);
+	for (size_t i = 0; i < t->nmembers; i++)
+		type_free(t->members[i]);
+	free(t->members);
+	free(t);
+}
+
+static void
 snode_free(struct snode *n)
 {
 	struct snode *next;
@@ -34,6 +73,20 @@ snode_free(struct snode *n)
 		snode_free(n->child);
 		free(n->name);
 		free(n->keys);
+		type_free(n->type);
+		free(n->units);
+		for (size_t i = 0; i < n->ndflts; i++)
+			free(n->dflts[i]);
+		free(n->dflts);
+		for (size_t i = 0; i < n->nwhen; i++)
+			free(n->when[i]);
+		free(n->when);
+		for (size_t i = 0; i < n->nmusts; i++) {
+			free(n->musts[i].expr);
+			free(n->musts[i].emsg);
+			free(n->musts[i].eapptag);
+		}
+		free(n->musts);
 		free(n);
 	}
 }
@@ -118,6 +171,43 @@ snode_kind_name(enum snode_kind kind)
 	return ("?");
 }
 
+const char *
+sntype_base_name(enum sntype_base base)
+{
+
+	switch (base) {
+	case ST_BINARY:		return ("binary");
+	case ST_BITS:		return ("bits");
+	case ST_BOOLEAN:	return ("boolean");
+	case ST_DECIMAL64:	return ("decimal64");
+	case ST_EMPTY:		return ("empty");
+	case ST_ENUMERATION:	return ("enumeration");
+	case ST_IDENTITYREF:	return ("identityref");
+	case ST_INSTANCEID:	return ("instance-identifier");
+	case ST_INT8:		return ("int8");
+	case ST_INT16:		return ("int16");
+	case ST_INT32:		return ("int32");
+	case ST_INT64:		return ("int64");
+	case ST_LEAFREF:	return ("leafref");
+	case ST_STRING:		return ("string");
+	case ST_UINT8:		return ("uint8");
+	case ST_UINT16:		return ("uint16");
+	case ST_UINT32:		return ("uint32");
+	case ST_UINT64:		return ("uint64");
+	case ST_UNION:		return ("union");
+	}
+	return ("?");
+}
+
+/* Signed bounds: the signed integers and decimal64. */
+bool
+sntype_signed(enum sntype_base base)
+{
+
+	return (base == ST_INT8 || base == ST_INT16 || base == ST_INT32 ||
+	    base == ST_INT64 || base == ST_DECIMAL64);
+}
+
 static void
 walk(struct snode *n, snode_visit_t *visit, void *arg)
 {
@@ -153,6 +243,106 @@ path_add(struct buf *b, const struct snode *n)
 	buf_puts(b, n->name);
 }
 
+/* An expression on one line, its runs of white space as one space. */
+static void
+dump_expr(const char *what, const char *x)
+{
+	bool space = false;
+
+	printf(" %s \"", what);
+	for (; *x != '\0'; x++) {
+		if (*x == ' ' || *x == '\t' || *x == '\n' || *x == '\r') {
+			space = true;
+			continue;
+		}
+		if (space)
+			putchar(' ');
+		space = false;
+		putchar(*x);
+	}
+	printf("\"");
+}
+
+static void
+dump_range(const char *what, const struct srange *r, bool sgn)
+{
+
+	if (r == NULL)
+		return;
+	printf(" %s ", what);
+	for (size_t i = 0; i < r->nparts; i++) {
+		if (i > 0)
+			printf("|");
+		if (sgn)
+			printf("%" PRId64 "..%" PRId64, r->parts[i].min.i,
+			    r->parts[i].max.i);
+		else
+			printf("%" PRIu64 "..%" PRIu64, r->parts[i].min.u,
+			    r->parts[i].max.u);
+	}
+}
+
+static void
+dump_type(const struct sntype *t)
+{
+
+	printf("%s", sntype_base_name(t->base));
+	if (t->name != NULL)
+		printf("(%s)", t->name);
+	switch (t->base) {
+	case ST_DECIMAL64:
+		printf(" fraction-digits %u", t->fdigits);
+		dump_range("range", t->range, true);
+		break;
+	case ST_STRING:
+		dump_range("length", t->length, false);
+		for (size_t i = 0; i < t->npatterns; i++)
+			printf(" pattern%s '%s'", t->patterns[i].invert ?
+			    "(invert)" : "", t->patterns[i].expr);
+		break;
+	case ST_BINARY:
+		dump_range("length", t->length, false);
+		break;
+	case ST_ENUMERATION:
+	case ST_BITS:
+		printf(" {");
+		for (size_t i = 0; i < t->nitems; i++)
+			printf("%s%s%s%" PRId64, i > 0 ? " " : "",
+			    t->items[i].name, t->base == ST_BITS ? "@" : "=",
+			    t->items[i].value);
+		printf("}");
+		break;
+	case ST_IDENTITYREF:
+		printf(" base");
+		for (size_t i = 0; i < t->nbases; i++)
+			printf(" %s:%s", t->bases[i]->module->name,
+			    t->bases[i]->name);
+		break;
+	case ST_LEAFREF:
+		dump_expr("path", t->path);
+		printf("%s -> ", t->require_instance ? "" :
+		    " (no instance required)");
+		dump_type(t->real);
+		break;
+	case ST_INSTANCEID:
+		if (!t->require_instance)
+			printf(" (no instance required)");
+		break;
+	case ST_UNION:
+		printf(" [");
+		for (size_t i = 0; i < t->nmembers; i++) {
+			if (i > 0)
+				printf(" | ");
+			dump_type(t->members[i]);
+		}
+		printf("]");
+		break;
+	default:
+		dump_range("range", t->range, sntype_signed(t->base));
+		break;
+	}
+}
+
 static void
 dump_node(struct snode *n, void *arg __unused)
 {
@@ -186,6 +376,20 @@ dump_node(struct snode *n, void *arg __unused)
 		printf(" obsolete");
 	if (n->kind == SN_LIST)
 		printf(" min %" PRIu32 " max %" PRIu32, n->min, n->max);
+	if (n->type != NULL) {
+		printf(" ");
+		dump_type(n->type);
+	}
+	if (n->units != NULL)
+		printf(" units \"%s\"", n->units);
+	for (size_t i = 0; i < n->ndflts; i++)
+		printf(" default \"%s\"", n->dflts[i]);
+	if (n->dflt_case != NULL)
+		printf(" default-case %s", n->dflt_case->name);
+	for (size_t i = 0; i < n->nwhen; i++)
+		dump_expr("when", n->when[i]);
+	for (size_t i = 0; i < n->nmusts; i++)
+		dump_expr("must", n->musts[i].expr);
 	printf("\n");
 }
 

@@ -182,15 +182,35 @@ log_clb(LY_LOG_LEVEL level, const char *msg, const char *data_path __unused,
 		diag_add(logto, (int)line, 0, "%s", msg);
 }
 
+/*
+ * The context, before capability mode.  libyang has some modules built
+ * in (ietf-yang-types, ietf-inet-types and others) and loads them now,
+ * resolving their imports from the search directories it is given here:
+ * so that an import without a revision takes the latest revision there,
+ * as the modules' own imports will, the directories are given, and only
+ * then is searching turned off, so that libyang never opens a file in
+ * capability mode.  Everything else comes through the import callback.
+ */
 struct ly_ctx *
-yang_ctx_new(void)
+yang_ctx_new(const char **dirs, size_t ndirs)
 {
 	struct ly_ctx *ctx;
+	struct buf b;
 
+	buf_init(&b);
+	for (size_t i = 0; i < ndirs; i++) {
+		if (strchr(dirs[i], ':') != NULL)
+			errx(2, "%s: a search directory with ':' in its "
+			    "name", dirs[i]);
+		buf_printf(&b, "%s%s", i > 0 ? ":" : "", dirs[i]);
+	}
 	ly_set_log_clb(log_clb);
-	if (ly_ctx_new(NULL, LY_CTX_DISABLE_SEARCHDIRS | LY_CTX_REF_IMPLEMENTED,
-	    &ctx) != LY_SUCCESS)
+	if (ly_ctx_new(ndirs > 0 ? b.p : NULL, LY_CTX_DISABLE_SEARCHDIR_CWD |
+	    LY_CTX_REF_IMPLEMENTED, &ctx) != LY_SUCCESS)
 		errx(2, "libyang: cannot make a context");
+	buf_free(&b);
+	if (ly_ctx_set_options(ctx, LY_CTX_DISABLE_SEARCHDIRS) != LY_SUCCESS)
+		errx(2, "libyang: cannot turn searching off");
 	ly_ctx_set_module_imp_clb(ctx, imp, NULL);
 	return (ctx);
 }
@@ -232,6 +252,7 @@ yang_load(struct ly_ctx *ctx, struct diags *d, const char **features)
 
 struct conv {
 	struct schema		 *s;
+	const struct ly_ctx	 *ctx;
 	const struct lys_module **lmods;	/* parallel to s->mods */
 };
 
@@ -270,6 +291,173 @@ kind_of(uint16_t nodetype)
 static struct snode *conv_list(struct conv *, const struct lysc_node *,
     struct snode *);
 
+static char *
+xstrdup_or_null(const char *p)
+{
+
+	return (p != NULL ? xstrdup(p) : NULL);
+}
+
+static enum sntype_base
+base_of(LY_DATA_TYPE t)
+{
+
+	switch (t) {
+	case LY_TYPE_BINARY:	return (ST_BINARY);
+	case LY_TYPE_UINT8:	return (ST_UINT8);
+	case LY_TYPE_UINT16:	return (ST_UINT16);
+	case LY_TYPE_UINT32:	return (ST_UINT32);
+	case LY_TYPE_UINT64:	return (ST_UINT64);
+	case LY_TYPE_STRING:	return (ST_STRING);
+	case LY_TYPE_BITS:	return (ST_BITS);
+	case LY_TYPE_BOOL:	return (ST_BOOLEAN);
+	case LY_TYPE_DEC64:	return (ST_DECIMAL64);
+	case LY_TYPE_EMPTY:	return (ST_EMPTY);
+	case LY_TYPE_ENUM:	return (ST_ENUMERATION);
+	case LY_TYPE_IDENT:	return (ST_IDENTITYREF);
+	case LY_TYPE_INST:	return (ST_INSTANCEID);
+	case LY_TYPE_LEAFREF:	return (ST_LEAFREF);
+	case LY_TYPE_UNION:	return (ST_UNION);
+	case LY_TYPE_INT8:	return (ST_INT8);
+	case LY_TYPE_INT16:	return (ST_INT16);
+	case LY_TYPE_INT32:	return (ST_INT32);
+	case LY_TYPE_INT64:	return (ST_INT64);
+	default:
+		break;
+	}
+	errx(2, "libyang: a type of unknown base %d", (int)t);
+}
+
+static struct srange *
+conv_range(const struct lysc_range *lr, bool sgn)
+{
+	struct srange *r;
+	LY_ARRAY_COUNT_TYPE u;
+
+	if (lr == NULL)
+		return (NULL);
+	r = xcalloc(1, sizeof(*r));
+	r->nparts = LY_ARRAY_COUNT(lr->parts);
+	r->parts = xcalloc(r->nparts, sizeof(*r->parts));
+	LY_ARRAY_FOR(lr->parts, u) {
+		if (sgn) {
+			r->parts[u].min.i = lr->parts[u].min_64;
+			r->parts[u].max.i = lr->parts[u].max_64;
+		} else {
+			r->parts[u].min.u = lr->parts[u].min_u64;
+			r->parts[u].max.u = lr->parts[u].max_u64;
+		}
+	}
+	r->emsg = xstrdup_or_null(lr->emsg);
+	r->eapptag = xstrdup_or_null(lr->eapptag);
+	return (r);
+}
+
+static struct sntype *
+conv_type(struct conv *c, const struct lysc_type *lt)
+{
+	const struct lysc_type_num *num = (const void *)lt;
+	const struct lysc_type_dec *dec = (const void *)lt;
+	const struct lysc_type_str *str = (const void *)lt;
+	const struct lysc_type_bin *bin = (const void *)lt;
+	const struct lysc_type_enum *en = (const void *)lt;
+	const struct lysc_type_bits *bits = (const void *)lt;
+	const struct lysc_type_identityref *idr = (const void *)lt;
+	const struct lysc_type_leafref *lr = (const void *)lt;
+	const struct lysc_type_instanceid *ii = (const void *)lt;
+	const struct lysc_type_union *un = (const void *)lt;
+	struct lysc_type_bitenum_item *items = NULL;
+	struct sntype *t;
+	LY_ARRAY_COUNT_TYPE u;
+
+	t = xcalloc(1, sizeof(*t));
+	t->base = base_of(lt->basetype);
+	t->name = xstrdup_or_null(lt->name);
+	switch (t->base) {
+	case ST_INT8: case ST_INT16: case ST_INT32: case ST_INT64:
+		t->range = conv_range(num->range, true);
+		break;
+	case ST_UINT8: case ST_UINT16: case ST_UINT32: case ST_UINT64:
+		t->range = conv_range(num->range, false);
+		break;
+	case ST_DECIMAL64:
+		t->fdigits = dec->fraction_digits;
+		t->range = conv_range(dec->range, true);
+		break;
+	case ST_STRING:
+		t->length = conv_range(str->length, false);
+		t->npatterns = LY_ARRAY_COUNT(str->patterns);
+		t->patterns = xcalloc(t->npatterns, sizeof(*t->patterns));
+		LY_ARRAY_FOR(str->patterns, u) {
+			t->patterns[u].expr = xstrdup(str->patterns[u]->expr);
+			t->patterns[u].invert = str->patterns[u]->inverted;
+			t->patterns[u].emsg =
+			    xstrdup_or_null(str->patterns[u]->emsg);
+			t->patterns[u].eapptag =
+			    xstrdup_or_null(str->patterns[u]->eapptag);
+		}
+		break;
+	case ST_BINARY:
+		t->length = conv_range(bin->length, false);
+		break;
+	case ST_ENUMERATION:
+		items = en->enums;
+		break;
+	case ST_BITS:
+		items = bits->bits;
+		break;
+	case ST_IDENTITYREF:
+		t->nbases = LY_ARRAY_COUNT(idr->bases);
+		t->bases = xcalloc(t->nbases, sizeof(*t->bases));
+		LY_ARRAY_FOR(idr->bases, u)
+			if ((t->bases[u] = schema_ident(c->s,
+			    idr->bases[u]->module->name,
+			    idr->bases[u]->name)) == NULL)
+				errx(2, "libyang: identity %s:%s not found",
+				    idr->bases[u]->module->name,
+				    idr->bases[u]->name);
+		break;
+	case ST_LEAFREF:
+		t->path = xstrdup(lyxp_get_expr(lr->path));
+		t->require_instance = lr->require_instance;
+		t->real = conv_type(c, lr->realtype);
+		break;
+	case ST_INSTANCEID:
+		t->require_instance = ii->require_instance;
+		break;
+	case ST_UNION:
+		t->nmembers = LY_ARRAY_COUNT(un->types);
+		t->members = xcalloc(t->nmembers, sizeof(*t->members));
+		LY_ARRAY_FOR(un->types, u)
+			t->members[u] = conv_type(c, un->types[u]);
+		break;
+	default:
+		break;
+	}
+	if (items != NULL) {
+		t->nitems = LY_ARRAY_COUNT(items);
+		t->items = xcalloc(t->nitems, sizeof(*t->items));
+		LY_ARRAY_FOR(items, u) {
+			t->items[u].name = xstrdup(items[u].name);
+			t->items[u].value = t->base == ST_BITS ?
+			    (int64_t)items[u].position : items[u].value;
+			if ((items[u].flags & LYS_STATUS_DEPRC) != 0)
+				t->items[u].flags |= SNF_DEPRECATED;
+			if ((items[u].flags & LYS_STATUS_OBSLT) != 0)
+				t->items[u].flags |= SNF_OBSOLETE;
+		}
+	}
+	return (t);
+}
+
+static void
+add_dflt(struct conv *c, struct snode *n, const struct lyd_value *v)
+{
+
+	n->dflts = xreallocarray(n->dflts, n->ndflts + 1, sizeof(*n->dflts));
+	n->dflts[n->ndflts++] = xstrdup(lyd_value_get_canonical(c->ctx, v));
+}
+
 static struct snode *
 conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 {
@@ -304,9 +492,38 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 		n->max = l->max;
 	} else if (ln->nodetype == LYS_LEAFLIST) {
 		const struct lysc_node_leaflist *l = (const void *)ln;
+		LY_ARRAY_COUNT_TYPE u;
 
 		n->min = l->min;
 		n->max = l->max;
+		n->type = conv_type(c, l->type);
+		n->units = xstrdup_or_null(l->units);
+		LY_ARRAY_FOR(l->dflts, u)
+			add_dflt(c, n, l->dflts[u]);
+	} else if (ln->nodetype == LYS_LEAF) {
+		const struct lysc_node_leaf *l = (const void *)ln;
+
+		n->type = conv_type(c, l->type);
+		n->units = xstrdup_or_null(l->units);
+		if (l->dflt != NULL)
+			add_dflt(c, n, l->dflt);
+	}
+	{
+		struct lysc_when **when = lysc_node_when(ln);
+		struct lysc_must *must = lysc_node_musts(ln);
+		LY_ARRAY_COUNT_TYPE u;
+
+		n->nwhen = LY_ARRAY_COUNT(when);
+		n->when = xcalloc(n->nwhen, sizeof(*n->when));
+		LY_ARRAY_FOR(when, u)
+			n->when[u] = xstrdup(lyxp_get_expr(when[u]->cond));
+		n->nmusts = LY_ARRAY_COUNT(must);
+		n->musts = xcalloc(n->nmusts, sizeof(*n->musts));
+		LY_ARRAY_FOR(must, u) {
+			n->musts[u].expr = xstrdup(lyxp_get_expr(must[u].cond));
+			n->musts[u].emsg = xstrdup_or_null(must[u].emsg);
+			n->musts[u].eapptag = xstrdup_or_null(must[u].eapptag);
+		}
 	}
 
 	/* Data children, then actions, then notifications. */
@@ -324,6 +541,15 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 		tail = &(*tail)->next;
 	}
 
+	if (n->kind == SN_CHOICE &&
+	    ((const struct lysc_node_choice *)(const void *)ln)->dflt != NULL) {
+		const char *dn = ((const struct lysc_node_choice *)(const void *)
+		    ln)->dflt->name;
+
+		for (struct snode *ch = n->child; ch != NULL; ch = ch->next)
+			if (strcmp(ch->name, dn) == 0)
+				n->dflt_case = ch;
+	}
 	if (n->kind == SN_LIST) {
 		for (struct snode *ch = n->child; ch != NULL; ch = ch->next)
 			if ((ch->flags & SNF_KEY) != 0) {
@@ -360,6 +586,7 @@ yang_schema(struct ly_ctx *ctx)
 	size_t i;
 
 	c.s = schema_new();
+	c.ctx = ctx;
 	/* Every module, implemented or only imported: identities. */
 	while ((lm = ly_ctx_get_module_iter(ctx, &idx)) != NULL) {
 		m = xcalloc(1, sizeof(*m));

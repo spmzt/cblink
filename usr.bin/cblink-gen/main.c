@@ -101,18 +101,25 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	size_t nodes = 0, nmods = 0;
 	int fd;
 
+	const char **dirs;
+	size_t ndirs = 0;
+
+	dirs = xcalloc(npaths + (size_t)argc, sizeof(*dirs));
 	for (int i = 0; i < argc; i++) {
 		if ((fd = open(argv[i], O_RDONLY | O_CLOEXEC)) == -1)
 			err(2, "%s", argv[i]);
 		yang_add_file(fd, argv[i], true);
 		close(fd);
 		pathcopy = xstrdup(argv[i]);
-		yang_add_dir(dirname(pathcopy));
+		dirs[ndirs] = xstrdup(dirname(pathcopy));
 		free(pathcopy);
+		yang_add_dir(dirs[ndirs++]);
 	}
-	for (size_t i = 0; i < npaths; i++)
+	for (size_t i = 0; i < npaths; i++) {
 		yang_add_dir(paths[i]);
-	ctx = yang_ctx_new();
+		dirs[ndirs++] = xstrdup(paths[i]);
+	}
+	ctx = yang_ctx_new(dirs, ndirs);
 
 	caph_cache_catpages();
 	if (caph_limit_stdio() != 0 || caph_enter() != 0)

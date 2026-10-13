@@ -207,9 +207,11 @@ yang_frontend_body()
 	atf_check -o save:dump $gen -d "$y/good@2026-10-13.yang"
 	atf_check -o inline:"good container /good:things rw
 good list /good:things/thing rw min 0 max 4294967295
-good leaf /good:things/thing/name rw key
-good leaf /good:things/thing/seen rw
-" grep '^good ' dump
+good leaf /good:things/thing/name rw key string length 1..63
+" grep '^good [a-z]* /good:things\(/thing\(/name\)\{0,1\}\)\{0,1\} ' dump
+	# A typedef's name and its pattern, whichever revision libyang has.
+	atf_check -o match:"^good leaf /good:things/thing/seen rw string\(date-and-time\) pattern '" \
+	    cat dump
 	atf_check -o match:'^module good@2026-10-13$' cat dump
 	atf_check -s exit:1 -e match:'^bad@2026-10-13.yang:.*uint33' \
 	    $gen -n "$y/bad@2026-10-13.yang"

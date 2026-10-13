@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 struct smodule;
-struct sntype;
+struct sident;
 
 enum snode_kind {
 	SN_CONTAINER,
@@ -46,6 +46,91 @@ enum snode_kind {
 #define	SNF_DEPRECATED	0x0020
 #define	SNF_OBSOLETE	0x0040
 
+/* Built-in types, after RFC 7950 section 4.2.4. */
+enum sntype_base {
+	ST_BINARY,
+	ST_BITS,
+	ST_BOOLEAN,
+	ST_DECIMAL64,
+	ST_EMPTY,
+	ST_ENUMERATION,
+	ST_IDENTITYREF,
+	ST_INSTANCEID,
+	ST_INT8,
+	ST_INT16,
+	ST_INT32,
+	ST_INT64,
+	ST_LEAFREF,
+	ST_STRING,
+	ST_UINT8,
+	ST_UINT16,
+	ST_UINT32,
+	ST_UINT64,
+	ST_UNION,
+};
+
+/*
+ * A range or length: its parts, each min..max, signed for the signed
+ * integers and decimal64 (whose bounds are scaled by its fraction
+ * digits), unsigned otherwise.
+ */
+struct srange {
+	struct srange_part {
+		union {
+			int64_t		 i;
+			uint64_t	 u;
+		} min, max;
+	}		*parts;
+	size_t		 nparts;
+	char		*emsg;		/* error-message, or NULL */
+	char		*eapptag;	/* error-app-tag, or NULL */
+};
+
+struct spattern {
+	char		*expr;		/* XSD regular expression, as written */
+	bool		 invert;	/* modifier invert-match */
+	char		*emsg;
+	char		*eapptag;
+};
+
+/* An enum with its value, or a bit with its position. */
+struct sitem {
+	char		*name;
+	int64_t		 value;
+	uint32_t	 flags;		/* SNF_DEPRECATED, SNF_OBSOLETE */
+};
+
+/*
+ * A type as compiled: the built-in it comes to, every restriction its
+ * typedef chain adds (a string's patterns accumulate), and what its kind
+ * needs.
+ */
+struct sntype {
+	enum sntype_base base;
+	char		*name;		/* the typedef, NULL for a built-in */
+	struct srange	*range;		/* integers, decimal64 */
+	struct srange	*length;	/* string, binary */
+	struct spattern	*patterns;	/* string */
+	size_t		 npatterns;
+	struct sitem	*items;		/* enumeration, bits */
+	size_t		 nitems;
+	uint8_t		 fdigits;	/* decimal64 */
+	struct sident	**bases;	/* identityref */
+	size_t		 nbases;
+	char		*path;		/* leafref */
+	struct sntype	*real;		/* leafref: the target's type */
+	bool		 require_instance; /* leafref, instance-identifier */
+	struct sntype	**members;	/* union */
+	size_t		 nmembers;
+};
+
+/* A must statement. */
+struct smust {
+	char		*expr;		/* XPath, as written */
+	char		*emsg;
+	char		*eapptag;
+};
+
 /*
  * A schema node.  Children are in schema order: data nodes, then the
  * node's actions, then its notifications; an rpc's or action's are its
@@ -64,6 +149,14 @@ struct snode {
 	uint32_t	 max;		/* list, leaf-list: max-elements */
 	struct snode	**keys;		/* list: its key leaves, in order */
 	size_t		 nkeys;
+	char		*units;		/* leaf, leaf-list */
+	char		**dflts;	/* leaf (one), leaf-list: canonical */
+	size_t		 ndflts;
+	struct snode	*dflt_case;	/* choice: its default case */
+	char		**when;		/* when expressions, as written */
+	size_t		 nwhen;
+	struct smust	*musts;
+	size_t		 nmusts;
 };
 
 /* An identity, and those derived from it directly. */
@@ -109,6 +202,8 @@ struct smodule	*schema_module(struct schema *s, const char *name,
 struct sident	*schema_ident(struct schema *s, const char *module,
 		    const char *name);
 const char	*snode_kind_name(enum snode_kind kind);
+const char	*sntype_base_name(enum sntype_base base);
+bool		 sntype_signed(enum sntype_base base);
 
 /*
  * Walk every node, depth first, parents before children: data, then rpcs,

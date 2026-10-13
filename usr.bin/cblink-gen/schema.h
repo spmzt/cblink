@@ -203,6 +203,7 @@ struct smodule {
 	char		*ns;
 	char		*prefix;
 	bool		 implemented;
+	bool		 given;		/* named on the command line */
 	struct sfeature	*features;
 	size_t		 nfeatures;
 	struct sident	*idents;
@@ -264,6 +265,14 @@ struct buf;
  * /module:structure.  False for a choice or a case, which have none.
  */
 bool		 snode_sid_path(const struct snode *n, struct buf *b);
+
+/*
+ * The C header of the schema's structs (gen_yang.c), base naming its
+ * guard, from the inputs it says it was generated from; -1 and
+ * diagnostics when two names collide.
+ */
+int		 gen_yang_h(struct schema *s, const char *base,
+		    const char *from, struct buf *out, struct diags *d);
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);

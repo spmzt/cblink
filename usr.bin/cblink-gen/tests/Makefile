@@ -48,6 +48,28 @@ ${_m}.h: ${.CURDIR}/minimal/${_m}.yaml ${GEN}
 ${_m}.c ${_m}_client.c ${_m}_server.c: ${_m}.h
 .endfor
 
+# yang_h_test: the structs of YANG modules, every shape and type, must
+# compile at WARNS=6; with a generator built with libyang only.
+LOCALBASE?=	/usr/local
+.if !defined(CBLINK_GEN_LIBYANG)
+.if exists(${LOCALBASE}/include/libyang/libyang.h)
+CBLINK_GEN_LIBYANG=	yes
+.else
+CBLINK_GEN_LIBYANG=	no
+.endif
+.endif
+.if ${CBLINK_GEN_LIBYANG} == "yes"
+ATF_TESTS_C+=	yang_h_test
+YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
+		${.CURDIR}/yang/ietf-system@2014-08-06.yang \
+		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang
+SRCS.yang_h_test=	yangh.h yang_h_test.c
+CFLAGS.yang_h_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+CLEANFILES+=	yangh.h
+yangh.h: ${YANGH_SRC} ${GEN}
+	${GEN} -m h -b yangh -o ${.OBJDIR} ${YANGH_SRC}
+.endif
+
 # Test data: the generator itself, golden files, error cases, and the
 # control family spec with the files committed in lib/libcblink.
 ${PACKAGE}FILES+=	${GEN}
@@ -78,6 +100,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/beyond@2026-10-13.yang yang/ietf-system@2014-08-06.yang \
 		yang/ietf-system@2014-08-06.sid yang/iana-crypt-hash@2014-08-06.yang \
 		yang/ietf-netconf-acm@2018-02-14.yang yang/subtract@2026-10-13.yang \
+		yang/shapes@2026-10-13.yang yang/clash@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
 YANGDIR=	${TESTSDIR}/yang

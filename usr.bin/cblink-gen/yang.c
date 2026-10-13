@@ -725,6 +725,11 @@ yang_schema(struct ly_ctx *ctx)
 		m->ns = xstrdup(lm->ns);
 		m->prefix = xstrdup(lm->prefix);
 		m->implemented = lm->implemented && lm->compiled != NULL;
+		for (size_t j = 0; j < nsrcs && !m->given; j++)
+			m->given = srcs[j].given &&
+			    strcmp(srcs[j].name, lm->name) == 0 &&
+			    (srcs[j].rev == NULL || (lm->revision != NULL &&
+			    strcmp(srcs[j].rev, lm->revision) == 0));
 		c.s->mods = xreallocarray(c.s->mods, c.s->nmods + 1,
 		    sizeof(*c.s->mods));
 		c.lmods = xreallocarray(c.lmods, c.s->nmods + 1,

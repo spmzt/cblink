@@ -19,7 +19,8 @@
 .Nm
 .Op Fl adn
 .Op Fl F Ar module : Ns Ar feature , Ns ...
-.Op Fl m Cm sid , Ns Cm sidjson
+.Op Fl b Ar base
+.Op Fl m Cm h , Ns Cm sid , Ns Cm sidjson
 .Op Fl o Ar dir
 .Op Fl p Ar dir
 .Op Fl s Ar file.sid
@@ -127,19 +128,40 @@ reference documentation in Markdown.
 .Pp
 The default is
 .Ql h,c,client,server,md .
-For YANG modules only the
-.Pa .sid
-files are written yet, one of each kind per
-.Fl s
-file, named after its module and revision:
+For YANG modules these are written yet:
 .Bl -tag -width "sidjson"
+.It Cm h
+.Ar base Ns .h ,
+.Ar base
+the first module's name by default: a struct for each container, list
+entry, rpc and action input and output, notification and structure of
+the modules named and of those whose trees they add to, and one for
+each module's top-level data.
+A container is a pointer, NULL when absent; a list or leaf-list a
+count and an array; a scalar leaf other than a key has a
+.Ql has_
+flag; a choice is an enum saying its case, its cases' members beside
+it; a union a struct saying which member is set.
+Names are the module's, then the path, with
+.Ql -
+and
+.Ql \&.
+made
+.Ql _ ;
+two nodes that would have one name are an error.
 .It Cm sid
-.Ar module Ns @ Ns Ar revision Ns .sid.cbor :
+.Ar module Ns @ Ns Ar revision Ns .sid.cbor ,
+one for each
+.Fl s
+file:
 the file in YANG-CBOR (RFC 9254), its
 .Ql ietf-sid-file
 structure keyed by SIDs, as cblink's GET-SID answers it.
 .It Cm sidjson
-.Ar module Ns @ Ns Ar revision Ns .sid :
+.Ar module Ns @ Ns Ar revision Ns .sid ,
+one for each
+.Fl s
+file:
 the file in JSON, as
 .Fl a
 writes it.
@@ -190,11 +212,9 @@ Several may be named.
 Only
 .Fl n ,
 .Fl d
-and the
-.Pa .sid
-files of
+and the parts of
 .Fl m
-are supported yet: the modules are parsed and compiled, and errors are
+named above are supported yet: the modules are parsed and compiled, and errors are
 reported as for a spec.
 .Pp
 The file

@@ -48,8 +48,8 @@ usage(void)
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
 	    "       cblink-gen [-adn] [-F module:feature,...] ... "
-	    "[-m sid,sidjson] [-o dir]\n"
-	    "                  [-p dir] ... [-s file.sid] ... "
+	    "[-b base] [-m h,sid,sidjson]\n"
+	    "                  [-o dir] [-p dir] ... [-s file.sid] ... "
 	    "module.yang ...\n");
 	exit(2);
 }
@@ -128,10 +128,11 @@ sid_emit(const struct sidfile *sf, int dirfd, bool cbor, bool json)
 static int
 yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     const char **feats, size_t nfeats, const char **sids, size_t nsids,
-    const char *parts, const char *outdir, bool assign, bool check,
-    bool dump)
+    const char *parts, const char *outdir, const char *base, bool assign,
+    bool check, bool dump)
 {
-	bool cbor = false, json = false;
+	bool cbor = false, json = false, hdr = false;
+	char *bname = NULL;
 	int dirfd = -1;
 	cap_rights_t rights;
 	int sidfd[16];
@@ -183,29 +184,43 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	ctx = yang_ctx_new(dirs, ndirs);
 
 	/*
-	 * Of the parts, only the .sid files are written yet: "sid", their
-	 * YANG-CBOR form as GET-SID answers it, and "sidjson", their JSON.
+	 * The parts written yet: "h", the structs; "sid", the .sid files'
+	 * YANG-CBOR form as GET-SID answers it; "sidjson", their JSON.
 	 */
 	if (!check && !dump) {
 		for (const char *p = parts; *p != '\0';) {
 			size_t n = strcspn(p, ",");
 
-			if (n == 3 && strncmp(p, "sid", 3) == 0)
+			if (n == 1 && *p == 'h')
+				hdr = true;
+			else if (n == 3 && strncmp(p, "sid", 3) == 0)
 				cbor = true;
 			else if (n == 7 && strncmp(p, "sidjson", 7) == 0)
 				json = true;
-			else {
-				cbor = json = false;
-				break;
-			}
+			else
+				errx(2, "-m %.*s: not written for YANG yet; "
+				    "-m h,sid,sidjson are", (int)n, p);
 			p += n + (p[n] == ',');
 		}
-		if (!cbor && !json)
-			errx(2, "generating C from YANG is not written yet; "
-			    "-n checks the modules, -d dumps them, -m "
-			    "sid,sidjson writes the .sid files");
-		if (nsids == 0)
+		if (!cbor && !json && !hdr)
+			errx(2, "generating C from YANG is not written yet "
+			    "but for -m h,sid,sidjson; -n checks the "
+			    "modules, -d dumps them");
+		if ((cbor || json) && nsids == 0)
 			errx(2, "-m sid,sidjson: no -s file");
+		/* The header's name: -b, or the first module's. */
+		if (base == NULL) {
+			pathcopy = xstrdup(argv[0]);
+			bname = xstrdup(basename(pathcopy));
+			free(pathcopy);
+			bname[strcspn(bname, "@")] = '\0';
+			if (strlen(bname) > 5 && strcmp(bname +
+			    strlen(bname) - 5, ".yang") == 0)
+				bname[strlen(bname) - 5] = '\0';
+			base = bname;
+		}
+		if (*base == '\0' || strchr(base, '/') != NULL)
+			errx(2, "invalid output base name '%s'", base);
 		if ((dirfd = open(outdir, O_DIRECTORY | O_SEARCH |
 		    O_CLOEXEC)) == -1)
 			err(2, "%s", outdir);
@@ -269,9 +284,22 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	}
 	if (dump)
 		schema_dump(s);
-	else if (check || cbor || json) {
-		if (!check)
-			goto done;
+	else if (!check) {
+		if (hdr) {
+			struct buf b;
+			char *name = xasprintf("%s.h", base);
+
+			buf_init(&b);
+			if (gen_yang_h(s, base, d.file, &b, &d) != 0) {
+				diag_print(&d);
+				return (1);
+			}
+			if (write_file(dirfd, name, &b) != 0)
+				return (2);
+			buf_free(&b);
+			free(name);
+		}
+	} else {
 		for (size_t i = 0; i < s->nmods; i++)
 			nmods += s->mods[i]->implemented;
 		schema_walk(s, count_node, &nodes);
@@ -283,9 +311,9 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			    nsids);
 		printf("\n");
 	}
-done:
 	schema_free(s);
 	diag_free(&d);
+	free(bname);
 	return (0);
 }
 #else
@@ -294,8 +322,8 @@ yang_main(int argc __unused, char *argv[], const char **paths __unused,
     size_t npaths __unused, const char **feats __unused,
     size_t nfeats __unused, const char **sids __unused,
     size_t nsids __unused, const char *parts __unused,
-    const char *outdir __unused, bool assign __unused, bool check __unused,
-    bool dump __unused)
+    const char *outdir __unused, const char *base __unused,
+    bool assign __unused, bool check __unused, bool dump __unused)
 {
 
 	errx(2, "%s: YANG input needs cblink-gen built with libyang "
@@ -368,8 +396,8 @@ main(int argc, char *argv[])
 	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
 	    strcmp(dot, ".yang") == 0)
 		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
-		    sids, nsids, mflag ? parts : "", outdir, assign, check,
-		    dump));
+		    sids, nsids, mflag ? parts : "", outdir, base, assign,
+		    check, dump));
 	if (argc != 1 || assign || dump || nfeats > 0 || nsids > 0)
 		usage();
 

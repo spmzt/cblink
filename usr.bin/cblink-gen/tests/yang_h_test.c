@@ -1,0 +1,115 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
+ */
+
+/*
+ * The structs cblink-gen writes for YANG modules (yangh.h, made at build
+ * time from shapes, ietf-system and ietf-sid-file): that they compile at
+ * WARNS=6 is most of the test; here, that they hold what a reader would
+ * put in them, each shape once.
+ */
+
+#include <atf-c.h>
+#include <string.h>
+
+#include "yangh.h"
+
+ATF_TC_WITHOUT_HEAD(shapes);
+ATF_TC_BODY(shapes, tc)
+{
+	static const char *const names[] = { "a", "b" };
+	static const enum shapes_shapes_levels levels[] = {
+		SHAPES_SHAPES_LEVELS_VERY_HIGH,
+	};
+	static const struct shapes_shapes_eithers eithers[] = {
+		{ .which = 0, .v.m0 = 7 }, { .which = 1, .v.m1 = "x" },
+	};
+	static const struct shapes_shapes_item items[] = {
+		{ .id = 1 }, { .id = 2, .has_peer = true, .peer = 1 },
+	};
+	static const struct shapes_shapes_tuned tuned = {
+		.has_max = true, .max = 9,
+	};
+	static const unsigned char perms[] = {
+		1u << SHAPES_SHAPES_PERMS_READ,
+	};
+	struct shapes_shapes sh = {
+		.default_ = "keyword",
+		.has_ratio = true, .ratio = 150,
+		.flag = true,
+		.perms = { perms, sizeof(perms) },
+		.has_level = true, .level = SHAPES_SHAPES_LEVEL_VERY_HIGH,
+		.has_either = true,
+		.either = { .which = 1, .v.m1 = SHAPES_SHAPES_EITHER_M1_LOW },
+		.names = { 2, names },
+		.levels = { 1, levels },
+		.eithers = { 2, eithers },
+		.tuned = &tuned,
+		.how = SHAPES_SHAPES_HOW_CAREFUL,
+		.check = SHAPES_SHAPES_CHECK_HASH, .hash = "sha256",
+		.item = { 2, items },
+	};
+	struct shapes top = { .shapes = &sh };
+	struct shapes_shapes_item_reset_input in = { .has_hard = true };
+	struct shapes_note_body body = { .text = "hello" };
+	struct shapes_note note = { .body = &body };
+
+	ATF_CHECK_EQ(SHAPES_SHAPES_LEVEL_VERY_HIGH, 7);
+	ATF_CHECK_EQ(SHAPES_SHAPES_PERMS_WRITE, 4u);
+	ATF_CHECK_STREQ(top.shapes->default_, "keyword");
+	ATF_CHECK_EQ(top.shapes->item.v[1].peer, 1u);
+	ATF_CHECK_STREQ(top.shapes->eithers.v[1].v.m1, "x");
+	ATF_CHECK_STREQ(top.shapes->names.v[1], "b");
+	ATF_CHECK_EQ(top.shapes->tuned->max, 9);
+	ATF_CHECK(top.shapes->check == SHAPES_SHAPES_CHECK_HASH);
+	ATF_CHECK(in.has_hard && !in.hard);
+	ATF_CHECK_STREQ(note.body->text, "hello");
+	/* Nothing in an rpc's output: still a struct. */
+	ATF_CHECK(sizeof(struct shapes_ping_output) > 0);
+}
+
+/* An IETF module and a structure: names with '-', a choice, a list. */
+ATF_TC_WITHOUT_HEAD(ietf);
+ATF_TC_BODY(ietf, tc)
+{
+	static const struct ietf_system_system_ntp_server servers[] = {
+		{ .name = "a", .transport =
+		    IETF_SYSTEM_SYSTEM_NTP_SERVER_TRANSPORT_UDP },
+	};
+	struct ietf_system_system_ntp ntp = {
+		.has_enabled = true, .enabled = true, .server = { 1, servers },
+	};
+	struct ietf_system_system_clock clock = {
+		.timezone = IETF_SYSTEM_SYSTEM_CLOCK_TIMEZONE_TIMEZONE_NAME,
+		.timezone_name = "Asia/Tehran",
+	};
+	struct ietf_system_system sys = {
+		.hostname = "edge1", .clock = &clock, .ntp = &ntp,
+	};
+	static const struct ietf_sid_file_sid_file_item item = {
+		/* Keys: no has_ flag. */
+		.namespace = IETF_SID_FILE_SID_FILE_ITEM_NAMESPACE_DATA,
+		/* A union of two strings: which says the member. */
+		.identifier = { .which = 1, .v.m1 = "/m:x" },
+		.has_sid = true, .sid = 60000,
+	};
+	struct ietf_sid_file_sid_file sf = {
+		.module_name = "m", .item = { 1, &item },
+	};
+
+	ATF_CHECK_STREQ(sys.ntp->server.v[0].name, "a");
+	ATF_CHECK_STREQ(sys.clock->timezone_name, "Asia/Tehran");
+	ATF_CHECK_EQ(sf.item.v[0].sid, 60000u);
+	ATF_CHECK_STREQ(sf.item.v[0].identifier.v.m1, "/m:x");
+	ATF_CHECK_EQ(IETF_SID_FILE_SID_FILE_ITEM_NAMESPACE_DATA, 3);
+}
+
+ATF_TP_ADD_TCS(tp)
+{
+
+	ATF_TP_ADD_TC(tp, shapes);
+	ATF_TP_ADD_TC(tp, ietf);
+	return (atf_no_error());
+}

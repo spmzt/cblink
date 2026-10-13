@@ -310,8 +310,8 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang
-	# Code generation from YANG is not written yet.
-	atf_check -s exit:2 -e match:'not written yet' \
+	# Without -m: C generation from YANG is not all written yet.
+	atf_check -s exit:2 -e match:'not written yet but for -m h,sid,sidjson' \
 	    $gen -o . "$y/good@2026-10-13.yang"
 }
 
@@ -408,9 +408,49 @@ sid_cbor_body()
 	atf_check -s exit:1 -e match:'YANG-CBOR: an indefinite length' \
 	    $gen -n -s indef.cbor "$m"
 	# Parts: only these yet, and only with a file.
-	atf_check -s exit:2 -e match:'not written yet' \
-	    $gen -m sid,h -s full.sid "$m"
+	atf_check -s exit:2 -e match:'-m c: not written for YANG yet' \
+	    $gen -m sid,c -s full.sid "$m"
 	atf_check -s exit:2 -e match:'no -s file' $gen -m sid "$m"
+}
+
+atf_test_case yang_h
+yang_h_head()
+{
+	atf_set "descr" "-m h writes the structs of the YANG modules named," \
+	    "and refuses two nodes that would have one C name"
+}
+yang_h_body()
+{
+	setup
+	y="$(atf_get_srcdir)/yang"
+
+	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
+	    grep -q 'needs cblink-gen built with libyang'; then
+		atf_skip "cblink-gen built without libyang"
+	fi
+	# Named after the first module, or -b; the modules named only,
+	# not what libyang implements of its own.
+	atf_check $gen -m h "$y/ietf-system@2014-08-06.yang"
+	atf_check -o match:'^struct ietf_system_system \{' cat ietf-system.h
+	atf_check -o match:'^#ifndef _IETF_SYSTEM_H_$' cat ietf-system.h
+	atf_check -s exit:1 -o empty grep -e ietf_yang_library ietf-system.h
+	mkdir out
+	atf_check $gen -m h -b both -o out "$y/good@2026-10-13.yang" \
+	    "$y/shapes@2026-10-13.yang"
+	atf_check -o match:'^struct good_things_thing \{' cat out/both.h
+	atf_check -o match:'^struct shapes_note \{' cat out/both.h
+	# Generating again: the same bytes.
+	cp out/both.h both.before
+	atf_check $gen -m h -b both -o out "$y/good@2026-10-13.yang" \
+	    "$y/shapes@2026-10-13.yang"
+	atf_check cmp out/both.h both.before
+	# a-b and a.b are both a_b in C.
+	atf_check -s exit:1 -e match:'struct clash_top: two members named a_b' \
+	    $gen -m h "$y/clash@2026-10-13.yang"
+	atf_check -s exit:1 test -e clash.h
+	# Parts not written for YANG yet.
+	atf_check -s exit:2 -e match:'-m c: not written for YANG yet' \
+	    $gen -m h,c "$y/good@2026-10-13.yang"
 }
 
 atf_init_test_cases()
@@ -425,4 +465,5 @@ atf_init_test_cases()
 	atf_add_test_case cblink_mk
 	atf_add_test_case yang_frontend
 	atf_add_test_case sid_cbor
+	atf_add_test_case yang_h
 }

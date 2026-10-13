@@ -1,0 +1,157 @@
+module shapes {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:shapes";
+  prefix s;
+
+  import ietf-yang-structure-ext {
+    prefix sx;
+  }
+
+  revision 2026-10-13;
+
+  identity colour;
+
+  identity red {
+    base colour;
+  }
+
+  typedef level {
+    type enumeration {
+      enum low;
+      enum "very high" {
+        value 7;
+      }
+    }
+  }
+
+  container shapes {
+    leaf default {
+      type string;
+      description "A C keyword as a name.";
+    }
+    leaf ratio {
+      type decimal64 {
+        fraction-digits 2;
+      }
+    }
+    leaf flag {
+      type empty;
+    }
+    leaf blob {
+      type binary;
+    }
+    leaf perms {
+      type bits {
+        bit read;
+        bit write {
+          position 4;
+        }
+      }
+    }
+    leaf level {
+      type level;
+    }
+    leaf colour {
+      type identityref {
+        base colour;
+      }
+    }
+    leaf target {
+      type instance-identifier;
+    }
+    leaf either {
+      type union {
+        type int32;
+        type level;
+        type string;
+      }
+    }
+    leaf-list names {
+      type string;
+    }
+    leaf-list levels {
+      type level;
+    }
+    leaf-list eithers {
+      type union {
+        type uint8;
+        type string;
+      }
+    }
+    anydata extra;
+    container tuned {
+      presence "Tuning is on.";
+      leaf max {
+        type uint16;
+        mandatory true;
+      }
+    }
+    choice how {
+      case fast {
+        leaf speed {
+          type uint32;
+        }
+      }
+      case careful {
+        choice check {
+          leaf crc {
+            type empty;
+          }
+          leaf hash {
+            type string;
+          }
+        }
+      }
+    }
+    list item {
+      key "id";
+      leaf id {
+        type uint32;
+      }
+      leaf peer {
+        type leafref {
+          path "../id";
+        }
+      }
+      action reset {
+        input {
+          leaf hard {
+            type boolean;
+          }
+        }
+        output {
+          leaf took {
+            type uint32;
+          }
+        }
+      }
+      notification changed {
+        leaf was {
+          type uint32;
+        }
+      }
+    }
+  }
+
+  rpc ping {
+    input {
+      leaf count {
+        type uint8;
+      }
+    }
+  }
+
+  notification alarm {
+    leaf text {
+      type string;
+    }
+  }
+
+  sx:structure note {
+    container body {
+      leaf text {
+        type string;
+      }
+    }
+  }
+}

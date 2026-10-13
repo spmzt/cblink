@@ -25,6 +25,7 @@ SRCS=		cbl_arena.c \
 		cbl_peer.c \
 		cbl_policy.c \
 		cbl_proxy.c \
+		cbl_schema.c \
 		cbl_sctp.c \
 		cbl_server.c \
 		cbl_sock.c \

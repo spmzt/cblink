@@ -168,6 +168,16 @@ identities a value may name, the modules' own and every one derived
 from a base an identityref has, wherever it is defined, each with all
 those derived from it, by SID, for
 .Fn derived-from .
+A node's children are found by a key's delta at once where their SIDs
+follow one another, by a table of their places where they lie close,
+by a binary search otherwise; every node is also in one array by SID.
+.Xr cblink 3 Ns 's
+.Fn cbl_ynode_child ,
+.Fn cbl_yschema_node ,
+.Fn cbl_yschema_ident
+and
+.Fn cbl_yderived_from
+look them up.
 Every node, structure and identityref base must have a SID: the
 modules'
 .Pa .sid

@@ -109,6 +109,9 @@ ATF_TC_BODY(ietf, tc)
 	ATF_CHECK_EQ(IETF_SID_FILE_SID_FILE_ITEM_NAMESPACE_DATA, 3);
 }
 
+/* The tables, by a shorter name. */
+static const struct cbl_yschema *const ys = &yangh_schema;
+
 static const struct cbl_ymodule *
 module(const char *name)
 {
@@ -263,49 +266,6 @@ ATF_TC_BODY(tables, tc)
 	    CBL_YNF_USERORDER));
 }
 
-/* The identity of a SID, by a binary search of the table. */
-static const struct cbl_yident *
-ident(uint64_t sid)
-{
-	size_t lo = 0, hi = yangh_schema.nident;
-
-	while (lo < hi) {
-		size_t mid = lo + (hi - lo) / 2;
-
-		if (yangh_schema.ident[mid].sid == sid)
-			return (&yangh_schema.ident[mid]);
-		if (yangh_schema.ident[mid].sid < sid)
-			lo = mid + 1;
-		else
-			hi = mid;
-	}
-	return (NULL);
-}
-
-/* derived-from(), and derived-from-or-self() with self. */
-static bool
-derived_from(uint64_t x, uint64_t base, bool self)
-{
-	const struct cbl_yident *b;
-	size_t lo, hi;
-
-	if (self && x == base)
-		return (true);
-	if ((b = ident(base)) == NULL)
-		return (false);
-	for (lo = 0, hi = b->nderived; lo < hi;) {
-		size_t mid = lo + (hi - lo) / 2;
-
-		if (b->derived[mid] == x)
-			return (true);
-		if (b->derived[mid] < x)
-			lo = mid + 1;
-		else
-			hi = mid;
-	}
-	return (false);
-}
-
 /* Every identityref base under n: in the table, its closure too. */
 static size_t
 check_bases(const struct cbl_ytype *t)
@@ -318,23 +278,24 @@ check_bases(const struct cbl_ytype *t)
 	for (uint16_t i = 0; i < t->nmembers; i++)
 		k += check_bases(t->members[i]);
 	for (uint16_t i = 0; i < t->nbases; i++) {
-		b = ident(t->bases[i]);
+		b = cbl_yschema_ident(ys, t->bases[i]);
 		ATF_CHECK_MSG(b != NULL, "base %ju not in the table",
 		    (uintmax_t)t->bases[i]);
 		if (b == NULL)
 			continue;
 		for (uint32_t j = 0; j < b->nderived; j++) {
-			ATF_CHECK_MSG(ident(b->derived[j]) != NULL, "%s: "
-			    "derived %ju not in the table", b->name,
+			ATF_CHECK_MSG(cbl_yschema_ident(ys, b->derived[j]) !=
+			    NULL, "%s: derived %ju not in the table", b->name,
 			    (uintmax_t)b->derived[j]);
 			if (j > 0)
 				ATF_CHECK(b->derived[j] > b->derived[j - 1]);
-			ATF_CHECK(derived_from(b->derived[j], b->sid, false));
-			ATF_CHECK(!derived_from(b->sid, b->derived[j],
+			ATF_CHECK(cbl_yderived_from(ys, b->derived[j], b->sid,
+			    false));
+			ATF_CHECK(!cbl_yderived_from(ys, b->sid, b->derived[j],
 			    false));
 		}
-		ATF_CHECK(!derived_from(b->sid, b->sid, false));
-		ATF_CHECK(derived_from(b->sid, b->sid, true));
+		ATF_CHECK(!cbl_yderived_from(ys, b->sid, b->sid, false));
+		ATF_CHECK(cbl_yderived_from(ys, b->sid, b->sid, true));
 		k++;
 	}
 	return (k);
@@ -348,6 +309,62 @@ check_idrefs(const struct cbl_ynode *n)
 	for (uint32_t i = 0; i < n->nchild; i++)
 		k += check_idrefs(n->child[i]);
 	return (k);
+}
+
+/*
+ * Every child found by its delta, every node by its SID, and a SID in a
+ * table's span that is no child's, not.  How many of each way.
+ */
+static void
+check_lookup(const struct cbl_ynode *n, size_t *dense, size_t *mapped)
+{
+	ATF_CHECK(cbl_yschema_node(ys, n->sid) == n);
+	if (n->nmap > 0 && n->map == NULL)
+		(*dense)++;
+	else if (n->nmap > 0)
+		(*mapped)++;
+	for (uint32_t i = 0; i < n->nchild; i++) {
+		ATF_CHECK_MSG(cbl_ynode_child(n, (int64_t)(n->child[i]->sid -
+		    n->sid)) == n->child[i], "%s/%s", n->name,
+		    n->child[i]->name);
+		check_lookup(n->child[i], dense, mapped);
+	}
+	for (uint32_t off = 0; n->map != NULL && off < n->nmap; off++)
+		if (n->map[off] == 0)
+			ATF_CHECK(cbl_ynode_child(n, (int64_t)
+			    (n->child[0]->sid + off - n->sid)) == NULL);
+	ATF_CHECK(cbl_ynode_child(n, INT64_MIN) == NULL);
+}
+
+ATF_TC_WITHOUT_HEAD(lookups);
+ATF_TC_BODY(lookups, tc)
+{
+	const struct cbl_ynode *n;
+	size_t dense = 0, mapped = 0;
+
+	ATF_REQUIRE(yangh_schema.nnode > 100);
+	for (uint32_t i = 1; i < yangh_schema.nnode; i++)
+		ATF_CHECK(yangh_schema.node[i]->sid >
+		    yangh_schema.node[i - 1]->sid);
+	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
+		for (uint32_t j = 0; j < yangh_schema.mod[i]->ntop; j++)
+			check_lookup(yangh_schema.mod[i]->top[j], &dense,
+			    &mapped);
+	ATF_CHECK(dense > 0);
+	ATF_CHECK(mapped > 0);
+	/* Two leaves, numbered one after the other: dense. */
+	n = child(top(module("ietf-sid-file"), "sid-file"),
+	    "assignment-range");
+	ATF_REQUIRE(n != NULL);
+	ATF_CHECK_EQ(2u, n->nmap);
+	ATF_CHECK(n->map == NULL);
+	ATF_CHECK_STREQ("size", cbl_ynode_child(n, 2)->name);
+	/* Their children between them: by a table. */
+	n = top(module("shapes"), "shapes");
+	ATF_REQUIRE(n != NULL && n->map != NULL);
+	ATF_CHECK_STREQ("item", cbl_ynode_child(n, (int64_t)(child(n,
+	    "item")->sid - n->sid))->name);
+	ATF_CHECK(cbl_yschema_node(ys, 1) == NULL);
 }
 
 ATF_TC_WITHOUT_HEAD(identities);
@@ -367,13 +384,15 @@ ATF_TC_BODY(identities, tc)
 	ATF_CHECK(bases >= 3);
 
 	/* shapes: red is a colour, colour is not red. */
-	ATF_REQUIRE((colour = ident(UINT64_C(1099511727777))) != NULL);
+	ATF_REQUIRE((colour = cbl_yschema_ident(&yangh_schema,
+	    UINT64_C(1099511727777))) != NULL);
 	ATF_CHECK_STREQ("colour", colour->name);
 	ATF_CHECK_STREQ("shapes", colour->module->name);
-	ATF_REQUIRE((red = ident(UINT64_C(1099511727778))) != NULL);
+	ATF_REQUIRE((red = cbl_yschema_ident(&yangh_schema,
+	    UINT64_C(1099511727778))) != NULL);
 	ATF_CHECK_STREQ("red", red->name);
-	ATF_CHECK(derived_from(red->sid, colour->sid, false));
-	ATF_CHECK(!derived_from(colour->sid, red->sid, true));
+	ATF_CHECK(cbl_yderived_from(ys, red->sid, colour->sid, false));
+	ATF_CHECK(!cbl_yderived_from(ys, colour->sid, red->sid, true));
 	ATF_CHECK_EQ(0u, red->nderived);
 
 	/* ietf-system: RADIUS and local users are ways to authenticate. */
@@ -387,8 +406,8 @@ ATF_TC_BODY(identities, tc)
 	for (uint32_t i = 0; i < yangh_schema.nident; i++)
 		if (strcmp(yangh_schema.ident[i].name, "radius") == 0 ||
 		    strcmp(yangh_schema.ident[i].name, "local-users") == 0)
-			ATF_CHECK(derived_from(yangh_schema.ident[i].sid,
-			    m->sid, false));
+			ATF_CHECK(cbl_yderived_from(ys,
+			    yangh_schema.ident[i].sid, m->sid, false));
 
 	/* Features, as the schema was compiled: every one on. */
 	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
@@ -406,5 +425,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ietf);
 	ATF_TP_ADD_TC(tp, tables);
 	ATF_TP_ADD_TC(tp, identities);
+	ATF_TP_ADD_TC(tp, lookups);
 	return (atf_no_error());
 }

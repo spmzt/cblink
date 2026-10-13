@@ -270,7 +270,11 @@ and
 iterate the items of a dump.
 .Fn cbl_subscribe
 joins a multicast group of a family; the server sends to it with
-.Fn cbl_notify .
+.Fn cbl_notify ,
+or to one peer with
+.Fn cbl_conn_notify ;
+.Fn cbl_conn_subscribed
+says whether a peer joined, for what is told only to those that asked.
 .Pp
 Streams carry a sequence of messages in one or both directions with
 credit-based flow control:
@@ -316,6 +320,30 @@ which makes simple blocking clients short.
 .Fn cbl_conn_stats
 reports what a connection is doing: queued output, requests in flight,
 dropped notifications.
+.Ss YANG schema tables
+.In cbl_schema.h
+describes the schema tables
+.Xr cblink-gen 1
+writes of YANG modules
+.Pq Fl m Cm schema :
+every node with its SID
+.Pq RFC 9595 ,
+its type, its children by SID, its constraints and expressions; the
+identities a value may name, each with those derived from it; each
+module's features.
+.Fn cbl_ynode_child
+finds the child a map key's delta names
+.Pq RFC 9254 ,
+.Fn cbl_yschema_node
+and
+.Fn cbl_yschema_ident
+a node and an identity by SID, and
+.Fn cbl_yderived_from
+answers XPath's
+.Fn derived-from
+and, with
+.Fa self ,
+.Fn derived-from-or-self .
 .Sh LIMITS
 Every limit has a default, a minimum and a maximum, and applies per
 context, listener or connection

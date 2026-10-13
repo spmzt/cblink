@@ -15,9 +15,12 @@
  *
  * A node is keyed by its SID (RFC 9595); its children, choices and cases
  * passed through, are sorted by SID, so that the delta a map key gives
- * finds the child by a binary search, and a run of children whose deltas
- * follow one another is a dense array.  Types are shared between the
- * nodes that have the same one.  XPath expressions (when, must, a
+ * finds the child (cbl_ynode_child()): at once when their SIDs follow
+ * one another (dense), by a small table when they lie close (RFC 9595's
+ * numbering puts a child's own children between it and the next), by a
+ * binary search otherwise, as for what another module augments in from
+ * its own range.  Types are shared between the nodes that have the same
+ * one.  XPath expressions (when, must, a
  * leafref's path) are the schema's, by number, as written: cbl_xpath
  * parses them where they are used.
  */
@@ -179,10 +182,17 @@ struct cbl_ynode {
 	uint16_t		 ndflt;
 	uint16_t		 ccase;		/* in choice: which case */
 	uint32_t		 nchild;
+	/*
+	 * The children from the first, by SID - child[0]->sid below nmap:
+	 * child[that] itself when map is NULL (dense), else child[map[that]
+	 * - 1] when not 0; the others by a binary search.
+	 */
+	uint32_t		 nmap;
 	uint32_t		 min;		/* list, leaf-list: min-elements */
 	uint32_t		 max;		/* and max-elements; 0: none */
 	const struct cbl_ytype	*type;		/* leaf, leaf-list */
 	const struct cbl_ynode	*const *child;	/* by SID */
+	const uint16_t		*map;
 	const uint32_t		*keys;		/* list: indices in child */
 	const struct cbl_ywhen	*when;
 	const struct cbl_ymust	*must;
@@ -229,7 +239,9 @@ struct cbl_yschema {
 	uint32_t		 nmod;
 	uint32_t		 nxpath;
 	uint32_t		 nident;
+	uint32_t		 nnode;
 	const struct cbl_ymodule *const *mod;
+	const struct cbl_ynode	*const *node;	/* every node, by SID */
 	const char		*const *xpath;	/* when, must, path: as written */
 	/*
 	 * The identities a value may name: the modules', and every one
@@ -238,5 +250,21 @@ struct cbl_yschema {
 	 */
 	const struct cbl_yident	*ident;
 };
+
+/* The child of n a map key's delta names (RFC 9254), or NULL. */
+const struct cbl_ynode *cbl_ynode_child(const struct cbl_ynode *n,
+		    int64_t delta);
+/* The node, the structure, of a SID, or NULL. */
+const struct cbl_ynode *cbl_yschema_node(const struct cbl_yschema *s,
+		    uint64_t sid);
+/* The identity of a SID, or NULL. */
+const struct cbl_yident *cbl_yschema_ident(const struct cbl_yschema *s,
+		    uint64_t sid);
+/*
+ * Whether identity x is derived from base (XPath derived-from()), or is
+ * it with self (derived-from-or-self()).
+ */
+bool		 cbl_yderived_from(const struct cbl_yschema *s, uint64_t x,
+		    uint64_t base, bool self);
 
 #endif /* !_CBL_SCHEMA_H_ */

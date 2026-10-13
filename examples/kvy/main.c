@@ -11,11 +11,13 @@
  * its own: a client edits the store, reads it back (its value in
  * YANG-CBOR, and decoded), and calls an rpc, and the program says what
  * came back.  The action is called through the table, as family 1 does
- * not carry actions yet; and the notification's bytes are shown.
+ * not carry actions yet.  A notification is shown as bytes, then sent
+ * to the client, which subscribed to family 1's group "notify".
  */
 
 #include <err.h>
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -153,11 +155,16 @@ handler(const char *name)
 	errx(1, "no handler for %s", name);
 }
 
+/* The module's top-level node named name. */
 static const struct cbl_ynode *
 node(const char *name)
 {
+	const struct cbl_ymodule *m = kv_server.schema->mod[0];
 
-	return (cbl_yschema_node(kv_server.schema, handler(name)->sid));
+	for (uint32_t i = 0; i < m->ntop; i++)
+		if (strcmp(m->top[i]->name, name) == 0)
+			return (m->top[i]);
+	errx(1, "no node %s", name);
 }
 
 /* The input or the output of an rpc. */
@@ -203,6 +210,30 @@ call(cbl_conn *c, enum cbl_ycmd cmd, cbl_msg **mp)
 	return (r);
 }
 
+/* A notification heard: which, and its key and what. */
+static void
+heard(cbl_conn *conn, cbl_msg *m, void *arg)
+{
+	struct kv_changed ch = { 0 };
+	struct cbl_ynotif nt;
+	cbl_yarena *a;
+	int *n = arg;
+
+	(void)conn;
+	if ((a = cbl_yarena_new()) == NULL)
+		err(1, "cbl_yarena_new");
+	if (cbl_msg_ynotif(m, &nt, a) != 0 ||
+	    nt.sid != node("changed")->sid ||
+	    cbl_ydecode(node("changed"), nt.content, nt.len, &ch, a,
+	    CBL_YD_STRICT, NULL, 0) != 0)
+		errx(1, "not the notification sent");
+	printf("notified: changed %s %s\n", ch.key,
+	    ch.what == KV_CHANGED_WHAT_DELETED ? "deleted" : "set");
+	cbl_yarena_free(a);
+	cbl_msg_free(m);
+	(*n)++;
+}
+
 static cbl_msg *
 request(cbl_ctx *ctx, enum cbl_ycmd cmd)
 {
@@ -244,8 +275,11 @@ main(void)
 	cbl_conn *c;
 	cbl_msg *m, *r;
 	cbl_yarena *a;
+	struct pollfd pfd;
 	pthread_t thr;
+	cbl_sub *sub;
 	uint64_t sid;
+	int events, timeout, nheard = 0;
 	const void *v;
 	size_t len;
 
@@ -328,6 +362,24 @@ main(void)
 		errx(1, "notification");
 	hex("changed", b.p, b.len);
 	cbl_ybuf_free(&b);
+
+	/* The notification sent to who subscribed, the client. */
+	if (cbl_subscribe(c, "cblink.yang", "notify", heard, &nheard,
+	    &sub) != 0)
+		errx(1, "subscribe");
+	if (cbl_ynotify(sctx, node("changed"), &ch) != 0)
+		errx(1, "cbl_ynotify");
+	while (nheard == 0 && cbl_conn_is_open(c)) {
+		cbl_conn_interest(c, &events, &timeout);
+		pfd.fd = cbl_conn_fd(c);
+		pfd.events = POLLIN | ((events & CBL_EV_WRITE) ? POLLOUT : 0);
+		if (poll(&pfd, 1, 5000) == 0)
+			errx(1, "no notification");
+		(void)cbl_conn_process(c,
+		    ((pfd.revents & POLLIN) ? CBL_EV_READ : 0) |
+		    ((pfd.revents & POLLOUT) ? CBL_EV_WRITE : 0));
+	}
+	(void)cbl_unsubscribe(sub);
 
 	cbl_conn_free(c);
 	cbl_loop_stop(loop);

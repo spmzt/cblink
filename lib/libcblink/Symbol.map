@@ -226,6 +226,8 @@ CBLINK_1.0 {
 	cbl_msg_err_sid;
 	cbl_yserver_add;
 	cbl_msg_put_yget;
+	cbl_ynotify;
+	cbl_msg_ynotif;
 	cbl_req_yarg;
 	cbl_req_set_yerr;
 };

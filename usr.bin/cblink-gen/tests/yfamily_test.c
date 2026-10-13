@@ -445,6 +445,109 @@ ATF_TC_BODY(dump, tc)
 	teardown(&f);
 }
 
+struct heard {
+	atomic_int	 n;
+	uint64_t	 sid;
+	char		 text[32];
+	char		 time[40];
+};
+
+static void
+heard_cb(cbl_conn *conn, cbl_msg *m, void *arg)
+{
+	struct heard *h = arg;
+	struct shapes_alarm al = { 0 };
+	struct cbl_ynotif nt;
+	cbl_yarena *a;
+
+	(void)conn;
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ(CBL_YCMD_NOTIFY, cbl_msg_cmd(m));
+	ATF_REQUIRE_EQ(0, cbl_msg_ynotif(m, &nt, a));
+	h->sid = nt.sid;
+	strlcpy(h->time, nt.event_time, sizeof(h->time));
+	ATF_REQUIRE_EQ(0, cbl_ydecode(top("shapes", "alarm"), nt.content,
+	    nt.len, &al, a, CBL_YD_STRICT, NULL, 0));
+	strlcpy(h->text, al.text != NULL ? al.text : "", sizeof(h->text));
+	cbl_yarena_free(a);
+	cbl_msg_free(m);
+	h->n++;
+}
+
+/* A notification, to the subscribers of group "notify". */
+ATF_TC_WITHOUT_HEAD(notify);
+ATF_TC_BODY(notify, tc)
+{
+	const struct cbl_ynode *alarm = top("shapes", "alarm");
+	struct shapes_alarm al = { .text = "hot" };
+	struct heard h = { 0 };
+	struct timespec t0, t1;
+	struct pollfd pfd;
+	struct fixture f;
+	int events, timeout;
+	cbl_sub *sub;
+
+	setup(&f);
+	ATF_REQUIRE_EQ(EINVAL, cbl_ynotify(f.sctx, n_shapes, &al));
+	ATF_REQUIRE_EQ(0, cbl_subscribe(f.c, "cblink.yang", "notify",
+	    heard_cb, &h, &sub));
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, alarm, &al));
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	while (h.n == 0) {
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		ATF_REQUIRE(t1.tv_sec - t0.tv_sec < 5);
+		cbl_conn_interest(f.c, &events, &timeout);
+		pfd.fd = cbl_conn_fd(f.c);
+		pfd.events = POLLIN | ((events & CBL_EV_WRITE) ? POLLOUT : 0);
+		(void)poll(&pfd, 1, 10);
+		(void)cbl_conn_process(f.c,
+		    ((pfd.revents & POLLIN) ? CBL_EV_READ : 0) |
+		    ((pfd.revents & POLLOUT) ? CBL_EV_WRITE : 0));
+	}
+	ATF_REQUIRE_EQ(alarm->sid, h.sid);
+	ATF_REQUIRE_STREQ("hot", h.text);
+	/* RFC 3339 in UTC: 2026-10-13T23:59:59.000000Z. */
+	ATF_REQUIRE_EQ(27, strlen(h.time));
+	ATF_REQUIRE(h.time[10] == 'T' && h.time[26] == 'Z');
+	ATF_REQUIRE_EQ(0, cbl_unsubscribe(sub));
+	teardown(&f);
+}
+
+/*
+ * The event's key is a delta from its own SID, 2^40 + 47: a notification
+ * of a smaller SID, a negative one.
+ */
+ATF_TC_WITHOUT_HEAD(notif_delta);
+ATF_TC_BODY(notif_delta, tc)
+{
+	/* {+1 event-time: "t", +2 event: {-3: {}}} */
+	static const uint8_t env[] = { 0xa2, 0x01, 0x61, 't', 0x02, 0xa1, 0x22,
+	    0xa0 };
+	cbl_ctx *ctx = test_ctx();
+	struct cbl_ynotif nt;
+	const void *fr;
+	cbl_msg *m, *rx;
+	cbl_yarena *a;
+	size_t len;
+
+	/* Not a NOTIFY frame, which needs a group: the body is what counts. */
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, CBL_YANG_FAMILY, CBL_YCMD_NOTIFY, 0,
+	    &m));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(m, UINT64_C(1099511627776) + 45,
+	    env, sizeof(env)));
+	ATF_REQUIRE_EQ(0, cbl_msg_encode(m, &fr, &len));
+	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, fr, len, NULL, &rx));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_msg_ynotif(rx, &nt, a));
+	ATF_REQUIRE_EQ(UINT64_C(1099511627776) + 44, nt.sid);
+	ATF_REQUIRE_STREQ("t", nt.event_time);
+	ATF_REQUIRE(nt.len == 1 && *(const uint8_t *)nt.content == 0xa0);
+	cbl_yarena_free(a);
+	cbl_msg_free(rx);
+	cbl_msg_free(m);
+	cbl_ctx_free(ctx);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -453,5 +556,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, refusals);
 	ATF_TP_ADD_TC(tp, rpc);
 	ATF_TP_ADD_TC(tp, dump);
+	ATF_TP_ADD_TC(tp, notify);
+	ATF_TP_ADD_TC(tp, notif_delta);
 	return (atf_no_error());
 }

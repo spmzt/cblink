@@ -441,7 +441,26 @@ enum cbl_ycmd {
 	CBL_YCMD_GET = 1,
 	CBL_YCMD_EDIT = 2,
 	CBL_YCMD_RPC = 3,
+	CBL_YCMD_NOTIFY = 4,	/* NOTIFY frames, group "notify" */
 };
+
+/*
+ * A YANG notification: cbl_ynotify() sends n's, its struct p, to the
+ * subscribers of family 1's group "notify", the time now.  A receiver
+ * gets its SID, time and content (cbl_ydecode() with the node of that
+ * SID) from cbl_msg_ynotif(), what it points to a's or msg's.
+ */
+struct cbl_ynotif {
+	uint64_t	 sid;
+	const char	*event_time;	/* RFC 3339, UTC */
+	const void	*content;
+	size_t		 len;
+};
+
+int		 cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n,
+		    const void *p);
+int		 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt,
+		    cbl_yarena *a);
 
 int		 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv,
 		    void *arg);

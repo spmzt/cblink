@@ -17,14 +17,19 @@
  *		edit that fails undoes those before it.
  *	RPC	{SID(rpc): input or null}; the reply {SID(rpc): output},
  *		null when the rpc has none.
+ *	NOTIFY	to group "notify": {cblink:notification: {event-time,
+ *		event: {delta: content}}}, the delta from event's SID
+ *		(RFC 9254: anydata's keys are as a container's).
  *
  * A request's targets are top-level nodes; a list entry's (a SID with
  * keys), actions and the .sid files (GET-SID) are for what comes next.
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "cbl_impl.h"
 #include "cbl_schema.h"
@@ -525,13 +530,154 @@ static const struct cbl_op yops[] = {
 	{ CBL_YCMD_RPC, CBL_OPF_DO, "rpc", NULL, y_rpc, NULL, NULL },
 };
 
+static const struct cbl_mcgrp ygroups[] = {
+	{ "notify", 0 },
+};
+
 static const struct cbl_family_def ydef = {
 	.abi = CBL_FAMILY_ABI,
 	.name = "cblink.yang",
 	.version = 1,
 	.ops = yops,
 	.nops = sizeof(yops) / sizeof(yops[0]),
+	.mcgrps = ygroups,
+	.nmcgrps = sizeof(ygroups) / sizeof(ygroups[0]),
 };
+
+/* A CBOR integer's head into p, major type 0 or 1: its length. */
+static size_t
+put_int(uint8_t *p, int64_t v)
+{
+	uint64_t u = v < 0 ? (uint64_t)(-(v + 1)) : (uint64_t)v;
+	uint8_t major = v < 0 ? 0x20 : 0;
+	size_t k = u < 24 ? 0 : u <= UINT8_MAX ? 1 : u <= UINT16_MAX ? 2 :
+	    u <= UINT32_MAX ? 4 : 8;
+
+	p[0] = (uint8_t)(major | (k == 0 ? u : k == 1 ? 24 : k == 2 ? 25 :
+	    k == 4 ? 26 : 27));
+	for (size_t i = 0; i < k; i++)
+		p[1 + i] = (uint8_t)(u >> (8 * (k - 1 - i)));
+	return (1 + k);
+}
+
+/* A CBOR head at p: its major type and value; 0, or EINVAL. */
+static int
+get_head(const uint8_t **pp, const uint8_t *end, int *major, uint64_t *v)
+{
+	const uint8_t *p = *pp;
+	size_t k;
+
+	if (p >= end)
+		return (EINVAL);
+	*major = p[0] >> 5;
+	*v = p[0] & 0x1f;
+	p++;
+	if (*v >= 24) {
+		if (*v > 27)
+			return (EINVAL);
+		k = (size_t)1 << (*v - 24);
+		if ((size_t)(end - p) < k)
+			return (EINVAL);
+		for (*v = 0; k > 0; k--)
+			*v = *v << 8 | *p++;
+	}
+	*pp = p;
+	return (0);
+}
+
+static const struct cbl_ynode *
+event_node(void)
+{
+	const struct cbl_ynode *e = cbl_fw_node("notification");
+
+	for (uint32_t i = 0; e != NULL && i < e->nchild; i++)
+		if (strcmp(e->child[i]->name, "event") == 0)
+			return (e->child[i]);
+	return (NULL);
+}
+
+int
+cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n, const void *p)
+{
+	struct cblink_notification e = { 0 };
+	const struct cbl_ynode *ev = event_node();
+	struct cbl_ybuf c = { 0 };
+	uint8_t head[1 + 9], *b = NULL;
+	char t[sizeof("YYYY-MM-DDThh:mm:ss.uuuuuuZ")];
+	struct timespec ts;
+	struct tm tm;
+	cbl_msg *msg;
+	size_t hl;
+	int error;
+
+	if (ctx == NULL || n == NULL || p == NULL ||
+	    n->kind != CBL_YN_NOTIF || ev == NULL)
+		return (EINVAL);
+	if (ctx->yfam == NULL)
+		return (ENOENT);	/* no module served */
+	if ((error = cbl_yencode(n, p, &c)) != 0)
+		return (error);
+	/* event: {delta: content}. */
+	head[0] = 0xa1;
+	hl = 1 + put_int(head + 1, (int64_t)(n->sid - ev->sid));
+	if ((b = malloc(hl + c.len)) == NULL) {
+		error = ENOMEM;
+		goto out;
+	}
+	memcpy(b, head, hl);
+	memcpy(b + hl, c.p, c.len);
+	e.event.p = b;
+	e.event.len = hl + c.len;
+	(void)clock_gettime(CLOCK_REALTIME, &ts);
+	(void)gmtime_r(&ts.tv_sec, &tm);
+	hl = strftime(t, sizeof(t), "%Y-%m-%dT%H:%M:%S", &tm);
+	(void)snprintf(t + hl, sizeof(t) - hl, ".%06ldZ",
+	    ts.tv_nsec / 1000);
+	e.event_time = t;
+	if ((error = cbl_notify_msg_new(ctx->yfam, CBL_YCMD_NOTIFY,
+	    &msg)) != 0)
+		goto out;
+	if ((error = cbl_msg_put_ynode(msg, cbl_fw_node("notification"),
+	    &e)) != 0) {
+		cbl_msg_free(msg);
+		goto out;
+	}
+	error = cbl_notify(ctx->yfam, 0, msg);
+out:
+	cbl_ybuf_free(&c);
+	free(b);
+	return (error);
+}
+
+int
+cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt, cbl_yarena *a)
+{
+	struct cblink_notification e;
+	const struct cbl_ynode *ev = event_node();
+	const uint8_t *p, *end;
+	uint64_t v;
+	int major, error;
+
+	if (msg == NULL || nt == NULL || a == NULL || ev == NULL)
+		return (EINVAL);
+	memset(nt, 0, sizeof(*nt));
+	if ((error = cbl_msg_ydecode(msg, cbl_fw_node("notification"), &e, a,
+	    CBL_YD_STRICT, NULL, 0)) != 0)
+		return (error);
+	if (e.event.p == NULL)
+		return (ENOENT);
+	p = e.event.p;
+	end = p + e.event.len;
+	/* {delta: content}: one item. */
+	if (get_head(&p, end, &major, &v) != 0 || major != 5 || v != 1 ||
+	    get_head(&p, end, &major, &v) != 0 || major > 1 || v > INT64_MAX)
+		return (EINVAL);
+	nt->sid = ev->sid + (major == 0 ? v : ~v);
+	nt->event_time = e.event_time;
+	nt->content = p;
+	nt->len = (size_t)(end - p);
+	return (0);
+}
 
 int
 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv, void *arg)

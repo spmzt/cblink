@@ -152,7 +152,8 @@ atf_test_case kvy
 kvy_head()
 {
 	atf_set "descr" "cbl-kvy: the kv example in YANG, its table served" \
-	    "by family 1: an edit, the store read back, an rpc"
+	    "by family 1: an edit, the store read back, an rpc, a" \
+	    "notification"
 }
 kvy_body()
 {
@@ -171,6 +172,7 @@ kvy_body()
 	# {SID of changed: {+1 key: "beta", +2 what: deleted (1)}}
 	atf_check -o match:'^changed: a1 1b .* a2 01 64 62 65 74 61 02 01$' \
 	    cat out
+	atf_check -o match:'^notified: changed beta deleted$' cat out
 }
 
 atf_init_test_cases()

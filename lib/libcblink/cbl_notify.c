@@ -197,7 +197,9 @@ copy_with_missed(cbl_conn *conn, cbl_msg *msg)
 	body = cbl_msg_body(rx);
 	for (uint32_t i = 0; body != NULL && i < body->count; i++) {
 		a = &body->child[i];
-		if (a->key < 1 || cbl_fw_sid((uint64_t)a->key))
+		/* An error it had already: the new one says ENOBUFS. */
+		if (a->key < 1 ||
+		    (uint64_t)a->key == cbl_fw_node("error")->sid)
 			continue;
 		(void)cbl_msg_put_sid_raw(copy, (uint64_t)a->key,
 		    rx->buf + rx->hdr.hdrlen + a->off, a->len);

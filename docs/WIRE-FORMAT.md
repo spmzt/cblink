@@ -491,6 +491,7 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 | 1   | `GET`  | do, dump | `{cblink:get: {target: [SID, ...]}}`, or empty: every top-level data node served | do: `{SID: value, ...}`; dump: one `MULTI` frame per node, `{SID: value}` |
 | 2   | `EDIT` | do       | `{SID: value or null, ...}` | ack |
 | 3   | `RPC`  | do       | `{SID(rpc): input or null}` | `{SID(rpc): output}`, or `{SID(rpc): null}` when the rpc has no output |
+| 4   | `NOTIFY` | notification, group `notify` | — | `{cblink:notification: {event-time, event: {delta: content}}}` |
 
 - **GET** is CORECONF's FETCH. A node that is not instantiated is left
   out of the reply. A target is a top-level node's SID; a list entry's
@@ -503,6 +504,12 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 - **RPC** is CORECONF's POST. An rpc's input and output are keyed by the
   rpc's SID, and their children's deltas are from the rpc's SID, not the
   `input` or `output` node's (RFC 9254 section 3.2).
+- **NOTIFY** frames carry YANG notifications to the subscribers of group
+  `notify` (section 9). The envelope is the `cblink:notification`
+  structure: `event-time` (RFC 3339, UTC) and the anydata `event`, whose
+  one key is the notification's SID as a delta from `event`'s own (RFC
+  9254: an anydata's keys are as a container's), and whose value is the
+  notification's content.
 - **Errors.** The `cblink:error` structure's `error-path` is the SID of
   the node at fault, alone; its `error-tag` says why, e.g.
   `unknown-element` for a SID no served module has,

@@ -1,0 +1,13 @@
+module subtract {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:subtract";
+  prefix s;
+
+  revision 2026-10-13;
+
+  leaf consonants {
+    type string {
+      pattern '[a-z-[aeiou]]+';
+    }
+  }
+}

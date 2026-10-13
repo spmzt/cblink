@@ -29,7 +29,7 @@ CFLAGS+=	-I/usr/include/private/ucl
 LDADD+=		-lprivateucl
 # The XPath parser is libcblink's, compiled in.
 .PATH:		${.CURDIR}/../../lib/libcblink
-SRCS+=		cbl_xpath.c
+SRCS+=		cbl_pattern.c cbl_xpath.c
 CFLAGS+=	-I${.CURDIR}/../../lib/libcblink
 CFLAGS+=	-DCBLINK_GEN_LIBYANG -idirafter ${LOCALBASE}/include
 LDADD+=		-L${LOCALBASE}/lib -lyang

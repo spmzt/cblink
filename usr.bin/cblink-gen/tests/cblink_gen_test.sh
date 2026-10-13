@@ -304,6 +304,9 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	echo '{"x": 1}' > notsid.sid
 	atf_check -s exit:1 -e match:'no "ietf-sid-file:sid-file" object' \
 	    $gen -n -s notsid.sid "$y/ietf-system@2014-08-06.yang"
+	# A pattern beyond what cblink matches is refused, at its node.
+	atf_check -s exit:1 -e match:"^subtract@2026-10-13.yang:.*/subtract:consonants: pattern '\\[a-z-\\[aeiou\\]\\]\\+': outside what cblink matches: class subtraction" \
+	    $gen -n "$y/subtract@2026-10-13.yang"
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang

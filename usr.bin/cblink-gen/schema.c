@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cbl_pattern.h"
 #include "cbl_xpath.h"
 #include "gen.h"
 #include "schema.h"
@@ -486,14 +487,36 @@ dump_node(struct snode *n, void *arg __unused)
 }
 
 /*
- * Every XPath expression of the model (when, must, a leafref's path)
- * parsed and held to XPath-lite, which is what cblink evaluates; one
- * that does not parse, or goes beyond it, is a diagnostic at its node.
+ * The profile cblink keeps to: every XPath expression of the model
+ * (when, must, a leafref's path) parsed and held to XPath-lite, and
+ * every pattern translated to an ERE and compiled, which is what cblink
+ * evaluates and matches; one that cannot be is a diagnostic at its node.
  */
 struct xpcheck {
 	struct diags	*d;
 	size_t		 n;
+	size_t		 npat;
 };
+
+static void
+pat_one(struct xpcheck *c, const struct snode *n, const char *pat)
+{
+	regex_t re;
+	struct buf b;
+	char err[256];
+	size_t pos;
+
+	c->npat++;
+	if (cbl_pattern_compile(pat, &re, err, sizeof(err), &pos) == 0) {
+		cbl_pattern_free(&re);
+		return;
+	}
+	buf_init(&b);
+	path_add(&b, n);
+	diag_add(c->d, 0, 0, "%s: pattern '%s': outside what cblink matches: "
+	    "%s at offset %zu", b.p, pat, err, pos);
+	buf_free(&b);
+}
 
 static void
 xp_one(struct xpcheck *c, const struct snode *n, const char *what,
@@ -533,6 +556,8 @@ xp_type(struct xpcheck *c, const struct snode *n, const struct sntype *t)
 		return;
 	if (t->path != NULL)
 		xp_one(c, n, "path", t->path);
+	for (size_t i = 0; i < t->npatterns; i++)
+		pat_one(c, n, t->patterns[i].expr);
 	xp_type(c, n, t->real);
 	for (size_t i = 0; i < t->nmembers; i++)
 		xp_type(c, n, t->members[i]);
@@ -553,7 +578,7 @@ xp_node(struct snode *n, void *arg)
 }
 
 size_t
-schema_check_xpath(struct schema *s, struct diags *d)
+schema_check_profile(struct schema *s, struct diags *d, size_t *npatterns)
 {
 	struct xpcheck c = { .d = d };
 
@@ -561,6 +586,7 @@ schema_check_xpath(struct schema *s, struct diags *d)
 	for (size_t i = 0; i < s->nmods; i++)
 		for (size_t j = 0; j < s->mods[i]->nexts; j++)
 			walk(s->mods[i]->exts[j].data, xp_node, &c);
+	*npatterns = c.npat;
 	return (c.n);
 }
 

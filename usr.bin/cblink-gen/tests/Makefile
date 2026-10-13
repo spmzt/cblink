@@ -77,7 +77,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/good-dev@2026-10-13.yang yang/ext@2026-10-13.yang \
 		yang/beyond@2026-10-13.yang yang/ietf-system@2014-08-06.yang \
 		yang/ietf-system@2014-08-06.sid yang/iana-crypt-hash@2014-08-06.yang \
-		yang/ietf-netconf-acm@2018-02-14.yang
+		yang/ietf-netconf-acm@2018-02-14.yang yang/subtract@2026-10-13.yang
 YANGDIR=	${TESTSDIR}/yang
 
 .for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG

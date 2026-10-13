@@ -26,6 +26,7 @@
 
 #include "spec.h"
 #ifdef CBLINK_GEN_LIBYANG
+#include "cbl_pattern.h"
 #include "schema.h"
 #include "sid.h"
 #include "yang.h"
@@ -105,7 +106,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	struct schema *s;
 	struct ly_ctx *ctx;
 	char *pathcopy;
-	size_t nodes = 0, nmods = 0, nexprs;
+	size_t nodes = 0, nmods = 0, nexprs, npats;
 	int fd, nassigned;
 
 	const char **dirs;
@@ -145,6 +146,9 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		sidfd[i] = fd;
 	}
 	ctx = yang_ctx_new(dirs, ndirs);
+	/* Patterns are compiled in C.UTF-8, which cannot be loaded later. */
+	if (cbl_pattern_init() != 0)
+		errx(2, "no C.UTF-8 locale for the patterns");
 
 	caph_cache_catpages();
 	if (caph_limit_stdio() != 0 || caph_enter() != 0)
@@ -190,7 +194,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		free(pathcopy);
 	}
 	d.file = argc == 1 ? basename(argv[0]) : "the modules";
-	nexprs = schema_check_xpath(s, &d);
+	nexprs = schema_check_profile(s, &d, &npats);
 	if (d.n > 0) {
 		diag_print(&d);
 		schema_free(s);
@@ -203,8 +207,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			nmods += s->mods[i]->implemented;
 		schema_walk(s, count_node, &nodes);
 		printf("%s: compiled, %zu modules implemented, %zu schema "
-		    "nodes, %zu XPath expressions", d.file, nmods, nodes,
-		    nexprs);
+		    "nodes, %zu XPath expressions, %zu patterns", d.file, nmods,
+		    nodes, nexprs, npats);
 		if (nsids > 0)
 			printf(", %zu SIDs from %zu .sid files", nattached,
 			    nsids);

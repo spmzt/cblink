@@ -248,8 +248,13 @@ typedef void	snode_visit_t(struct snode *n, void *arg);
 void		 schema_walk(struct schema *s, snode_visit_t *visit, void *arg);
 
 struct diags;
-/* Every XPath expression parsed; the count, problems added to d. */
-size_t		 schema_check_xpath(struct schema *s, struct diags *d);
+/*
+ * The profile: every XPath expression parsed and within XPath-lite, every
+ * pattern translated and compiled.  The count of expressions, that of
+ * patterns in *npatterns, problems added to d.
+ */
+size_t		 schema_check_profile(struct schema *s, struct diags *d,
+		    size_t *npatterns);
 
 struct buf;
 /*

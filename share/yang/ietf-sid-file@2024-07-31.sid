@@ -1,0 +1,115 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-sid-file",
+    "module-revision": "2024-07-31",
+    "description": "IANA's range for the module (RFC 9595), numbered as its Appendix B says by cblink-gen -a: IANA has published no .sid file for it.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-types",
+        "module-revision": "2013-07-15"
+      },
+      {
+        "module-name": "ietf-yang-structure-ext",
+        "module-revision": "2020-06-17"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "1300",
+        "size": "50"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "ietf-sid-file",
+        "sid": "1300"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file",
+        "sid": "1301"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/assignment-range",
+        "sid": "1302"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/assignment-range/entry-point",
+        "sid": "1303"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/assignment-range/size",
+        "sid": "1304"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/dependency-revision",
+        "sid": "1305"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/dependency-revision/module-name",
+        "sid": "1306"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/dependency-revision/module-revision",
+        "sid": "1307"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/description",
+        "sid": "1308"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/item",
+        "sid": "1309"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/item/identifier",
+        "sid": "1310"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/item/namespace",
+        "sid": "1311"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/item/sid",
+        "sid": "1312"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/item/status",
+        "sid": "1313"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/module-name",
+        "sid": "1314"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/module-revision",
+        "sid": "1315"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/sid-file-status",
+        "sid": "1316"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-sid-file:sid-file/sid-file-version",
+        "sid": "1317"
+      }
+    ]
+  }
+}

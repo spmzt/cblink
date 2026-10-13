@@ -47,9 +47,10 @@ usage(void)
 
 	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
 	    "[-o dir] spec.yaml\n"
-	    "       cblink-gen -n | -d [-a] [-F module:feature,...] ... "
-	    "[-p dir] ... [-s file.sid] ...\n"
-	    "                  module.yang ...\n");
+	    "       cblink-gen [-adn] [-F module:feature,...] ... "
+	    "[-m sid,sidjson] [-o dir]\n"
+	    "                  [-p dir] ... [-s file.sid] ... "
+	    "module.yang ...\n");
 	exit(2);
 }
 
@@ -88,6 +89,37 @@ read_file(int fd, const char *path, size_t *lenp)
 }
 
 #ifdef CBLINK_GEN_LIBYANG
+/* A .sid file as asked: name@revision.sid, and .sid.cbor its CBOR. */
+static int
+sid_emit(const struct sidfile *sf, int dirfd, bool cbor, bool json)
+{
+	struct buf b;
+	char *name;
+	int rv = 0;
+
+	name = sf->revision != NULL ? xasprintf("%s@%s.sid", sf->module,
+	    sf->revision) : xasprintf("%s.sid", sf->module);
+	if (strchr(name, '/') != NULL || name[0] == '.')
+		errx(2, "%s: not a file name", name);
+	if (json) {
+		buf_init(&b);
+		sid_write(sf, &b);
+		rv |= write_file(dirfd, name, &b);
+		buf_free(&b);
+	}
+	if (cbor) {
+		char *cname = xasprintf("%s.cbor", name);
+
+		buf_init(&b);
+		sid_write_cbor(sf, &b);
+		rv |= write_file(dirfd, cname, &b);
+		buf_free(&b);
+		free(cname);
+	}
+	free(name);
+	return (rv);
+}
+
 /*
  * YANG modules: those they may import are read, from -p and from their
  * own directories, before capability mode.  -n says what was compiled,
@@ -96,8 +128,11 @@ read_file(int fd, const char *path, size_t *lenp)
 static int
 yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     const char **feats, size_t nfeats, const char **sids, size_t nsids,
-    bool assign, bool check, bool dump)
+    const char *parts, const char *outdir, bool assign, bool check,
+    bool dump)
 {
+	bool cbor = false, json = false;
+	int dirfd = -1;
 	cap_rights_t rights;
 	int sidfd[16];
 	struct diags d = { 0 };
@@ -146,6 +181,35 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 		sidfd[i] = fd;
 	}
 	ctx = yang_ctx_new(dirs, ndirs);
+
+	/*
+	 * Of the parts, only the .sid files are written yet: "sid", their
+	 * YANG-CBOR form as GET-SID answers it, and "sidjson", their JSON.
+	 */
+	if (!check && !dump) {
+		for (const char *p = parts; *p != '\0';) {
+			size_t n = strcspn(p, ",");
+
+			if (n == 3 && strncmp(p, "sid", 3) == 0)
+				cbor = true;
+			else if (n == 7 && strncmp(p, "sidjson", 7) == 0)
+				json = true;
+			else {
+				cbor = json = false;
+				break;
+			}
+			p += n + (p[n] == ',');
+		}
+		if (!cbor && !json)
+			errx(2, "generating C from YANG is not written yet; "
+			    "-n checks the modules, -d dumps them, -m "
+			    "sid,sidjson writes the .sid files");
+		if (nsids == 0)
+			errx(2, "-m sid,sidjson: no -s file");
+		if ((dirfd = open(outdir, O_DIRECTORY | O_SEARCH |
+		    O_CLOEXEC)) == -1)
+			err(2, "%s", outdir);
+	}
 	/* Patterns are compiled in C.UTF-8, which cannot be loaded later. */
 	if (cbl_pattern_init() != 0)
 		errx(2, "no C.UTF-8 locale for the patterns");
@@ -182,6 +246,9 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			}
 			if (d.n == 0 && sid_verify(s, sf, &d) == 0)
 				nattached += sf->nitems;
+			if (d.n == 0 && (cbor || json) &&
+			    sid_emit(sf, dirfd, cbor, json) != 0)
+				return (2);
 			sid_free(sf);
 		}
 		if (assign)
@@ -202,7 +269,9 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	}
 	if (dump)
 		schema_dump(s);
-	else if (check) {
+	else if (check || cbor || json) {
+		if (!check)
+			goto done;
 		for (size_t i = 0; i < s->nmods; i++)
 			nmods += s->mods[i]->implemented;
 		schema_walk(s, count_node, &nodes);
@@ -213,9 +282,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			printf(", %zu SIDs from %zu .sid files", nattached,
 			    nsids);
 		printf("\n");
-	} else
-		errx(2, "generating C from YANG is not written yet; -n "
-		    "checks the modules, -d dumps them");
+	}
+done:
 	schema_free(s);
 	diag_free(&d);
 	return (0);
@@ -225,7 +293,8 @@ static int
 yang_main(int argc __unused, char *argv[], const char **paths __unused,
     size_t npaths __unused, const char **feats __unused,
     size_t nfeats __unused, const char **sids __unused,
-    size_t nsids __unused, bool assign __unused, bool check __unused,
+    size_t nsids __unused, const char *parts __unused,
+    const char *outdir __unused, bool assign __unused, bool check __unused,
     bool dump __unused)
 {
 
@@ -242,6 +311,7 @@ main(int argc, char *argv[])
 	struct ynode *root;
 	struct spec *s;
 	bool assign = false, builtin = false, check = false, dump = false;
+	bool mflag = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
 	const char *paths[16], *feats[64], *sids[16];
 	size_t len, npaths = 0, nfeats = 0, nsids = 0;
@@ -268,6 +338,7 @@ main(int argc, char *argv[])
 			break;
 		case 'm':
 			parts = optarg;
+			mflag = true;
 			break;
 		case 'n':
 			check = true;
@@ -297,7 +368,8 @@ main(int argc, char *argv[])
 	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
 	    strcmp(dot, ".yang") == 0)
 		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
-		    sids, nsids, assign, check, dump));
+		    sids, nsids, mflag ? parts : "", outdir, assign, check,
+		    dump));
 	if (argc != 1 || assign || dump || nfeats > 0 || nsids > 0)
 		usage();
 

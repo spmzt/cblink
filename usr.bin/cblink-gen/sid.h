@@ -63,7 +63,10 @@ struct sidfile {
 	size_t		 nitems;
 };
 
-/* Read a .sid file's text (JSON); NULL and diagnostics on error. */
+/*
+ * Read a .sid file: its JSON text, or its YANG-CBOR form (below); NULL
+ * and diagnostics on error.
+ */
 struct sidfile	*sid_read(const char *text, size_t len, struct diags *d);
 void		 sid_free(struct sidfile *f);
 
@@ -96,9 +99,16 @@ int		 sid_verify(struct schema *s, const struct sidfile *f,
 int		 sid_assign(struct schema *s, struct sidfile *f,
 		    struct diags *d);
 
-/* The file as JSON, deterministically: items in SID order. */
+/* The file as JSON, deterministically, its lists in the file's order. */
 struct buf;
 void		 sid_write(const struct sidfile *f, struct buf *b);
+
+/*
+ * The file in YANG-CBOR (RFC 9254), its ietf-sid-file structure keyed by
+ * SIDs as GET-SID answers it; and read back.  sid_read() takes either.
+ */
+void		 sid_write_cbor(const struct sidfile *f, struct buf *b);
+struct sidfile	*sid_read_cbor(const char *data, size_t len, struct diags *d);
 
 const char	*sid_ns_name(enum sid_ns ns);
 

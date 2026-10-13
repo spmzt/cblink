@@ -1749,7 +1749,7 @@ gen_server(struct buf *b, struct gctx *g, const char *base)
 }
 
 /* Write "b" to dirfd/name, replacing it atomically. */
-static int
+int
 write_file(int dirfd, const char *name, const struct buf *b)
 {
 	char *tmp;

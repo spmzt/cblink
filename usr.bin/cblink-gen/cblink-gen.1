@@ -17,9 +17,10 @@
 .Op Fl o Ar dir
 .Ar spec.yaml
 .Nm
-.Fl n | d
-.Op Fl a
+.Op Fl adn
 .Op Fl F Ar module : Ns Ar feature , Ns ...
+.Op Fl m Cm sid , Ns Cm sidjson
+.Op Fl o Ar dir
 .Op Fl p Ar dir
 .Op Fl s Ar file.sid
 .Ar module.yang ...
@@ -126,6 +127,23 @@ reference documentation in Markdown.
 .Pp
 The default is
 .Ql h,c,client,server,md .
+For YANG modules only the
+.Pa .sid
+files are written yet, one of each kind per
+.Fl s
+file, named after its module and revision:
+.Bl -tag -width "sidjson"
+.It Cm sid
+.Ar module Ns @ Ns Ar revision Ns .sid.cbor :
+the file in YANG-CBOR (RFC 9254), its
+.Ql ietf-sid-file
+structure keyed by SIDs, as cblink's GET-SID answers it.
+.It Cm sidjson
+.Ar module Ns @ Ns Ar revision Ns .sid :
+the file in JSON, as
+.Fl a
+writes it.
+.El
 .It Fl n
 Check the spec and report problems without writing anything.
 For a YANG module, report what was compiled.
@@ -138,7 +156,9 @@ It may be given up to 16 times.
 For YANG modules: attach the YANG Schema Item iDentifiers of a module
 from an RFC 9595
 .Pa .sid
-file, and verify them: no SID given twice, none outside the file's
+file, in JSON or in the YANG-CBOR form
+.Fl m Cm sid
+writes, and verify them: no SID given twice, none outside the file's
 assignment ranges, and every item of the module with one, empty
 .Ql input
 and
@@ -168,11 +188,22 @@ from its own directory and each
 directory; a module imported without a revision is the latest found.
 Several may be named.
 Only
-.Fl n
-and
+.Fl n ,
 .Fl d
+and the
+.Pa .sid
+files of
+.Fl m
 are supported yet: the modules are parsed and compiled, and errors are
 reported as for a spec.
+.Pp
+The file
+.Pa share/yang/ietf-sid-file@2024-07-31.sid
+of cblink's sources holds the SIDs the YANG-CBOR form is keyed by: IANA's range for the
+module, 1300 to 1349, numbered as RFC 9595 Appendix B says, IANA having
+published no
+.Pa .sid
+file for it.
 A
 .Nm
 built without libyang refuses YANG modules.

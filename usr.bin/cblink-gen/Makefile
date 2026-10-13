@@ -23,7 +23,7 @@ CBLINK_GEN_LIBYANG=	no
 .if !exists(${LOCALBASE}/include/libyang/libyang.h)
 .error CBLINK_GEN_LIBYANG=yes, but libyang is not in ${LOCALBASE}: pkg install libyang3
 .endif
-SRCS+=		schema.c sid.c yang.c
+SRCS+=		schema.c sid.c sidcbor.c yang.c
 # .sid files are JSON, read with base's libucl (private, with its header).
 CFLAGS+=	-I/usr/include/private/ucl
 LDADD+=		-lprivateucl

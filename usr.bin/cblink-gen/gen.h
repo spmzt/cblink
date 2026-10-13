@@ -37,6 +37,7 @@ char	*xasprintf(const char *fmt, ...) __printflike(1, 2);
 char	*xstrndup(const char *s, size_t len);
 void	*xcalloc(size_t n, size_t size);
 void	*xreallocarray(void *p, size_t n, size_t size);
+int	 write_file(int dirfd, const char *name, const struct buf *b);
 
 /* Diagnostics: "file:line:col: error: msg". */
 struct diag {

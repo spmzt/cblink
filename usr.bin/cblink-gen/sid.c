@@ -125,6 +125,9 @@ sid_read(const char *text, size_t len, struct diags *d)
 	uint64_t v;
 	size_t errs = d->n;
 
+	/* A map of one: the CBOR form. */
+	if (len > 0 && (unsigned char)text[0] == 0xa1)
+		return (sid_read_cbor(text, len, d));
 	if ((up = ucl_parser_new(UCL_PARSER_NO_IMPLICIT_ARRAYS |
 	    UCL_PARSER_DISABLE_MACRO | UCL_PARSER_NO_TIME)) == NULL)
 		errx(2, "libucl: no memory");

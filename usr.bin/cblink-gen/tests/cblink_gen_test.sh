@@ -315,6 +315,104 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	    $gen -o . "$y/good@2026-10-13.yang"
 }
 
+atf_test_case sid_cbor
+sid_cbor_head()
+{
+	atf_set "descr" "A .sid file written in YANG-CBOR, as GET-SID" \
+	    "answers it, decodes to the file; JSON written back is the same"
+}
+sid_cbor_body()
+{
+	setup
+	y="$(atf_get_srcdir)/yang"
+	m="$y/ietf-system@2014-08-06.yang"
+
+	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
+	    grep -q 'needs cblink-gen built with libyang'; then
+		atf_skip "cblink-gen built without libyang"
+	fi
+	# ietf-sid-file's own SIDs: IANA's range, numbered by Appendix B,
+	# and the ones the encoder keys by.
+	cat "$y/ietf-sid-file@2024-07-31.sid" > sf.sid
+	atf_check -o match:', 18 SIDs from 1 .sid files$' $gen -n -a \
+	    -s sf.sid "$y/ietf-sid-file@2024-07-31.yang"
+	atf_check cmp sf.sid "$y/ietf-sid-file@2024-07-31.sid"
+	awk -F'"' '/"identifier"/ { id = $4 } /"sid"/ { print $4, id }' \
+	    sf.sid > sids
+	cat > sids.want <<-EOF
+	1300 ietf-sid-file
+	1301 /ietf-sid-file:sid-file
+	1302 /ietf-sid-file:sid-file/assignment-range
+	1303 /ietf-sid-file:sid-file/assignment-range/entry-point
+	1304 /ietf-sid-file:sid-file/assignment-range/size
+	1305 /ietf-sid-file:sid-file/dependency-revision
+	1306 /ietf-sid-file:sid-file/dependency-revision/module-name
+	1307 /ietf-sid-file:sid-file/dependency-revision/module-revision
+	1308 /ietf-sid-file:sid-file/description
+	1309 /ietf-sid-file:sid-file/item
+	1310 /ietf-sid-file:sid-file/item/identifier
+	1311 /ietf-sid-file:sid-file/item/namespace
+	1312 /ietf-sid-file:sid-file/item/sid
+	1313 /ietf-sid-file:sid-file/item/status
+	1314 /ietf-sid-file:sid-file/module-name
+	1315 /ietf-sid-file:sid-file/module-revision
+	1316 /ietf-sid-file:sid-file/sid-file-status
+	1317 /ietf-sid-file:sid-file/sid-file-version
+	EOF
+	atf_check cmp sids sids.want
+
+	# RFC 9595's example, completed: JSON to CBOR and back, the same.
+	cat "$y/ietf-system@2014-08-06.sid" > full.sid
+	atf_check -o ignore $gen -n -a -s full.sid "$m"
+	mkdir one two
+	atf_check $gen -m sid,sidjson -o one -s full.sid "$m"
+	atf_check cmp one/ietf-system@2014-08-06.sid full.sid
+	# {1301: {...}}: a map of one, keyed by sid-file's SID.
+	atf_check -o match:'^ *a1 +19 +05 +15 *$' \
+	    od -A n -t x1 -N 4 one/ietf-system@2014-08-06.sid.cbor
+	atf_check $gen -m sidjson -o two \
+	    -s one/ietf-system@2014-08-06.sid.cbor "$m"
+	atf_check cmp two/ietf-system@2014-08-06.sid full.sid
+	# Read as the file, verified as the file.
+	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n \
+	    -s one/ietf-system@2014-08-06.sid.cbor "$m"
+	# A .sid file with a status per item and a file status.
+	awk '{ print }
+	    /"sid-file-version": 1,/ {
+	        print "    \"sid-file-status\": \"unpublished\"," }
+	    /"identifier": "ietf-system",/ && !done {
+	        print "        \"status\": \"unstable\","; done = 1 }' \
+	    full.sid > status.sid
+	mkdir three
+	atf_check $gen -m sid -o three -s status.sid "$m"
+	atf_check $gen -m sidjson -o three \
+	    -s three/ietf-system@2014-08-06.sid.cbor "$m"
+	atf_check cmp three/ietf-system@2014-08-06.sid status.sid
+
+	# Malformed: cut short, a byte after, a key twice, one unknown, an
+	# indefinite length.
+	c=one/ietf-system@2014-08-06.sid.cbor
+	head -c 200 $c > short.cbor
+	atf_check -s exit:1 -e match:'YANG-CBOR: truncated' \
+	    $gen -n -s short.cbor "$m"
+	{ cat $c; printf '\0'; } > after.cbor
+	atf_check -s exit:1 -e match:'YANG-CBOR: bytes after the structure' \
+	    $gen -n -s after.cbor "$m"
+	printf '\241\031\005\025\242\015\141x\015\141y' > twice.cbor
+	atf_check -s exit:1 -e match:'YANG-CBOR: a key given twice at byte 9$' \
+	    $gen -n -s twice.cbor "$m"
+	printf '\241\031\005\025\241\030\040\000' > unknown.cbor
+	atf_check -s exit:1 -e match:'YANG-CBOR: a key not in ietf-sid-file' \
+	    $gen -n -s unknown.cbor "$m"
+	printf '\241\031\005\025\277\377' > indef.cbor
+	atf_check -s exit:1 -e match:'YANG-CBOR: an indefinite length' \
+	    $gen -n -s indef.cbor "$m"
+	# Parts: only these yet, and only with a file.
+	atf_check -s exit:2 -e match:'not written yet' \
+	    $gen -m sid,h -s full.sid "$m"
+	atf_check -s exit:2 -e match:'no -s file' $gen -m sid "$m"
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case golden
@@ -326,4 +424,5 @@ atf_init_test_cases()
 	atf_add_test_case big_input
 	atf_add_test_case cblink_mk
 	atf_add_test_case yang_frontend
+	atf_add_test_case sid_cbor
 }

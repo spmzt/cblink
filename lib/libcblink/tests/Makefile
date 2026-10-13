@@ -16,12 +16,21 @@ ATF_TESTS_C=	attr_test \
 		policy_test \
 		proxy_test \
 		sctp_raw_test \
+		sid_test \
 		stream_test \
 		tcp_test
 
 CFLAGS+=	-I${.CURDIR}/..
 LDADD+=		-L${.OBJDIR:H} -lcblink -lpthread
 DPADD+=		${.OBJDIR:H}/libcblink.so
+
+# YANG-CBOR written and read with libcbor itself.
+CFLAGS.sid_test+=	${CBOR_CFLAGS}
+.if defined(CBLINK_INTREE)
+LIBADD.sid_test+=	cbor
+.else
+LDADD.sid_test+=	${CBOR_LDADD}
+.endif
 
 ATF_TESTS_SH=	sctp_test \
 		tls_test \

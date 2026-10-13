@@ -315,10 +315,7 @@ find_structure(struct smodule *m, const char *path)
 	    path[len + 1] != ':')
 		return (NULL);
 	for (size_t i = 0; i < m->nexts; i++)
-		if (m->exts[i].arg != NULL && !m->exts[i].inherited &&
-		    m->exts[i].module == m &&
-		    strcmp(m->exts[i].ext,
-		    "ietf-yang-structure-ext:structure") == 0 &&
+		if (sext_is_structure(&m->exts[i], m) &&
 		    strcmp(m->exts[i].arg, path + len + 2) == 0)
 			return (&m->exts[i]);
 	return (NULL);
@@ -484,9 +481,7 @@ sid_verify(struct schema *s, const struct sidfile *f, struct diags *d)
 			diag_add(d, 0, 0, "feature %s: no SID",
 			    m->features[i].name);
 	for (i = 0; i < m->nexts; i++)
-		if (!m->exts[i].inherited && m->exts[i].module == m &&
-		    strcmp(m->exts[i].ext,
-		    "ietf-yang-structure-ext:structure") == 0 &&
+		if (sext_is_structure(&m->exts[i], m) &&
 		    m->exts[i].sid == 0)
 			diag_add(d, 0, 0, "data /%s:%s: no SID", m->name,
 			    m->exts[i].arg);
@@ -583,9 +578,7 @@ sid_assign(struct schema *s, struct sidfile *f, struct diags *d)
 			collect_add(&c, SID_NS_FEATURE,
 			    xstrdup(m->features[i].name));
 	for (i = 0; i < m->nexts; i++)
-		if (!m->exts[i].inherited && m->exts[i].module == m &&
-		    strcmp(m->exts[i].ext,
-		    "ietf-yang-structure-ext:structure") == 0 &&
+		if (sext_is_structure(&m->exts[i], m) &&
 		    m->exts[i].sid == 0)
 			collect_add(&c, SID_NS_DATA, xasprintf("/%s:%s",
 			    m->name, m->exts[i].arg));

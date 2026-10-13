@@ -126,6 +126,7 @@ snode_free(struct snode *n)
 		for (size_t i = 0; i < n->nwhen; i++)
 			free(n->when[i]);
 		free(n->when);
+		free(n->whenctx);
 		for (size_t i = 0; i < n->nmusts; i++) {
 			free(n->musts[i].expr);
 			free(n->musts[i].emsg);
@@ -281,6 +282,38 @@ sntype_signed(enum sntype_base base)
 
 	return (base == ST_INT8 || base == ST_INT16 || base == ST_INT32 ||
 	    base == ST_INT64 || base == ST_DECIMAL64);
+}
+
+/* Whether a module given has a node in the trees from n. */
+static bool
+holds_given(const struct snode *n)
+{
+
+	for (; n != NULL; n = n->next)
+		if (n->module->given || holds_given(n->child))
+			return (true);
+	return (false);
+}
+
+bool
+sext_is_structure(const struct sext *e, const struct smodule *m)
+{
+
+	return (!e->inherited && e->module == m && e->arg != NULL &&
+	    (strcmp(e->ext, "ietf-yang-structure-ext:structure") == 0 ||
+	    strcmp(e->ext, "ietf-restconf:yang-data") == 0));
+}
+
+bool
+smodule_emitted(const struct smodule *m)
+{
+	bool want;
+
+	want = m->given || holds_given(m->data) || holds_given(m->rpcs) ||
+	    holds_given(m->notifs);
+	for (size_t j = 0; j < m->nexts && !want; j++)
+		want = holds_given(m->exts[j].data);
+	return (m->implemented && want);
 }
 
 static void

@@ -793,8 +793,12 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 
 		n->nwhen = LY_ARRAY_COUNT(when);
 		n->when = xcalloc(n->nwhen, sizeof(*n->when));
-		LY_ARRAY_FOR(when, u)
+		n->whenctx = xcalloc(n->nwhen + 1, sizeof(*n->whenctx));
+		LY_ARRAY_FOR(when, u) {
 			n->when[u] = xstrdup(lyxp_get_expr(when[u]->cond));
+			n->whenctx[u] = when[u]->context == ln ? SWC_SELF :
+			    when[u]->context == NULL ? SWC_ROOT : SWC_PARENT;
+		}
 		n->nmusts = LY_ARRAY_COUNT(must);
 		n->musts = xcalloc(n->nmusts, sizeof(*n->musts));
 		LY_ARRAY_FOR(must, u) {

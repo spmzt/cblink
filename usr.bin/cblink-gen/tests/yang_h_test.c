@@ -8,11 +8,14 @@
  * The structs cblink-gen writes for YANG modules (yangh.h, made at build
  * time from shapes, ietf-system and ietf-sid-file): that they compile at
  * WARNS=6 is most of the test; here, that they hold what a reader would
- * put in them, each shape once.
+ * put in them, each shape once.  And their schema tables (yangh_schema.c):
+ * children by SID, keys, choices, types shared, what the runtime reads.
  */
 
 #include <atf-c.h>
 #include <string.h>
+
+#include <regex.h>
 
 #include "yangh.h"
 
@@ -106,10 +109,165 @@ ATF_TC_BODY(ietf, tc)
 	ATF_CHECK_EQ(IETF_SID_FILE_SID_FILE_ITEM_NAMESPACE_DATA, 3);
 }
 
+static const struct cbl_ymodule *
+module(const char *name)
+{
+
+	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
+		if (strcmp(yangh_schema.mod[i]->name, name) == 0)
+			return (yangh_schema.mod[i]);
+	return (NULL);
+}
+
+static const struct cbl_ynode *
+top(const struct cbl_ymodule *m, const char *name)
+{
+
+	for (uint32_t i = 0; m != NULL && i < m->ntop; i++)
+		if (strcmp(m->top[i]->name, name) == 0)
+			return (m->top[i]);
+	return (NULL);
+}
+
+static const struct cbl_ynode *
+child(const struct cbl_ynode *n, const char *name)
+{
+
+	for (uint32_t i = 0; n != NULL && i < n->nchild; i++)
+		if (strcmp(n->child[i]->name, name) == 0)
+			return (n->child[i]);
+	return (NULL);
+}
+
+/* Children by SID, strictly; keys that are key leaves.  Its count. */
+static size_t
+check_tree(const struct cbl_ynode *n)
+{
+	size_t k = 1;
+
+	ATF_CHECK_MSG(n->sid != 0, "%s: no SID", n->name);
+	for (uint32_t i = 0; i < n->nchild; i++) {
+		if (i > 0)
+			ATF_CHECK_MSG(n->child[i]->sid > n->child[i - 1]->sid,
+			    "%s: %s before %s", n->name, n->child[i - 1]->name,
+			    n->child[i]->name);
+		k += check_tree(n->child[i]);
+	}
+	for (uint16_t i = 0; i < n->nkeys; i++)
+		ATF_CHECK(n->keys[i] < n->nchild &&
+		    (n->child[n->keys[i]]->flags & CBL_YNF_KEY) != 0);
+	return (k);
+}
+
+ATF_TC_WITHOUT_HEAD(tables);
+ATF_TC_BODY(tables, tc)
+{
+	const struct cbl_ymodule *sh, *sys;
+	const struct cbl_ynode *n, *s, *item, *x;
+	const struct cbl_ytype *t;
+	size_t nodes = 0;
+	regex_t re;
+
+	ATF_REQUIRE_EQ(3u, yangh_schema.nmod);
+	ATF_REQUIRE((sh = module("shapes")) != NULL);
+	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
+	ATF_REQUIRE(module("ietf-sid-file") != NULL);
+	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
+		for (uint32_t j = 0; j < yangh_schema.mod[i]->ntop; j++) {
+			if (j > 0)
+				ATF_CHECK(yangh_schema.mod[i]->top[j]->sid >
+				    yangh_schema.mod[i]->top[j - 1]->sid);
+			nodes += check_tree(yangh_schema.mod[i]->top[j]);
+		}
+	ATF_CHECK(nodes > 100);
+
+	/* shapes: SIDs from its .sid file, by -a. */
+	ATF_CHECK_EQ(UINT64_C(1099511727776), sh->sid);
+	ATF_REQUIRE((s = top(sh, "shapes")) != NULL);
+	ATF_CHECK_EQ(CBL_YN_CONTAINER, s->kind);
+	ATF_CHECK(s->flags & CBL_YNF_CONFIG);
+	n = child(s, "ratio");
+	ATF_REQUIRE(n != NULL && n->type != NULL);
+	ATF_CHECK_EQ(CBL_YT_DECIMAL64, n->type->kind);
+	ATF_CHECK_EQ(2, n->type->fdigits);
+	n = child(s, "colour");
+	ATF_REQUIRE(n != NULL && n->type->kind == CBL_YT_IDENTITYREF);
+	ATF_REQUIRE_EQ(1, n->type->nbases);
+	ATF_CHECK_EQ(UINT64_C(1099511727777), n->type->bases[0]);
+	/* A union, an enumeration among its members, shared with level. */
+	n = child(s, "either");
+	ATF_REQUIRE(n != NULL && n->type->kind == CBL_YT_UNION);
+	ATF_REQUIRE_EQ(3, n->type->nmembers);
+	t = n->type->members[1];
+	ATF_CHECK_EQ(CBL_YT_ENUMERATION, t->kind);
+	ATF_REQUIRE_EQ(2u, t->nitems);
+	ATF_CHECK_STREQ("very high", t->items[1].name);
+	ATF_CHECK_EQ(7, t->items[1].value);
+	ATF_CHECK(child(s, "level")->type == t);
+	/* Choices: a case's node says which; a choice in a case, its own. */
+	n = child(s, "speed");
+	ATF_REQUIRE(n != NULL && n->choice != NULL);
+	ATF_CHECK_STREQ("how", n->choice->name);
+	ATF_CHECK_STREQ("fast", n->choice->cases[n->ccase].name);
+	n = child(s, "crc");
+	ATF_REQUIRE(n != NULL && n->choice != NULL);
+	ATF_CHECK_STREQ("check", n->choice->name);
+	ATF_REQUIRE(n->choice->parent != NULL);
+	ATF_CHECK_STREQ("how", n->choice->parent->name);
+	ATF_CHECK_STREQ("careful",
+	    n->choice->parent->cases[n->choice->parent_case].name);
+	/* A list, its key, an action and a notification in it, a leafref. */
+	item = child(s, "item");
+	ATF_REQUIRE(item != NULL && item->kind == CBL_YN_LIST);
+	ATF_REQUIRE_EQ(1, item->nkeys);
+	ATF_CHECK_STREQ("id", item->child[item->keys[0]]->name);
+	ATF_CHECK(child(item, "reset") != NULL &&
+	    child(item, "reset")->kind == CBL_YN_ACTION);
+	ATF_CHECK(child(child(item, "reset"), "input") != NULL);
+	ATF_CHECK(child(item, "changed") != NULL &&
+	    child(item, "changed")->kind == CBL_YN_NOTIF);
+	n = child(item, "peer");
+	ATF_REQUIRE(n != NULL);
+	ATF_CHECK_EQ(CBL_YT_UINT32, n->type->kind);
+	ATF_CHECK(n->type->flags & CBL_YTF_LEAFREF);
+	ATF_REQUIRE(n->type->path >= 0 &&
+	    (uint32_t)n->type->path < yangh_schema.nxpath);
+	ATF_CHECK_STREQ("../id", yangh_schema.xpath[n->type->path]);
+	n = child(child(s, "tuned"), "max");
+	ATF_CHECK(n != NULL && (n->flags & CBL_YNF_MANDATORY));
+	ATF_CHECK(child(s, "tuned")->flags & CBL_YNF_PRESENCE);
+	x = top(sh, "note");
+	ATF_REQUIRE(x != NULL);
+	ATF_CHECK_EQ(CBL_YN_STRUCTURE, x->kind);
+	ATF_CHECK(child(x, "body") != NULL);
+	ATF_CHECK(top(sh, "ping") != NULL && top(sh, "ping")->kind ==
+	    CBL_YN_RPC);
+
+	/* ietf-system: IANA's SIDs, a pattern as an ERE, a must. */
+	n = child(top(sys, "system"), "hostname");
+	ATF_REQUIRE(n != NULL);
+	ATF_CHECK_EQ(UINT64_C(1752), n->sid);
+	ATF_REQUIRE(n->type->npatterns > 0);
+	ATF_REQUIRE(regcomp(&re, n->type->patterns[0].ere, REG_EXTENDED |
+	    REG_NOSUB) == 0);
+	ATF_CHECK(regexec(&re, "edge1.example.com", 0, NULL, 0) == 0);
+	ATF_CHECK(regexec(&re, "-bad-", 0, NULL, 0) != 0);
+	regfree(&re);
+	n = child(top(sys, "system"), "authentication");
+	ATF_REQUIRE(n != NULL);
+	n = child(n, "user-authentication-order");
+	ATF_REQUIRE(n != NULL && n->nmust == 1);
+	ATF_CHECK(strstr(yangh_schema.xpath[n->must[0].expr], "radius") !=
+	    NULL);
+	ATF_CHECK(n->kind == CBL_YN_LEAFLIST && (n->flags &
+	    CBL_YNF_USERORDER));
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
 	ATF_TP_ADD_TC(tp, shapes);
 	ATF_TP_ADD_TC(tp, ietf);
+	ATF_TP_ADD_TC(tp, tables);
 	return (atf_no_error());
 }

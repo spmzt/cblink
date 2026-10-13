@@ -1,0 +1,903 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
+ */
+
+/*
+ * The schema tables of YANG modules (-m schema, PLAN-SDN-YANG 1.6.2):
+ * base_schema.c, the cbl_schema.h structures the library decodes,
+ * encodes and validates by, for the modules gen_yang_h() makes structs
+ * of.  Every node, choices and cases passed through, has its children
+ * sorted by SID; every node and identityref base must have a SID (their
+ * modules' .sid files, -s).  Types are shared by the nodes that have
+ * the same one, expressions by the statements that have the same text.
+ * What each module's tables come to is said on standard output and at
+ * the top of the file.
+ */
+
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "cbl_pattern.h"
+#include "cbl_schema.h"
+#include "gen.h"
+#include "schema.h"
+
+/* A pointer's number, by open addressing. */
+struct pmap {
+	const void	**k;
+	size_t		 *v;
+	size_t		  cap, n;
+};
+
+struct ys {
+	struct diags	*d;
+	struct buf	 types;		/* type definitions, members first */
+	struct buf	 body;		/* the rest */
+	struct pmap	 nodes;		/* snode -> its number */
+	struct pmap	 choices;	/* choice snode -> its number */
+	struct pmap	 mods;		/* smodule -> its number */
+	bool		*mref;		/* a node is of it: it is defined */
+	size_t		 nnodes, nchoices, ntypes, nmods;
+	char		**tkeys;	/* each type's key, by number */
+	char		**xp;		/* the expressions, by number */
+	size_t		 nxp;
+	const struct smodule *m;	/* the module whose tables these are */
+	size_t		 mnodes, mtypes, mbytes;	/* its counts */
+};
+
+static size_t
+phash(const void *p, size_t cap)
+{
+	uintptr_t x = (uintptr_t)p;
+
+	x ^= x >> 17;
+	x *= 0x9e3779b97f4a7c15ULL;
+	return ((size_t)(x >> 7) & (cap - 1));
+}
+
+static bool
+pmap_get(const struct pmap *m, const void *p, size_t *vp)
+{
+	size_t i;
+
+	if (m->cap == 0)
+		return (false);
+	for (i = phash(p, m->cap); m->k[i] != NULL; i = (i + 1) & (m->cap - 1))
+		if (m->k[i] == p) {
+			*vp = m->v[i];
+			return (true);
+		}
+	return (false);
+}
+
+static void
+pmap_put(struct pmap *m, const void *p, size_t v)
+{
+	struct pmap old = *m;
+	size_t i;
+
+	if ((m->n + 1) * 2 > m->cap) {
+		m->cap = m->cap == 0 ? 256 : m->cap * 2;
+		m->k = xcalloc(m->cap, sizeof(*m->k));
+		m->v = xcalloc(m->cap, sizeof(*m->v));
+		m->n = 0;
+		for (i = 0; i < old.cap; i++)
+			if (old.k[i] != NULL)
+				pmap_put(m, old.k[i], old.v[i]);
+		free(old.k);
+		free(old.v);
+	}
+	for (i = phash(p, m->cap); m->k[i] != NULL; i = (i + 1) & (m->cap - 1))
+		;
+	m->k[i] = p;
+	m->v[i] = v;
+	m->n++;
+}
+
+/* A C string literal, every byte that is not plain ASCII escaped. */
+static void
+cstr(struct buf *b, const char *s)
+{
+
+	if (s == NULL) {
+		buf_puts(b, "NULL");
+		return;
+	}
+	buf_puts(b, "\"");
+	for (; *s != '\0'; s++) {
+		unsigned char c = (unsigned char)*s;
+
+		if (c == '"' || c == '\\')
+			buf_printf(b, "\\%c", c);
+		else if (c == '\n')
+			buf_puts(b, "\\n");
+		else if (c == '\t')
+			buf_puts(b, "\\t");
+		else if (c < 0x20 || c >= 0x7f)
+			buf_printf(b, "\\%03o", c);
+		else
+			buf_add(b, (const char *)&c, 1);
+	}
+	buf_puts(b, "\"");
+}
+
+/* An expression's number: the same text, the same number. */
+static int32_t
+xpath_id(struct ys *y, const char *x)
+{
+
+	for (size_t i = 0; i < y->nxp; i++)
+		if (strcmp(y->xp[i], x) == 0)
+			return ((int32_t)i);
+	y->xp = xreallocarray(y->xp, y->nxp + 1, sizeof(*y->xp));
+	y->xp[y->nxp] = xstrdup(x);
+	return ((int32_t)y->nxp++);
+}
+
+static const int ytype_kind[] = {
+	[ST_BINARY] = CBL_YT_BINARY, [ST_BITS] = CBL_YT_BITS,
+	[ST_BOOLEAN] = CBL_YT_BOOLEAN, [ST_DECIMAL64] = CBL_YT_DECIMAL64,
+	[ST_EMPTY] = CBL_YT_EMPTY, [ST_ENUMERATION] = CBL_YT_ENUMERATION,
+	[ST_IDENTITYREF] = CBL_YT_IDENTITYREF,
+	[ST_INSTANCEID] = CBL_YT_INSTANCEID, [ST_INT8] = CBL_YT_INT8,
+	[ST_INT16] = CBL_YT_INT16, [ST_INT32] = CBL_YT_INT32,
+	[ST_INT64] = CBL_YT_INT64, [ST_STRING] = CBL_YT_STRING,
+	[ST_UINT8] = CBL_YT_UINT8, [ST_UINT16] = CBL_YT_UINT16,
+	[ST_UINT32] = CBL_YT_UINT32, [ST_UINT64] = CBL_YT_UINT64,
+	[ST_UNION] = CBL_YT_UNION,
+};
+
+static const char *const ytype_name[] = {
+	[CBL_YT_BINARY] = "CBL_YT_BINARY", [CBL_YT_BITS] = "CBL_YT_BITS",
+	[CBL_YT_BOOLEAN] = "CBL_YT_BOOLEAN",
+	[CBL_YT_DECIMAL64] = "CBL_YT_DECIMAL64",
+	[CBL_YT_EMPTY] = "CBL_YT_EMPTY",
+	[CBL_YT_ENUMERATION] = "CBL_YT_ENUMERATION",
+	[CBL_YT_IDENTITYREF] = "CBL_YT_IDENTITYREF",
+	[CBL_YT_INSTANCEID] = "CBL_YT_INSTANCEID",
+	[CBL_YT_INT8] = "CBL_YT_INT8", [CBL_YT_INT16] = "CBL_YT_INT16",
+	[CBL_YT_INT32] = "CBL_YT_INT32", [CBL_YT_INT64] = "CBL_YT_INT64",
+	[CBL_YT_STRING] = "CBL_YT_STRING", [CBL_YT_UINT8] = "CBL_YT_UINT8",
+	[CBL_YT_UINT16] = "CBL_YT_UINT16", [CBL_YT_UINT32] = "CBL_YT_UINT32",
+	[CBL_YT_UINT64] = "CBL_YT_UINT64", [CBL_YT_UNION] = "CBL_YT_UNION",
+};
+
+/* A range or a length, as an initializer; its parts defined before. */
+static void
+restrict_emit(struct ys *y, struct buf *init, const char *what,
+    const struct srange *r, bool sgn, size_t tn)
+{
+	struct buf parts;
+
+	if (r == NULL || r->nparts == 0)
+		return;
+	buf_init(&parts);
+	for (size_t i = 0; i < r->nparts; i++)
+		if (sgn)
+			buf_printf(&parts, "\t{ .min.i = INT64_C(%" PRId64 "), "
+			    ".max.i = INT64_C(%" PRId64 ") },\n",
+			    r->parts[i].min.i, r->parts[i].max.i);
+		else
+			buf_printf(&parts, "\t{ .min.u = UINT64_C(%" PRIu64 "), "
+			    ".max.u = UINT64_C(%" PRIu64 ") },\n",
+			    r->parts[i].min.u, r->parts[i].max.u);
+	buf_printf(&y->types, "static const struct cbl_yrange t%zu_%c[] = {\n"
+	    "%s};\n", tn, what[0], parts.p);
+	y->mbytes += r->nparts * sizeof(struct cbl_yrange);
+	buf_printf(init, "\t.%s = { t%zu_%c, %zu, ", what, tn, what[0],
+	    r->nparts);
+	cstr(init, r->emsg);
+	buf_puts(init, ", ");
+	cstr(init, r->eapptag);
+	buf_puts(init, " },\n");
+	buf_free(&parts);
+}
+
+/* What makes two types the same: everything the table says of them. */
+static void
+type_key(struct buf *k, const struct sntype *t)
+{
+
+	if (t->base == ST_LEAFREF && t->real != NULL) {
+		buf_printf(k, "leafref(%s,%d)", t->path != NULL ? t->path : "",
+		    t->require_instance);
+		type_key(k, t->real);
+		return;
+	}
+	buf_printf(k, "%d/%u/%d", t->base, t->fdigits, t->require_instance);
+	for (size_t i = 0; t->range != NULL && i < t->range->nparts; i++)
+		buf_printf(k, "r%" PRIx64 ":%" PRIx64,
+		    t->range->parts[i].min.u, t->range->parts[i].max.u);
+	if (t->range != NULL)
+		buf_printf(k, "e%s|%s", t->range->emsg != NULL ?
+		    t->range->emsg : "", t->range->eapptag != NULL ?
+		    t->range->eapptag : "");
+	for (size_t i = 0; t->length != NULL && i < t->length->nparts; i++)
+		buf_printf(k, "l%" PRIx64 ":%" PRIx64,
+		    t->length->parts[i].min.u, t->length->parts[i].max.u);
+	if (t->length != NULL)
+		buf_printf(k, "e%s|%s", t->length->emsg != NULL ?
+		    t->length->emsg : "", t->length->eapptag != NULL ?
+		    t->length->eapptag : "");
+	for (size_t i = 0; i < t->npatterns; i++)
+		buf_printf(k, "p%d%s|%s|%s", t->patterns[i].invert,
+		    t->patterns[i].expr, t->patterns[i].emsg != NULL ?
+		    t->patterns[i].emsg : "", t->patterns[i].eapptag != NULL ?
+		    t->patterns[i].eapptag : "");
+	for (size_t i = 0; i < t->nitems; i++)
+		buf_printf(k, "i%s=%" PRId64, t->items[i].name,
+		    t->items[i].value);
+	for (size_t i = 0; i < t->nbases; i++)
+		buf_printf(k, "b%s:%s", t->bases[i]->module->name,
+		    t->bases[i]->name);
+	for (size_t i = 0; i < t->nmembers; i++) {
+		buf_puts(k, "m(");
+		type_key(k, t->members[i]);
+		buf_puts(k, ")");
+	}
+}
+
+/* A type's number: made once, its members before it. */
+static size_t
+type_ref(struct ys *y, const struct sntype *t, const char *where)
+{
+	const struct sntype *real;
+	struct buf key, init, list;
+	size_t tn, *mem = NULL;
+	char why[256];
+	size_t pos;
+
+	buf_init(&key);
+	type_key(&key, t);
+	for (tn = 0; tn < y->ntypes; tn++)
+		if (strcmp(y->tkeys[tn], key.p) == 0) {
+			buf_free(&key);
+			return (tn);
+		}
+	real = t->base == ST_LEAFREF && t->real != NULL ? t->real : t;
+	if (real->base == ST_LEAFREF) {
+		diag_add(y->d, 0, 0, "%s: a leafref without its target's type",
+		    where);
+		real = NULL;
+	}
+	if (real != NULL && real->nmembers > 0) {
+		mem = xcalloc(real->nmembers, sizeof(*mem));
+		for (size_t i = 0; i < real->nmembers; i++)
+			mem[i] = type_ref(y, real->members[i], where);
+	}
+	tn = y->ntypes++;
+	y->tkeys = xreallocarray(y->tkeys, y->ntypes, sizeof(*y->tkeys));
+	y->tkeys[tn] = key.p;
+	y->mtypes++;
+	y->mbytes += sizeof(struct cbl_ytype);
+	if (real == NULL) {
+		buf_printf(&y->types, "static const struct cbl_ytype t%zu;\n",
+		    tn);
+		return (tn);
+	}
+
+	buf_init(&init);
+	buf_printf(&init, "\t.kind = %s,\n", ytype_name[ytype_kind[real->base]]);
+	/* require-instance: a leafref's own, an instance-identifier's. */
+	if (t != real && t->require_instance)
+		buf_puts(&init, "\t.flags = CBL_YTF_LEAFREF | CBL_YTF_REQUIRE,\n");
+	else if (t != real)
+		buf_puts(&init, "\t.flags = CBL_YTF_LEAFREF,\n");
+	else if (real->base == ST_INSTANCEID && real->require_instance)
+		buf_puts(&init, "\t.flags = CBL_YTF_REQUIRE,\n");
+	if (real->fdigits != 0)
+		buf_printf(&init, "\t.fdigits = %u,\n", real->fdigits);
+	buf_printf(&init, "\t.path = %d,\n", t != real && t->path != NULL ?
+	    xpath_id(y, t->path) : -1);
+	restrict_emit(y, &init, "range", real->range,
+	    sntype_signed(real->base), tn);
+	restrict_emit(y, &init, "length", real->length, false, tn);
+	if (real->npatterns > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < real->npatterns; i++) {
+			const struct spattern *p = &real->patterns[i];
+			char *ere;
+
+			if ((ere = cbl_pattern_ere(p->expr, why, sizeof(why),
+			    &pos)) == NULL) {
+				diag_add(y->d, 0, 0, "%s: pattern '%s': %s",
+				    where, p->expr, why);
+				continue;
+			}
+			buf_puts(&list, "\t{ ");
+			cstr(&list, p->expr);
+			buf_puts(&list, ", ");
+			cstr(&list, ere);
+			buf_printf(&list, ", %s, ", p->invert ? "true" :
+			    "false");
+			cstr(&list, p->emsg);
+			buf_puts(&list, ", ");
+			cstr(&list, p->eapptag);
+			buf_puts(&list, " },\n");
+			y->mbytes += sizeof(struct cbl_ypattern) +
+			    strlen(p->expr) + strlen(ere) + 2;
+			free(ere);
+		}
+		buf_printf(&y->types, "static const struct cbl_ypattern "
+		    "t%zu_p[] = {\n%s};\n", tn, list.p != NULL ? list.p : "");
+		buf_printf(&init, "\t.npatterns = %zu,\n\t.patterns = t%zu_p,\n",
+		    real->npatterns, tn);
+		buf_free(&list);
+	}
+	if (real->nitems > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < real->nitems; i++) {
+			buf_puts(&list, "\t{ ");
+			cstr(&list, real->items[i].name);
+			buf_printf(&list, ", INT64_C(%" PRId64 ") },\n",
+			    real->items[i].value);
+			y->mbytes += sizeof(struct cbl_yitem) +
+			    strlen(real->items[i].name) + 1;
+		}
+		buf_printf(&y->types, "static const struct cbl_yitem "
+		    "t%zu_i[] = {\n%s};\n", tn, list.p);
+		buf_printf(&init, "\t.nitems = %zu,\n\t.items = t%zu_i,\n",
+		    real->nitems, tn);
+		buf_free(&list);
+	}
+	if (real->nmembers > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < real->nmembers; i++)
+			buf_printf(&list, "%s&t%zu", i > 0 ? ", " : "", mem[i]);
+		buf_printf(&y->types, "static const struct cbl_ytype *const "
+		    "t%zu_m[] = { %s };\n", tn, list.p);
+		buf_printf(&init, "\t.nmembers = %zu,\n\t.members = t%zu_m,\n",
+		    real->nmembers, tn);
+		y->mbytes += real->nmembers * sizeof(void *);
+		buf_free(&list);
+	}
+	if (real->nbases > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < real->nbases; i++) {
+			if (real->bases[i]->sid == 0)
+				diag_add(y->d, 0, 0, "%s: identity %s:%s, a "
+				    "base, has no SID", where,
+				    real->bases[i]->module->name,
+				    real->bases[i]->name);
+			buf_printf(&list, "%sUINT64_C(%" PRIu64 ")", i > 0 ?
+			    ", " : "", real->bases[i]->sid);
+		}
+		buf_printf(&y->types, "static const uint64_t t%zu_b[] = { %s };"
+		    "\n", tn, list.p);
+		buf_printf(&init, "\t.nbases = %zu,\n\t.bases = t%zu_b,\n",
+		    real->nbases, tn);
+		y->mbytes += real->nbases * sizeof(uint64_t);
+		buf_free(&list);
+	}
+	buf_printf(&y->types, "static const struct cbl_ytype t%zu = {\n%s};\n\n",
+	    tn, init.p);
+	buf_free(&init);
+	free(mem);
+	return (tn);
+}
+
+/* A data node to the tables: not a choice, a case, or libyang's own. */
+static bool
+tabled(const struct snode *n)
+{
+
+	return (n->kind != SN_CHOICE && n->kind != SN_CASE &&
+	    (n->flags & SNF_INTERNAL) == 0);
+}
+
+/* The children of a node, choices and cases passed through. */
+struct kids {
+	const struct snode **v;
+	size_t		 n;
+};
+
+static void
+kids_add(struct kids *k, const struct snode *first)
+{
+
+	for (const struct snode *c = first; c != NULL; c = c->next) {
+		if (c->kind == SN_CHOICE || c->kind == SN_CASE)
+			kids_add(k, c->child);
+		else if (tabled(c)) {
+			k->v = xreallocarray(k->v, k->n + 1, sizeof(*k->v));
+			k->v[k->n++] = c;
+		}
+	}
+}
+
+static int
+by_sid(const void *a, const void *b)
+{
+	const struct snode *x = *(const struct snode *const *)a;
+	const struct snode *y = *(const struct snode *const *)b;
+
+	return ((x->sid > y->sid) - (x->sid < y->sid));
+}
+
+static void
+whens_emit(struct ys *y, const struct snode *n, const char *name)
+{
+	struct buf list;
+
+	if (n->nwhen == 0)
+		return;
+	buf_init(&list);
+	for (size_t i = 0; i < n->nwhen; i++)
+		buf_printf(&list, "\t{ %d, %s },\n", xpath_id(y, n->when[i]),
+		    n->whenctx[i] == SWC_SELF ? "CBL_YWC_SELF" :
+		    n->whenctx[i] == SWC_ROOT ? "CBL_YWC_ROOT" :
+		    "CBL_YWC_PARENT");
+	buf_printf(&y->body, "static const struct cbl_ywhen %s[] = {\n%s};\n",
+	    name, list.p);
+	y->mbytes += n->nwhen * sizeof(struct cbl_ywhen);
+	buf_free(&list);
+}
+
+/* The choice c is: its cases, and the choice it is in, made first. */
+static size_t
+choice_ref(struct ys *y, const struct snode *c)
+{
+	const struct snode *pc, *k;
+	struct buf init, list, w;
+	size_t cn, pn = 0, ncases, i, dflt;
+	bool in_choice;
+
+	if (pmap_get(&y->choices, c, &cn))
+		return (cn);
+	/* A choice in a case of another, under the same data node. */
+	pc = c->parent;
+	in_choice = pc != NULL && pc->kind == SN_CASE && pc->parent != NULL &&
+	    pc->parent->kind == SN_CHOICE;
+	if (in_choice)
+		pn = choice_ref(y, pc->parent);
+	cn = y->nchoices++;
+	pmap_put(&y->choices, c, cn);
+
+	buf_init(&list);
+	ncases = 0;
+	dflt = SIZE_MAX;
+	for (k = c->child, i = 0; k != NULL; k = k->next, i++) {
+		buf_init(&w);
+		buf_printf(&w, "c%zu_w%zu", cn, i);
+		whens_emit(y, k, w.p);
+		buf_puts(&list, "\t{ ");
+		cstr(&list, k->name);
+		if (k->nwhen > 0)
+			buf_printf(&list, ", %s, %zu },\n", w.p, k->nwhen);
+		else
+			buf_puts(&list, ", NULL, 0 },\n");
+		if (k == c->dflt_case)
+			dflt = i;
+		buf_free(&w);
+		ncases++;
+		y->mbytes += sizeof(struct cbl_ycase) + strlen(k->name) + 1;
+	}
+	buf_printf(&y->body, "static const struct cbl_ycase c%zu_c[] = {\n%s"
+	    "};\n", cn, list.p != NULL ? list.p : "");
+	buf_free(&list);
+	buf_init(&w);
+	buf_printf(&w, "c%zu_w", cn);
+	whens_emit(y, c, w.p);
+	buf_init(&init);
+	buf_puts(&init, "\t.name = ");
+	cstr(&init, c->name);
+	buf_puts(&init, ",\n");
+	if (in_choice) {
+		for (k = pc->parent->child, i = 0; k != NULL && k != pc;
+		    k = k->next)
+			i++;
+		buf_printf(&init, "\t.parent = &c%zu,\n\t.parent_case = %zu,\n",
+		    pn, i);
+	}
+	buf_printf(&init, "\t.ncases = %zu,\n\t.cases = c%zu_c,\n"
+	    "\t.dflt = %d,\n", ncases, cn, dflt == SIZE_MAX ? -1 : (int)dflt);
+	if (c->flags & SNF_MANDATORY)
+		buf_puts(&init, "\t.mandatory = true,\n");
+	if (c->nwhen > 0)
+		buf_printf(&init, "\t.when = %s,\n\t.nwhen = %zu,\n", w.p,
+		    c->nwhen);
+	buf_printf(&y->body, "static const struct cbl_ychoice c%zu = {\n%s};\n"
+	    "\n", cn, init.p);
+	y->mbytes += sizeof(struct cbl_ychoice) + strlen(c->name) + 1;
+	buf_free(&init);
+	buf_free(&w);
+	return (cn);
+}
+
+static const char *const ynode_kind[] = {
+	[SN_CONTAINER] = "CBL_YN_CONTAINER", [SN_LEAF] = "CBL_YN_LEAF",
+	[SN_LEAFLIST] = "CBL_YN_LEAFLIST", [SN_LIST] = "CBL_YN_LIST",
+	[SN_ANYDATA] = "CBL_YN_ANYDATA", [SN_ANYXML] = "CBL_YN_ANYXML",
+	[SN_RPC] = "CBL_YN_RPC", [SN_ACTION] = "CBL_YN_ACTION",
+	[SN_NOTIF] = "CBL_YN_NOTIF", [SN_INPUT] = "CBL_YN_INPUT",
+	[SN_OUTPUT] = "CBL_YN_OUTPUT",
+};
+
+static size_t	node_ref(struct ys *y, const struct snode *n);
+
+/*
+ * The children array of node nn, from first, by SID; the keys, as
+ * indices in it, when the node is a list.  Returns how many.
+ */
+static size_t
+children_emit(struct ys *y, size_t nn, const struct snode *first,
+    const struct snode *list, struct buf *init)
+{
+	struct kids k = { 0 };
+	struct buf arr;
+	size_t *num;
+
+	kids_add(&k, first);
+	if (k.n == 0)
+		return (0);
+	qsort(k.v, k.n, sizeof(*k.v), by_sid);
+	num = xcalloc(k.n, sizeof(*num));
+	for (size_t i = 0; i < k.n; i++) {
+		if (i > 0 && k.v[i]->sid == k.v[i - 1]->sid && k.v[i]->sid !=
+		    0)
+			diag_add(y->d, 0, 0, "%s and %s: one SID, %" PRIu64,
+			    k.v[i - 1]->name, k.v[i]->name, k.v[i]->sid);
+		num[i] = node_ref(y, k.v[i]);
+	}
+	buf_init(&arr);
+	for (size_t i = 0; i < k.n; i++)
+		buf_printf(&arr, "%s&n%zu", i % 6 == 0 ? (i > 0 ? ",\n\t" :
+		    "\t") : ", ", num[i]);
+	buf_printf(&y->body, "static const struct cbl_ynode *const n%zu_c[] = "
+	    "{\n%s\n};\n", nn, arr.p);
+	buf_printf(init, "\t.nchild = %zu,\n\t.child = n%zu_c,\n", k.n, nn);
+	y->mbytes += k.n * sizeof(void *);
+	if (list != NULL && list->nkeys > 0) {
+		arr.len = 0;
+		arr.p[0] = '\0';
+		for (size_t i = 0; i < list->nkeys; i++) {
+			size_t j;
+
+			for (j = 0; j < k.n && k.v[j] != list->keys[i]; j++)
+				;
+			buf_printf(&arr, "%s%zu", i > 0 ? ", " : "", j);
+		}
+		buf_printf(&y->body, "static const uint32_t n%zu_k[] = { %s };"
+		    "\n", nn, arr.p);
+		buf_printf(init, "\t.nkeys = %zu,\n\t.keys = n%zu_k,\n",
+		    list->nkeys, nn);
+		y->mbytes += list->nkeys * sizeof(uint32_t);
+	}
+	buf_free(&arr);
+	free(num);
+	free(k.v);
+	return (k.n);
+}
+
+/* The path of n, for what is said about it. */
+static void
+where_of(struct buf *b, const struct snode *n)
+{
+
+	if (!snode_sid_path(n, b))
+		buf_printf(b, "%s:%s", n->module->name, n->name);
+}
+
+/* A node's number: made with its children. */
+static size_t
+node_ref(struct ys *y, const struct snode *n)
+{
+	const struct snode *c;
+	struct buf init, list, w, where;
+	size_t nn, mn;
+
+	if (pmap_get(&y->nodes, n, &nn))
+		return (nn);
+	nn = y->nnodes++;
+	pmap_put(&y->nodes, n, nn);
+	y->mnodes++;
+	y->mbytes += sizeof(struct cbl_ynode) + strlen(n->name) + 1;
+	buf_init(&where);
+	where_of(&where, n);
+	if (n->sid == 0)
+		diag_add(y->d, 0, 0, "%s: no SID: its module's .sid file (-s) "
+		    "gives it one, cblink-gen -a numbers it", where.p);
+
+	buf_init(&init);
+	buf_printf(&init, "\t.sid = UINT64_C(%" PRIu64 "),\n\t.name = ",
+	    n->sid);
+	cstr(&init, n->name);
+	buf_printf(&init, ",\n\t.kind = %s,\n", ynode_kind[n->kind]);
+	if ((n->flags & 0x7f) != 0)
+		buf_printf(&init, "\t.flags = 0x%x,\n", n->flags & 0x7f);
+	if (n->type != NULL)
+		buf_printf(&init, "\t.type = &t%zu,\n", type_ref(y, n->type,
+		    where.p));
+	(void)children_emit(y, nn, n->child, n->kind == SN_LIST ? n : NULL,
+	    &init);
+	if (n->nwhen > 0) {
+		buf_init(&w);
+		buf_printf(&w, "n%zu_w", nn);
+		whens_emit(y, n, w.p);
+		buf_printf(&init, "\t.nwhen = %zu,\n\t.when = %s,\n", n->nwhen,
+		    w.p);
+		buf_free(&w);
+	}
+	if (n->nmusts > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < n->nmusts; i++) {
+			buf_printf(&list, "\t{ %d, ", xpath_id(y,
+			    n->musts[i].expr));
+			cstr(&list, n->musts[i].emsg);
+			buf_puts(&list, ", ");
+			cstr(&list, n->musts[i].eapptag);
+			buf_puts(&list, " },\n");
+		}
+		buf_printf(&y->body, "static const struct cbl_ymust n%zu_m[] = "
+		    "{\n%s};\n", nn, list.p);
+		buf_printf(&init, "\t.nmust = %zu,\n\t.must = n%zu_m,\n",
+		    n->nmusts, nn);
+		y->mbytes += n->nmusts * sizeof(struct cbl_ymust);
+		buf_free(&list);
+	}
+	if (n->ndflts > 0) {
+		buf_init(&list);
+		for (size_t i = 0; i < n->ndflts; i++) {
+			buf_puts(&list, i > 0 ? ", " : "");
+			cstr(&list, n->dflts[i]);
+			y->mbytes += strlen(n->dflts[i]) + 1 + sizeof(void *);
+		}
+		buf_printf(&y->body, "static const char *const n%zu_d[] = { %s "
+		    "};\n", nn, list.p);
+		buf_printf(&init, "\t.ndflt = %zu,\n\t.dflt = n%zu_d,\n",
+		    n->ndflts, nn);
+		buf_free(&list);
+	}
+	if (n->kind == SN_LIST || n->kind == SN_LEAFLIST) {
+		if (n->min != 0)
+			buf_printf(&init, "\t.min = %u,\n", n->min);
+		if (n->max != 0 && n->max != UINT32_MAX)
+			buf_printf(&init, "\t.max = %u,\n", n->max);
+	}
+	if (n->units != NULL) {
+		buf_puts(&init, "\t.units = ");
+		cstr(&init, n->units);
+		buf_puts(&init, ",\n");
+	}
+	/* The choice it is in, under the same data node. */
+	if ((c = n->parent) != NULL && c->kind == SN_CASE && c->parent !=
+	    NULL && c->parent->kind == SN_CHOICE) {
+		const struct snode *k;
+		size_t i;
+
+		for (k = c->parent->child, i = 0; k != NULL && k != c;
+		    k = k->next)
+			i++;
+		buf_printf(&init, "\t.choice = &c%zu,\n\t.ccase = %zu,\n",
+		    choice_ref(y, c->parent), i);
+	}
+	/* Its own module: an augment's nodes are the augmenting one's. */
+	(void)pmap_get(&y->mods, n->module, &mn);
+	y->mref[mn] = true;
+	buf_printf(&y->body, "static const struct cbl_ynode n%zu = {\n%s"
+	    "\t.module = &m%zu,\n};\n\n", nn, init.p, mn);
+	buf_free(&init);
+	buf_free(&where);
+	return (nn);
+}
+
+/* An sx:structure: a node of its own, keyed by the structure's SID. */
+static size_t
+structure_emit(struct ys *y, const struct smodule *m, size_t mn,
+    const struct sext *e)
+{
+	struct buf init;
+	size_t nn;
+
+	nn = y->nnodes++;
+	y->mnodes++;
+	y->mbytes += sizeof(struct cbl_ynode) + strlen(e->arg) + 1;
+	if (e->sid == 0)
+		diag_add(y->d, 0, 0, "/%s:%s: the structure has no SID: its "
+		    "module's .sid file (-s) gives it one", m->name, e->arg);
+	buf_init(&init);
+	buf_printf(&init, "\t.sid = UINT64_C(%" PRIu64 "),\n\t.name = ", e->sid);
+	cstr(&init, e->arg);
+	buf_puts(&init, ",\n\t.kind = CBL_YN_STRUCTURE,\n");
+	(void)children_emit(y, nn, e->data, NULL, &init);
+	buf_printf(&y->body, "static const struct cbl_ynode n%zu = {\n%s"
+	    "\t.module = &m%zu,\n};\n\n", nn, init.p, mn);
+	buf_free(&init);
+	return (nn);
+}
+
+struct topn {
+	size_t		 n;		/* its number */
+	uint64_t	 sid;
+};
+
+static int
+top_cmp(const void *a, const void *b)
+{
+	const struct topn *x = a, *y = b;
+
+	return ((x->sid > y->sid) - (x->sid < y->sid));
+}
+
+static void
+top_add(struct topn **v, size_t *n, size_t num, uint64_t sid)
+{
+
+	*v = xreallocarray(*v, *n + 1, sizeof(**v));
+	(*v)[*n].n = num;
+	(*v)[(*n)++].sid = sid;
+}
+
+int
+gen_yang_schema(struct schema *s, const char *base, const char *from,
+    struct buf *out, FILE *report, struct diags *d)
+{
+	struct ys y = { .d = d };
+	struct buf tops, head, sizes, nm;
+	struct topn *top;
+	size_t ntop, total = 0, errs = d->n, i, mn;
+	struct kids k;
+
+	buf_init(&y.types);
+	buf_init(&y.body);
+	buf_init(&tops);
+	buf_init(&sizes);
+	for (i = 0; i < s->nmods; i++)
+		pmap_put(&y.mods, s->mods[i], i);
+	y.mref = xcalloc(s->nmods + 1, sizeof(*y.mref));
+
+	for (mn = 0; mn < s->nmods; mn++) {
+		const struct smodule *m = s->mods[mn];
+
+		if (!smodule_emitted(m))
+			continue;
+		y.m = m;
+		y.mnodes = y.mtypes = y.mbytes = 0;
+		y.mref[mn] = true;
+		top = NULL;
+		ntop = 0;
+		memset(&k, 0, sizeof(k));
+		kids_add(&k, m->data);
+		kids_add(&k, m->rpcs);
+		kids_add(&k, m->notifs);
+		for (i = 0; i < k.n; i++)
+			top_add(&top, &ntop, node_ref(&y, k.v[i]), k.v[i]->sid);
+		free(k.v);
+		for (i = 0; i < m->nexts; i++)
+			if (sext_is_structure(&m->exts[i], m))
+				top_add(&top, &ntop, structure_emit(&y, m, mn,
+				    &m->exts[i]), m->exts[i].sid);
+		qsort(top, ntop, sizeof(*top), top_cmp);
+		if (ntop > 0) {
+			buf_printf(&tops, "static const struct cbl_ynode "
+			    "*const m%zu_t[] = {\n", mn);
+			for (i = 0; i < ntop; i++)
+				buf_printf(&tops, "%s&n%zu", i % 6 == 0 ?
+				    (i > 0 ? ",\n\t" : "\t") : ", ", top[i].n);
+			buf_puts(&tops, "\n};\n");
+			y.mbytes += ntop * sizeof(void *);
+		}
+		y.mbytes += sizeof(struct cbl_ymodule);
+		buf_printf(&tops, "static const struct cbl_ymodule m%zu = {\n"
+		    "\t.name = ", mn);
+		cstr(&tops, m->name);
+		buf_puts(&tops, ",\n\t.revision = ");
+		cstr(&tops, m->revision);
+		buf_puts(&tops, ",\n\t.ns = ");
+		cstr(&tops, m->ns);
+		buf_puts(&tops, ",\n\t.prefix = ");
+		cstr(&tops, m->prefix);
+		buf_printf(&tops, ",\n\t.sid = UINT64_C(%" PRIu64 "),\n", m->sid);
+		if (ntop > 0)
+			buf_printf(&tops, "\t.ntop = %zu,\n\t.top = m%zu_t,\n",
+			    ntop, mn);
+		buf_puts(&tops, "};\n\n");
+		free(top);
+		/* Its trees, what other modules add to them included. */
+		buf_printf(&sizes, " * %s: %zu nodes, %zu types, %zu bytes\n",
+		    m->name, y.mnodes, y.mtypes, y.mbytes);
+		total += y.mbytes;
+	}
+	/* A module another's nodes are of: named, its tables elsewhere. */
+	for (mn = 0; mn < s->nmods; mn++) {
+		const struct smodule *m = s->mods[mn];
+
+		if (!y.mref[mn] || smodule_emitted(m))
+			continue;
+		buf_printf(&tops, "static const struct cbl_ymodule m%zu = {\n"
+		    "\t.name = ", mn);
+		cstr(&tops, m->name);
+		buf_puts(&tops, ",\n\t.revision = ");
+		cstr(&tops, m->revision);
+		buf_puts(&tops, ",\n\t.ns = ");
+		cstr(&tops, m->ns);
+		buf_puts(&tops, ",\n\t.prefix = ");
+		cstr(&tops, m->prefix);
+		buf_printf(&tops, ",\n\t.sid = UINT64_C(%" PRIu64 "),\n};\n\n",
+		    m->sid);
+	}
+
+	buf_init(&nm);
+	buf_puts(&nm, "_");
+	for (const char *p = base; *p != '\0'; p++)
+		buf_printf(&nm, "%c", (*p >= 'a' && *p <= 'z') || (*p >= 'A' &&
+		    *p <= 'Z') || (*p >= '0' && *p <= '9') ? *p : '_');
+	buf_init(&head);
+	buf_printf(&head, "/*\n * Generated by cblink-gen %s from %s.  Do not "
+	    "edit.\n *\n * The schema tables (cbl_schema.h):\n%s * in all, "
+	    "%zu nodes, %zu types, %zu expressions, %zu bytes\n */\n\n"
+	    "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
+	    "#include <cbl_schema.h>\n\n", CBLGEN_VERSION, from,
+	    sizes.p != NULL ? sizes.p : "", y.nnodes, y.ntypes, y.nxp, total);
+	/* Said when the tables are good: the file's comment, its lines. */
+	if (report != NULL && d->n == errs) {
+		for (const char *p = sizes.p; p != NULL && *p != '\0';) {
+			const char *e = strchr(p, '\n');
+
+			fprintf(report, "%.*s\n", (int)(e - p - 3), p + 3);
+			p = e + 1;
+		}
+		fprintf(report, "in all: %zu nodes, %zu types, %zu expressions, "
+		    "%zu bytes\n", y.nnodes, y.ntypes, y.nxp, total);
+	}
+	/* Declared first: they point at each other. */
+	for (i = 0; i < s->nmods; i++)
+		if (y.mref[i])
+			buf_printf(&head, "static const struct cbl_ymodule m%zu;\n",
+			    i);
+	for (i = 0; i < y.nchoices; i++)
+		buf_printf(&head, "static const struct cbl_ychoice c%zu;\n", i);
+	for (i = 0; i < y.nnodes; i++)
+		buf_printf(&head, "static const struct cbl_ynode n%zu;\n", i);
+	buf_puts(out, head.p);
+	buf_puts(out, "\n");
+	if (y.types.len > 0)
+		buf_puts(out, y.types.p);
+	if (y.body.len > 0)
+		buf_puts(out, y.body.p);
+	if (tops.len > 0)
+		buf_puts(out, tops.p);
+	buf_puts(out, "static const struct cbl_ymodule *const mods[] = {\n");
+	for (i = 0, mn = 0; i < s->nmods; i++)
+		if (smodule_emitted(s->mods[i])) {
+			buf_printf(out, "\t&m%zu,\n", i);
+			mn++;
+		}
+	buf_puts(out, "};\n\nstatic const char *const xpaths[] = {\n");
+	for (i = 0; i < y.nxp; i++) {
+		buf_puts(out, "\t");
+		cstr(out, y.xp[i]);
+		buf_puts(out, ",\n");
+	}
+	if (y.nxp == 0)
+		buf_puts(out, "\tNULL,\n");
+	buf_printf(out, "};\n\nextern const struct cbl_yschema %s_schema;\n"
+	    "const struct cbl_yschema %s_schema = {\n\t.nmod = %zu,\n"
+	    "\t.nxpath = %zu,\n\t.mod = mods,\n\t.xpath = xpaths,\n};\n",
+	    nm.p + 1, nm.p + 1, mn, y.nxp);
+
+	for (i = 0; i < y.ntypes; i++)
+		free(y.tkeys[i]);
+	free(y.tkeys);
+	for (i = 0; i < y.nxp; i++)
+		free(y.xp[i]);
+	free(y.xp);
+	free(y.mref);
+	free(y.nodes.k);
+	free(y.nodes.v);
+	free(y.choices.k);
+	free(y.choices.v);
+	free(y.mods.k);
+	free(y.mods.v);
+	buf_free(&y.types);
+	buf_free(&y.body);
+	buf_free(&tops);
+	buf_free(&sizes);
+	buf_free(&head);
+	buf_free(&nm);
+	return (d->n > errs ? -1 : 0);
+}

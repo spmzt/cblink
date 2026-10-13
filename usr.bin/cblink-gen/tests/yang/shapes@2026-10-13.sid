@@ -1,0 +1,226 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "shapes",
+    "module-revision": "2026-10-13",
+    "description": "SIDs of a test module, numbered by cblink-gen -a.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-structure-ext",
+        "module-revision": "2020-06-17"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "1099511727776",
+        "size": "1000"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "shapes",
+        "sid": "1099511727776"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "colour",
+        "sid": "1099511727777"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "red",
+        "sid": "1099511727778"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:alarm",
+        "sid": "1099511727779"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:alarm/text",
+        "sid": "1099511727780"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:note",
+        "sid": "1099511727781"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:note/body",
+        "sid": "1099511727782"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:note/body/text",
+        "sid": "1099511727783"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:ping",
+        "sid": "1099511727784"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:ping/input",
+        "sid": "1099511727785"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:ping/input/count",
+        "sid": "1099511727786"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:ping/output",
+        "sid": "1099511727787"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes",
+        "sid": "1099511727788"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/blob",
+        "sid": "1099511727789"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/colour",
+        "sid": "1099511727790"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/crc",
+        "sid": "1099511727791"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/default",
+        "sid": "1099511727792"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/either",
+        "sid": "1099511727793"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/eithers",
+        "sid": "1099511727794"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/extra",
+        "sid": "1099511727795"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/flag",
+        "sid": "1099511727796"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/hash",
+        "sid": "1099511727797"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item",
+        "sid": "1099511727798"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/changed",
+        "sid": "1099511727799"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/changed/was",
+        "sid": "1099511727800"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/id",
+        "sid": "1099511727801"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/peer",
+        "sid": "1099511727802"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/reset",
+        "sid": "1099511727803"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/reset/input",
+        "sid": "1099511727804"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/reset/input/hard",
+        "sid": "1099511727805"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/reset/output",
+        "sid": "1099511727806"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/item/reset/output/took",
+        "sid": "1099511727807"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/level",
+        "sid": "1099511727808"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/levels",
+        "sid": "1099511727809"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/names",
+        "sid": "1099511727810"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/perms",
+        "sid": "1099511727811"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/ratio",
+        "sid": "1099511727812"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/speed",
+        "sid": "1099511727813"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/target",
+        "sid": "1099511727814"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/tuned",
+        "sid": "1099511727815"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/shapes:shapes/tuned/max",
+        "sid": "1099511727816"
+      }
+    ]
+  }
+}

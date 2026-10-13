@@ -20,7 +20,7 @@
 .Op Fl adn
 .Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl b Ar base
-.Op Fl m Cm h , Ns Cm md , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
+.Op Fl m Cm h , Ns Cm md , Ns Cm schema , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
 .Op Fl o Ar dir
 .Op Fl p Ar dir
 .Op Fl s Ar file.sid
@@ -150,6 +150,27 @@ and
 made
 .Ql _ ;
 two nodes that would have one name are an error.
+The header declares
+.Va base Ns _schema ,
+the tables
+.Cm schema
+writes.
+.It Cm schema
+.Ar base Ns _schema.c :
+the schema tables of the same modules, the structures of
+.In cbl_schema.h
+the library decodes, encodes and validates YANG-CBOR by: every node
+with its SID, its type, its children sorted by SID, its keys, choices,
+when and must expressions, defaults and limits; types shared between
+the nodes that have the same one, a pattern also as the POSIX ERE it
+translates to.
+Every node, structure and identityref base must have a SID: the
+modules'
+.Pa .sid
+files are given with
+.Fl s .
+What each module's tables come to, its trees with what other modules
+add to them, is printed and written at the top of the file.
 .It Cm md
 .Ar base Ns .md :
 a page of Markdown for each module named: its tree diagram, and a
@@ -207,7 +228,7 @@ assignment ranges, and every item of the module with one, empty
 and
 .Ql output
 included.
-It may be given up to 16 times.
+It may be given up to 256 times.
 .It Fl o Ar dir
 Write the files into
 .Ar dir

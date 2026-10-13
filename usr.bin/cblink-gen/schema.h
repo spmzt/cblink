@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 struct smodule;
 struct sident;
@@ -56,6 +57,15 @@ enum snode_kind {
 	SN_INPUT,
 	SN_OUTPUT,
 };
+
+/*
+ * A when's context node (RFC 7950 section 7.21.5): the node itself, its
+ * closest ancestor that is a data node (a when of a uses, an augment, a
+ * choice or a case), or the root.
+ */
+#define	SWC_SELF	0
+#define	SWC_PARENT	1
+#define	SWC_ROOT	2
 
 /* snode flags. */
 #define	SNF_CONFIG	0x0001	/* config true (else state) */
@@ -180,6 +190,7 @@ struct snode {
 	size_t		 ndflts;
 	struct snode	*dflt_case;	/* choice: its default case */
 	char		**when;		/* when expressions, as written */
+	uint8_t		*whenctx;	/* each one's context node: SWC_* */
 	size_t		 nwhen;
 	struct smust	*musts;
 	size_t		 nmusts;
@@ -279,6 +290,19 @@ const char	*snode_kind_name(enum snode_kind kind);
 /* The node's instance of the extension "module:name", or NULL. */
 const struct sext *snode_ext(const struct snode *n, const char *ext);
 const char	*sntype_base_name(enum sntype_base base);
+/*
+ * Whether what is generated has the module's trees: those of the modules
+ * named, and those they add to (ietf-ip's nodes are in ietf-interfaces'
+ * tree); not what libyang implements of its own (yang-library).
+ */
+bool		 smodule_emitted(const struct smodule *m);
+/*
+ * Whether e is a structure of m's own, written in it: an sx:structure
+ * (RFC 8791) or an rc:yang-data (RFC 8040), which RFC 9595 numbers
+ * alike, a SID for the structure, its nodes from /m:structure.
+ */
+bool		 sext_is_structure(const struct sext *e,
+		    const struct smodule *m);
 bool		 sntype_signed(enum sntype_base base);
 
 /*
@@ -313,6 +337,16 @@ bool		 snode_sid_path(const struct snode *n, struct buf *b);
  */
 int		 gen_yang_h(struct schema *s, const char *base,
 		    const char *from, struct buf *out, struct diags *d);
+
+/*
+ * The schema tables (cbl_schema.h) of the modules gen_yang_h() makes
+ * structs of, as base_schema.c (gen_yschema.c); what each module's
+ * come to said on report too.  -1 and diagnostics for a node or an
+ * identityref base without a SID.
+ */
+int		 gen_yang_schema(struct schema *s, const char *base,
+		    const char *from, struct buf *out, FILE *report,
+		    struct diags *d);
 
 /* One line a node, as tools/yangwalk prints them, for cross-checks. */
 void		 schema_dump(struct schema *s);

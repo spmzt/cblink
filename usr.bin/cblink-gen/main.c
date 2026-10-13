@@ -61,6 +61,8 @@ doc_emit(const struct schema *s, int dirfd, const char *base,
 #endif
 
 #define	DEFAULT_PARTS	"h,c,client,server,md"
+/* .sid files: one a module, a module set's modules. */
+#define	MAX_SIDS	256
 
 static void
 usage(void)
@@ -153,13 +155,14 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
     bool check, bool dump)
 {
 	bool cbor = false, json = false, hdr = false, md = false, tree = false;
+	bool tables = false;
 	char *bname = NULL;
 	int dirfd = -1;
 	cap_rights_t rights;
-	int sidfd[16];
+	int sidfd[MAX_SIDS];
 	struct diags d = { 0 };
-	char *sidtext[16];
-	size_t sidlen[16], nattached = 0;
+	char *sidtext[MAX_SIDS];
+	size_t sidlen[MAX_SIDS], nattached = 0;
 	struct schema *s;
 	struct ly_ctx *ctx;
 	char *pathcopy;
@@ -208,7 +211,7 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	 * The parts written yet: "h", the structs; "md", the modules'
 	 * Markdown; "sid", the .sid files' YANG-CBOR form as GET-SID
 	 * answers it; "sidjson", their JSON; "tree", the modules' tree
-	 * diagrams.
+	 * diagrams; "schema", the tables the library decodes by.
 	 */
 	if (!check && !dump) {
 		for (const char *p = parts; *p != '\0';) {
@@ -224,15 +227,18 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 				tree = true;
 			else if (n == 2 && strncmp(p, "md", 2) == 0)
 				md = true;
+			else if (n == 6 && strncmp(p, "schema", 6) == 0)
+				tables = true;
 			else
 				errx(2, "-m %.*s: not written for YANG yet; "
-				    "-m h,md,sid,sidjson,tree are", (int)n, p);
+				    "-m h,md,schema,sid,sidjson,tree are", (int)n,
+				    p);
 			p += n + (p[n] == ',');
 		}
-		if (!cbor && !json && !hdr && !md && !tree)
+		if (!cbor && !json && !hdr && !md && !tree && !tables)
 			errx(2, "generating C from YANG is not written yet "
-			    "but for -m h,md,sid,sidjson,tree; -n checks the "
-			    "modules, -d dumps them");
+			    "but for -m h,md,schema,sid,sidjson,tree; -n checks "
+			    "the modules, -d dumps them");
 		if ((cbor || json) && nsids == 0)
 			errx(2, "-m sid,sidjson: no -s file");
 		/* The outputs' name: -b, or the first module's. */
@@ -326,6 +332,21 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 			buf_free(&b);
 			free(name);
 		}
+		if (tables) {
+			struct buf b;
+			char *name = xasprintf("%s_schema.c", base);
+
+			buf_init(&b);
+			if (gen_yang_schema(s, base, d.file, &b, stdout,
+			    &d) != 0) {
+				diag_print(&d);
+				return (1);
+			}
+			if (write_file(dirfd, name, &b) != 0)
+				return (2);
+			buf_free(&b);
+			free(name);
+		}
 		if ((tree && doc_emit(s, dirfd, base, d.file, false) != 0) ||
 		    (md && doc_emit(s, dirfd, base, d.file, true) != 0))
 			return (2);
@@ -371,7 +392,7 @@ main(int argc, char *argv[])
 	bool assign = false, builtin = false, check = false, dump = false;
 	bool mflag = false;
 	char *data, *pathcopy, *file, *dot, *bname = NULL;
-	const char *paths[16], *feats[64], *sids[16];
+	const char *paths[16], *feats[64], *sids[MAX_SIDS];
 	size_t len, npaths = 0, nfeats = 0, nsids = 0;
 	int ch, fd, dirfd, rv;
 

@@ -63,11 +63,22 @@ ATF_TESTS_C+=	yang_h_test
 YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 		${.CURDIR}/yang/ietf-system@2014-08-06.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang
-SRCS.yang_h_test=	yangh.h yang_h_test.c
+# Their SIDs: RFC 9595's ietf-system completed (-a), as it leaves empty
+# input and output without.
+YANGH_SID=	-s ${.CURDIR}/yang/shapes@2026-10-13.sid \
+		-s ${.OBJDIR}/ietf-system.sid \
+		-s ${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
+SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c
 CFLAGS.yang_h_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
-CLEANFILES+=	yangh.h
+LDADD.yang_h_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CLEANFILES+=	yangh.h yangh_schema.c ietf-system.sid
 yangh.h: ${YANGH_SRC} ${GEN}
-	${GEN} -m h -b yangh -o ${.OBJDIR} ${YANGH_SRC}
+	cat ${.CURDIR}/yang/ietf-system@2014-08-06.sid > ${.OBJDIR}/ietf-system.sid
+	${GEN} -n -a -s ${.OBJDIR}/ietf-system.sid \
+	    ${.CURDIR}/yang/ietf-system@2014-08-06.yang > /dev/null
+	${GEN} -m h,schema -b yangh -o ${.OBJDIR} ${YANGH_SID} ${YANGH_SRC} \
+	    > /dev/null
+yangh_schema.c: yangh.h
 .endif
 
 # Test data: the generator itself, golden files, error cases, and the
@@ -100,7 +111,8 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/beyond@2026-10-13.yang yang/ietf-system@2014-08-06.yang \
 		yang/ietf-system@2014-08-06.sid yang/iana-crypt-hash@2014-08-06.yang \
 		yang/ietf-netconf-acm@2018-02-14.yang yang/subtract@2026-10-13.yang \
-		yang/shapes@2026-10-13.yang yang/clash@2026-10-13.yang \
+		yang/shapes@2026-10-13.yang yang/shapes@2026-10-13.sid \
+		yang/clash@2026-10-13.yang \
 		yang/tree@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid

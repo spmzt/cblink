@@ -311,7 +311,7 @@ ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang
 	# Without -m: C generation from YANG is not all written yet.
-	atf_check -s exit:2 -e match:'not written yet but for -m h,md,sid,sidjson,tree' \
+	atf_check -s exit:2 -e match:'not written yet but for -m h,md,schema,sid,sidjson,tree' \
 	    $gen -o . "$y/good@2026-10-13.yang"
 }
 
@@ -444,6 +444,15 @@ yang_h_body()
 	atf_check $gen -m h -b both -o out "$y/good@2026-10-13.yang" \
 	    "$y/shapes@2026-10-13.yang"
 	atf_check cmp out/both.h both.before
+	# The schema tables: every node keyed by its SID, so a module's .sid
+	# file is wanted; what each module's tables come to is said.
+	atf_check -s exit:1 -e match:'/shapes:shapes: no SID' \
+	    $gen -m schema "$y/shapes@2026-10-13.yang"
+	atf_check -o match:'^shapes: [0-9]+ nodes, [0-9]+ types, [0-9]+ bytes$' \
+	    -o match:'^in all: ' $gen -m schema -o out \
+	    -s "$y/shapes@2026-10-13.sid" "$y/shapes@2026-10-13.yang"
+	atf_check -o match:'^const struct cbl_yschema shapes_schema = \{$' \
+	    cat out/shapes_schema.c
 	# a-b and a.b are both a_b in C.
 	atf_check -s exit:1 -e match:'struct clash_top: two members named a_b' \
 	    $gen -m h "$y/clash@2026-10-13.yang"

@@ -263,11 +263,148 @@ ATF_TC_BODY(tables, tc)
 	    CBL_YNF_USERORDER));
 }
 
+/* The identity of a SID, by a binary search of the table. */
+static const struct cbl_yident *
+ident(uint64_t sid)
+{
+	size_t lo = 0, hi = yangh_schema.nident;
+
+	while (lo < hi) {
+		size_t mid = lo + (hi - lo) / 2;
+
+		if (yangh_schema.ident[mid].sid == sid)
+			return (&yangh_schema.ident[mid]);
+		if (yangh_schema.ident[mid].sid < sid)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return (NULL);
+}
+
+/* derived-from(), and derived-from-or-self() with self. */
+static bool
+derived_from(uint64_t x, uint64_t base, bool self)
+{
+	const struct cbl_yident *b;
+	size_t lo, hi;
+
+	if (self && x == base)
+		return (true);
+	if ((b = ident(base)) == NULL)
+		return (false);
+	for (lo = 0, hi = b->nderived; lo < hi;) {
+		size_t mid = lo + (hi - lo) / 2;
+
+		if (b->derived[mid] == x)
+			return (true);
+		if (b->derived[mid] < x)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return (false);
+}
+
+/* Every identityref base under n: in the table, its closure too. */
+static size_t
+check_bases(const struct cbl_ytype *t)
+{
+	const struct cbl_yident *b;
+	size_t k = 0;
+
+	if (t == NULL)
+		return (0);
+	for (uint16_t i = 0; i < t->nmembers; i++)
+		k += check_bases(t->members[i]);
+	for (uint16_t i = 0; i < t->nbases; i++) {
+		b = ident(t->bases[i]);
+		ATF_CHECK_MSG(b != NULL, "base %ju not in the table",
+		    (uintmax_t)t->bases[i]);
+		if (b == NULL)
+			continue;
+		for (uint32_t j = 0; j < b->nderived; j++) {
+			ATF_CHECK_MSG(ident(b->derived[j]) != NULL, "%s: "
+			    "derived %ju not in the table", b->name,
+			    (uintmax_t)b->derived[j]);
+			if (j > 0)
+				ATF_CHECK(b->derived[j] > b->derived[j - 1]);
+			ATF_CHECK(derived_from(b->derived[j], b->sid, false));
+			ATF_CHECK(!derived_from(b->sid, b->derived[j],
+			    false));
+		}
+		ATF_CHECK(!derived_from(b->sid, b->sid, false));
+		ATF_CHECK(derived_from(b->sid, b->sid, true));
+		k++;
+	}
+	return (k);
+}
+
+static size_t
+check_idrefs(const struct cbl_ynode *n)
+{
+	size_t k = check_bases(n->type);
+
+	for (uint32_t i = 0; i < n->nchild; i++)
+		k += check_idrefs(n->child[i]);
+	return (k);
+}
+
+ATF_TC_WITHOUT_HEAD(identities);
+ATF_TC_BODY(identities, tc)
+{
+	const struct cbl_ymodule *sys;
+	const struct cbl_yident *colour, *red, *m;
+	size_t bases = 0;
+
+	ATF_REQUIRE(yangh_schema.nident > 0);
+	for (uint32_t i = 1; i < yangh_schema.nident; i++)
+		ATF_CHECK(yangh_schema.ident[i].sid >
+		    yangh_schema.ident[i - 1].sid);
+	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
+		for (uint32_t j = 0; j < yangh_schema.mod[i]->ntop; j++)
+			bases += check_idrefs(yangh_schema.mod[i]->top[j]);
+	ATF_CHECK(bases >= 3);
+
+	/* shapes: red is a colour, colour is not red. */
+	ATF_REQUIRE((colour = ident(UINT64_C(1099511727777))) != NULL);
+	ATF_CHECK_STREQ("colour", colour->name);
+	ATF_CHECK_STREQ("shapes", colour->module->name);
+	ATF_REQUIRE((red = ident(UINT64_C(1099511727778))) != NULL);
+	ATF_CHECK_STREQ("red", red->name);
+	ATF_CHECK(derived_from(red->sid, colour->sid, false));
+	ATF_CHECK(!derived_from(colour->sid, red->sid, true));
+	ATF_CHECK_EQ(0u, red->nderived);
+
+	/* ietf-system: RADIUS and local users are ways to authenticate. */
+	m = NULL;
+	for (uint32_t i = 0; i < yangh_schema.nident; i++)
+		if (strcmp(yangh_schema.ident[i].name,
+		    "authentication-method") == 0)
+			m = &yangh_schema.ident[i];
+	ATF_REQUIRE(m != NULL);
+	ATF_CHECK_EQ(2u, m->nderived);
+	for (uint32_t i = 0; i < yangh_schema.nident; i++)
+		if (strcmp(yangh_schema.ident[i].name, "radius") == 0 ||
+		    strcmp(yangh_schema.ident[i].name, "local-users") == 0)
+			ATF_CHECK(derived_from(yangh_schema.ident[i].sid,
+			    m->sid, false));
+
+	/* Features, as the schema was compiled: every one on. */
+	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
+	ATF_REQUIRE(sys->nfeature > 0);
+	for (uint32_t i = 0; i < sys->nfeature; i++) {
+		ATF_CHECK(sys->feature[i].sid != 0);
+		ATF_CHECK(sys->feature[i].enabled);
+	}
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
 	ATF_TP_ADD_TC(tp, shapes);
 	ATF_TP_ADD_TC(tp, ietf);
 	ATF_TP_ADD_TC(tp, tables);
+	ATF_TP_ADD_TC(tp, identities);
 	return (atf_no_error());
 }

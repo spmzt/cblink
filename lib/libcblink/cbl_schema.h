@@ -191,6 +191,27 @@ struct cbl_ynode {
 	const struct cbl_ychoice *choice;	/* the one it is in, or NULL */
 };
 
+/*
+ * An identity, and every identity derived from it, directly or not, by
+ * SID: derived-from(x, base) is x in base's derived, derived-from-or-
+ * self also x the base.
+ */
+struct cbl_yident {
+	uint64_t		 sid;
+	const char		*name;
+	const struct cbl_ymodule *module;
+	uint16_t		 flags;		/* CBL_YNF_DEPRECATED, _OBSOLETE */
+	uint32_t		 nderived;
+	const uint64_t		*derived;
+};
+
+/* A feature, and whether the schema was compiled with it. */
+struct cbl_yfeature {
+	uint64_t		 sid;
+	const char		*name;
+	bool			 enabled;
+};
+
 struct cbl_ymodule {
 	const char		*name;
 	const char		*revision;	/* NULL: none */
@@ -198,15 +219,24 @@ struct cbl_ymodule {
 	const char		*prefix;
 	uint64_t		 sid;
 	uint32_t		 ntop;
+	uint32_t		 nfeature;
 	/* Its data at the top, rpcs, notifications, structures: by SID. */
 	const struct cbl_ynode	*const *top;
+	const struct cbl_yfeature *feature;	/* by name, as the module */
 };
 
 struct cbl_yschema {
 	uint32_t		 nmod;
 	uint32_t		 nxpath;
+	uint32_t		 nident;
 	const struct cbl_ymodule *const *mod;
 	const char		*const *xpath;	/* when, must, path: as written */
+	/*
+	 * The identities a value may name: the modules', and every one
+	 * derived from a base an identityref has, wherever it is
+	 * defined; by SID.
+	 */
+	const struct cbl_yident	*ident;
 };
 
 #endif /* !_CBL_SCHEMA_H_ */

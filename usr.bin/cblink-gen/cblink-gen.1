@@ -163,7 +163,11 @@ the library decodes, encodes and validates YANG-CBOR by: every node
 with its SID, its type, its children sorted by SID, its keys, choices,
 when and must expressions, defaults and limits; types shared between
 the nodes that have the same one, a pattern also as the POSIX ERE it
-translates to.
+translates to; each module's features, enabled or not; and the
+identities a value may name, the modules' own and every one derived
+from a base an identityref has, wherever it is defined, each with all
+those derived from it, by SID, for
+.Fn derived-from .
 Every node, structure and identityref base must have a SID: the
 modules'
 .Pa .sid

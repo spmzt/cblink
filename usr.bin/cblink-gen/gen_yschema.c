@@ -40,6 +40,9 @@ struct ys {
 	struct pmap	 nodes;		/* snode -> its number */
 	struct pmap	 choices;	/* choice snode -> its number */
 	struct pmap	 mods;		/* smodule -> its number */
+	struct pmap	 bases;		/* identityref bases met, a set */
+	const struct sident **basev;
+	size_t		 nbase;
 	bool		*mref;		/* a node is of it: it is defined */
 	size_t		 nnodes, nchoices, ntypes, nmods;
 	char		**tkeys;	/* each type's key, by number */
@@ -363,6 +366,12 @@ type_ref(struct ys *y, const struct sntype *t, const char *where)
 				    "base, has no SID", where,
 				    real->bases[i]->module->name,
 				    real->bases[i]->name);
+			if (!pmap_get(&y->bases, real->bases[i], &pos)) {
+				pmap_put(&y->bases, real->bases[i], y->nbase);
+				y->basev = xreallocarray(y->basev, y->nbase + 1,
+				    sizeof(*y->basev));
+				y->basev[y->nbase++] = real->bases[i];
+			}
 			buf_printf(&list, "%sUINT64_C(%" PRIu64 ")", i > 0 ?
 			    ", " : "", real->bases[i]->sid);
 		}
@@ -685,6 +694,140 @@ node_ref(struct ys *y, const struct snode *n)
 	return (nn);
 }
 
+/*
+ * Identities.
+ */
+
+struct iset {
+	struct pmap		 in;
+	const struct sident	**v;
+	size_t			 n;
+};
+
+static void
+iset_add(struct iset *is, const struct sident *id)
+{
+	size_t x;
+
+	if (pmap_get(&is->in, id, &x))
+		return;
+	pmap_put(&is->in, id, is->n);
+	is->v = xreallocarray(is->v, is->n + 1, sizeof(*is->v));
+	is->v[is->n++] = id;
+}
+
+/* Every identity derived from id, directly or not, into is. */
+static void
+closure(struct iset *is, const struct sident *id)
+{
+	size_t x;
+
+	for (size_t i = 0; i < id->nderived; i++)
+		if (!pmap_get(&is->in, id->derived[i], &x)) {
+			iset_add(is, id->derived[i]);
+			closure(is, id->derived[i]);
+		}
+}
+
+static void
+iset_free(struct iset *is)
+{
+
+	free(is->in.k);
+	free(is->in.v);
+	free(is->v);
+}
+
+static int
+ident_cmp(const void *a, const void *b)
+{
+	const struct sident *x = *(const struct sident *const *)a;
+	const struct sident *y = *(const struct sident *const *)b;
+
+	return ((x->sid > y->sid) - (x->sid < y->sid));
+}
+
+static int
+u64_cmp(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+
+	return ((x > y) - (x < y));
+}
+
+/*
+ * The identity table: the emitted modules' identities, and every one a
+ * base has, wherever defined; each with its closure.  Its size.
+ */
+static size_t
+idents_emit(struct ys *y, struct schema *s, struct buf *out)
+{
+	struct iset all = { 0 };
+	struct buf list;
+	size_t i, mn;
+
+	for (i = 0; i < s->nmods; i++)
+		if (smodule_emitted(s->mods[i]))
+			for (size_t j = 0; j < s->mods[i]->nidents; j++)
+				iset_add(&all, &s->mods[i]->idents[j]);
+	for (i = 0; i < y->nbase; i++) {
+		iset_add(&all, y->basev[i]);
+		closure(&all, y->basev[i]);
+	}
+	qsort(all.v, all.n, sizeof(*all.v), ident_cmp);
+	buf_init(&list);
+	for (i = 0; i < all.n; i++) {
+		const struct sident *id = all.v[i];
+		struct iset c = { 0 };
+		uint64_t *sids;
+
+		if (id->sid == 0)
+			diag_add(y->d, 0, 0, "identity %s:%s: no SID: its "
+			    "module's .sid file (-s) gives it one",
+			    id->module->name, id->name);
+		else if (i > 0 && all.v[i - 1]->sid == id->sid)
+			diag_add(y->d, 0, 0, "identities %s:%s and %s:%s: one "
+			    "SID, %" PRIu64, all.v[i - 1]->module->name,
+			    all.v[i - 1]->name, id->module->name, id->name,
+			    id->sid);
+		closure(&c, id);
+		sids = xcalloc(c.n + 1, sizeof(*sids));
+		for (size_t j = 0; j < c.n; j++)
+			sids[j] = c.v[j]->sid;
+		qsort(sids, c.n, sizeof(*sids), u64_cmp);
+		if (c.n > 0) {
+			buf_printf(out, "static const uint64_t i%zu_d[] = {", i);
+			for (size_t j = 0; j < c.n; j++)
+				buf_printf(out, "%sUINT64_C(%" PRIu64 ")",
+				    j == 0 ? "\n\t" : j % 4 == 0 ? ",\n\t" :
+				    ", ", sids[j]);
+			buf_puts(out, "\n};\n");
+		}
+		(void)pmap_get(&y->mods, id->module, &mn);
+		y->mref[mn] = true;
+		buf_printf(&list, "\t{ UINT64_C(%" PRIu64 "), ", id->sid);
+		cstr(&list, id->name);
+		buf_printf(&list, ", &m%zu, 0x%x, %zu, ", mn,
+		    id->flags & (SNF_DEPRECATED | SNF_OBSOLETE), c.n);
+		if (c.n > 0)
+			buf_printf(&list, "i%zu_d },\n", i);
+		else
+			buf_puts(&list, "NULL },\n");
+		y->mbytes += sizeof(struct cbl_yident) + strlen(id->name) + 1 +
+		    c.n * sizeof(uint64_t);
+		free(sids);
+		iset_free(&c);
+	}
+	/* One more, so that the array has one: not counted. */
+	buf_printf(out, "static const struct cbl_yident idents[] = {\n%s"
+	    "\t{ 0, NULL, NULL, 0, 0, NULL },\n};\n\n", list.p != NULL ?
+	    list.p : "");
+	buf_free(&list);
+	i = all.n;
+	iset_free(&all);
+	return (i);
+}
+
 /* An sx:structure: a node of its own, keyed by the structure's SID. */
 static size_t
 structure_emit(struct ys *y, const struct smodule *m, size_t mn,
@@ -737,9 +880,9 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
     struct buf *out, FILE *report, struct diags *d)
 {
 	struct ys y = { .d = d };
-	struct buf tops, head, sizes, nm;
+	struct buf tops, head, sizes, nm, idents;
 	struct topn *top;
-	size_t ntop, total = 0, errs = d->n, i, mn;
+	size_t ntop, total = 0, errs = d->n, i, mn, nident;
 	struct kids k;
 
 	buf_init(&y.types);
@@ -782,6 +925,25 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 			y.mbytes += ntop * sizeof(void *);
 		}
 		y.mbytes += sizeof(struct cbl_ymodule);
+		if (m->nfeatures > 0) {
+			buf_printf(&tops, "static const struct cbl_yfeature "
+			    "m%zu_f[] = {\n", mn);
+			for (i = 0; i < m->nfeatures; i++) {
+				if (m->features[i].sid == 0)
+					diag_add(d, 0, 0, "feature %s:%s: no "
+					    "SID: its module's .sid file (-s) "
+					    "gives it one", m->name,
+					    m->features[i].name);
+				buf_printf(&tops, "\t{ UINT64_C(%" PRIu64 "), ",
+				    m->features[i].sid);
+				cstr(&tops, m->features[i].name);
+				buf_printf(&tops, ", %s },\n",
+				    m->features[i].enabled ? "true" : "false");
+				y.mbytes += sizeof(struct cbl_yfeature) +
+				    strlen(m->features[i].name) + 1;
+			}
+			buf_puts(&tops, "};\n");
+		}
 		buf_printf(&tops, "static const struct cbl_ymodule m%zu = {\n"
 		    "\t.name = ", mn);
 		cstr(&tops, m->name);
@@ -795,6 +957,9 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		if (ntop > 0)
 			buf_printf(&tops, "\t.ntop = %zu,\n\t.top = m%zu_t,\n",
 			    ntop, mn);
+		if (m->nfeatures > 0)
+			buf_printf(&tops, "\t.nfeature = %zu,\n\t.feature = "
+			    "m%zu_f,\n", m->nfeatures, mn);
 		buf_puts(&tops, "};\n\n");
 		free(top);
 		/* Its trees, what other modules add to them included. */
@@ -802,6 +967,11 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		    m->name, y.mnodes, y.mtypes, y.mbytes);
 		total += y.mbytes;
 	}
+	/* The identities, after the nodes: their bases are known. */
+	buf_init(&idents);
+	y.mbytes = 0;
+	nident = idents_emit(&y, s, &idents);
+	total += y.mbytes;
 	/* A module another's nodes are of: named, its tables elsewhere. */
 	for (mn = 0; mn < s->nmods; mn++) {
 		const struct smodule *m = s->mods[mn];
@@ -829,10 +999,12 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	buf_init(&head);
 	buf_printf(&head, "/*\n * Generated by cblink-gen %s from %s.  Do not "
 	    "edit.\n *\n * The schema tables (cbl_schema.h):\n%s * in all, "
-	    "%zu nodes, %zu types, %zu expressions, %zu bytes\n */\n\n"
+	    "%zu nodes, %zu types, %zu expressions, %zu identities, %zu "
+	    "bytes\n */\n\n"
 	    "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
 	    "#include <cbl_schema.h>\n\n", CBLGEN_VERSION, from,
-	    sizes.p != NULL ? sizes.p : "", y.nnodes, y.ntypes, y.nxp, total);
+	    sizes.p != NULL ? sizes.p : "", y.nnodes, y.ntypes, y.nxp, nident,
+	    total);
 	/* Said when the tables are good: the file's comment, its lines. */
 	if (report != NULL && d->n == errs) {
 		for (const char *p = sizes.p; p != NULL && *p != '\0';) {
@@ -842,7 +1014,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 			p = e + 1;
 		}
 		fprintf(report, "in all: %zu nodes, %zu types, %zu expressions, "
-		    "%zu bytes\n", y.nnodes, y.ntypes, y.nxp, total);
+		    "%zu identities, %zu bytes\n", y.nnodes, y.ntypes, y.nxp,
+		    nident, total);
 	}
 	/* Declared first: they point at each other. */
 	for (i = 0; i < s->nmods; i++)
@@ -859,6 +1032,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		buf_puts(out, y.types.p);
 	if (y.body.len > 0)
 		buf_puts(out, y.body.p);
+	if (idents.len > 0)
+		buf_puts(out, idents.p);
 	if (tops.len > 0)
 		buf_puts(out, tops.p);
 	buf_puts(out, "static const struct cbl_ymodule *const mods[] = {\n");
@@ -877,8 +1052,9 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		buf_puts(out, "\tNULL,\n");
 	buf_printf(out, "};\n\nextern const struct cbl_yschema %s_schema;\n"
 	    "const struct cbl_yschema %s_schema = {\n\t.nmod = %zu,\n"
-	    "\t.nxpath = %zu,\n\t.mod = mods,\n\t.xpath = xpaths,\n};\n",
-	    nm.p + 1, nm.p + 1, mn, y.nxp);
+	    "\t.nxpath = %zu,\n\t.nident = %zu,\n\t.mod = mods,\n"
+	    "\t.xpath = xpaths,\n\t.ident = idents,\n};\n",
+	    nm.p + 1, nm.p + 1, mn, y.nxp, nident);
 
 	for (i = 0; i < y.ntypes; i++)
 		free(y.tkeys[i]);
@@ -896,6 +1072,10 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	buf_free(&y.types);
 	buf_free(&y.body);
 	buf_free(&tops);
+	buf_free(&idents);
+	free(y.bases.k);
+	free(y.bases.v);
+	free(y.basev);
 	buf_free(&sizes);
 	buf_free(&head);
 	buf_free(&nm);

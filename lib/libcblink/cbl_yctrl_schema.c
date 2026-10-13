@@ -812,6 +812,21 @@ cblink_ctrl_get_family_input_decode(const void *data, size_t len, struct cblink_
 }
 
 int
+cblink_ctrl_get_family_input_put(cbl_msg *m, const struct cblink_ctrl_get_family_input *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n1, p));
+}
+
+int
+cblink_ctrl_get_family_input_parse(const cbl_msg *m, struct cblink_ctrl_get_family_input *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n1, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_get_family_output_encode(const struct cblink_ctrl_get_family_output *p, struct cbl_ybuf *b)
 {
 
@@ -825,6 +840,42 @@ cblink_ctrl_get_family_output_decode(const void *data, size_t len, struct cblink
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n4, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_get_family_output_put(cbl_msg *m, const struct cblink_ctrl_get_family_output *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n4, p));
+}
+
+int
+cblink_ctrl_get_family_output_parse(const cbl_msg *m, struct cblink_ctrl_get_family_output *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n4, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_get_family_call(cbl_conn *c, const struct cblink_ctrl_get_family_input *in,
+    struct cblink_ctrl_get_family_output *out, cbl_yarena *a, int timeout_ms)
+{
+	cbl_msg *m, *r;
+	int error;
+
+	if ((error = cbl_msg_new(cbl_conn_ctx(c), CBL_YANG_FAMILY,
+	    CBL_YCMD_RPC, 0, &m)) != 0)
+		return (error);
+	if ((error = cbl_msg_put_ynode(m, &n1, in)) != 0) {
+		cbl_msg_free(m);
+		return (error);
+	}
+	if ((error = cbl_request(c, m, &r, timeout_ms)) == 0)
+		error = cbl_msg_ydecode(r, &n4, out, a, CBL_YD_STRICT, NULL,
+		    0);
+	cbl_msg_free(r);
+	return (error);
 }
 
 int
@@ -844,6 +895,21 @@ cblink_ctrl_get_family_output_group_decode(const void *data, size_t len, struct 
 }
 
 int
+cblink_ctrl_get_family_output_group_put(cbl_msg *m, const struct cblink_ctrl_get_family_output_group *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n5, p));
+}
+
+int
+cblink_ctrl_get_family_output_group_parse(const cbl_msg *m, struct cblink_ctrl_get_family_output_group *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n5, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_get_family_output_op_encode(const struct cblink_ctrl_get_family_output_op *p, struct cbl_ybuf *b)
 {
 
@@ -857,6 +923,21 @@ cblink_ctrl_get_family_output_op_decode(const void *data, size_t len, struct cbl
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n11, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_get_family_output_op_put(cbl_msg *m, const struct cblink_ctrl_get_family_output_op *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n11, p));
+}
+
+int
+cblink_ctrl_get_family_output_op_parse(const cbl_msg *m, struct cblink_ctrl_get_family_output_op *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n11, p, a, flags, why, whylen));
 }
 
 int
@@ -876,6 +957,21 @@ cblink_ctrl_subscribe_input_decode(const void *data, size_t len, struct cblink_c
 }
 
 int
+cblink_ctrl_subscribe_input_put(cbl_msg *m, const struct cblink_ctrl_subscribe_input *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n17, p));
+}
+
+int
+cblink_ctrl_subscribe_input_parse(const cbl_msg *m, struct cblink_ctrl_subscribe_input *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n17, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_subscribe_output_encode(const struct cblink_ctrl_subscribe_output *p, struct cbl_ybuf *b)
 {
 
@@ -889,6 +985,42 @@ cblink_ctrl_subscribe_output_decode(const void *data, size_t len, struct cblink_
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n20, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_subscribe_output_put(cbl_msg *m, const struct cblink_ctrl_subscribe_output *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n20, p));
+}
+
+int
+cblink_ctrl_subscribe_output_parse(const cbl_msg *m, struct cblink_ctrl_subscribe_output *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n20, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_subscribe_call(cbl_conn *c, const struct cblink_ctrl_subscribe_input *in,
+    struct cblink_ctrl_subscribe_output *out, cbl_yarena *a, int timeout_ms)
+{
+	cbl_msg *m, *r;
+	int error;
+
+	if ((error = cbl_msg_new(cbl_conn_ctx(c), CBL_YANG_FAMILY,
+	    CBL_YCMD_RPC, 0, &m)) != 0)
+		return (error);
+	if ((error = cbl_msg_put_ynode(m, &n17, in)) != 0) {
+		cbl_msg_free(m);
+		return (error);
+	}
+	if ((error = cbl_request(c, m, &r, timeout_ms)) == 0)
+		error = cbl_msg_ydecode(r, &n20, out, a, CBL_YD_STRICT, NULL,
+		    0);
+	cbl_msg_free(r);
+	return (error);
 }
 
 int
@@ -908,6 +1040,21 @@ cblink_ctrl_unsubscribe_input_decode(const void *data, size_t len, struct cblink
 }
 
 int
+cblink_ctrl_unsubscribe_input_put(cbl_msg *m, const struct cblink_ctrl_unsubscribe_input *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n22, p));
+}
+
+int
+cblink_ctrl_unsubscribe_input_parse(const cbl_msg *m, struct cblink_ctrl_unsubscribe_input *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n22, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_unsubscribe_output_encode(const struct cblink_ctrl_unsubscribe_output *p, struct cbl_ybuf *b)
 {
 
@@ -921,6 +1068,42 @@ cblink_ctrl_unsubscribe_output_decode(const void *data, size_t len, struct cblin
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n25, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_unsubscribe_output_put(cbl_msg *m, const struct cblink_ctrl_unsubscribe_output *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n25, p));
+}
+
+int
+cblink_ctrl_unsubscribe_output_parse(const cbl_msg *m, struct cblink_ctrl_unsubscribe_output *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n25, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_unsubscribe_call(cbl_conn *c, const struct cblink_ctrl_unsubscribe_input *in,
+    struct cblink_ctrl_unsubscribe_output *out, cbl_yarena *a, int timeout_ms)
+{
+	cbl_msg *m, *r;
+	int error;
+
+	if ((error = cbl_msg_new(cbl_conn_ctx(c), CBL_YANG_FAMILY,
+	    CBL_YCMD_RPC, 0, &m)) != 0)
+		return (error);
+	if ((error = cbl_msg_put_ynode(m, &n22, in)) != 0) {
+		cbl_msg_free(m);
+		return (error);
+	}
+	if ((error = cbl_request(c, m, &r, timeout_ms)) == 0)
+		error = cbl_msg_ydecode(r, &n25, out, a, CBL_YD_STRICT, NULL,
+		    0);
+	cbl_msg_free(r);
+	return (error);
 }
 
 int
@@ -940,6 +1123,21 @@ cblink_ctrl_ping_input_decode(const void *data, size_t len, struct cblink_ctrl_p
 }
 
 int
+cblink_ctrl_ping_input_put(cbl_msg *m, const struct cblink_ctrl_ping_input *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n27, p));
+}
+
+int
+cblink_ctrl_ping_input_parse(const cbl_msg *m, struct cblink_ctrl_ping_input *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n27, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_ping_output_encode(const struct cblink_ctrl_ping_output *p, struct cbl_ybuf *b)
 {
 
@@ -953,6 +1151,42 @@ cblink_ctrl_ping_output_decode(const void *data, size_t len, struct cblink_ctrl_
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n29, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_ping_output_put(cbl_msg *m, const struct cblink_ctrl_ping_output *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n29, p));
+}
+
+int
+cblink_ctrl_ping_output_parse(const cbl_msg *m, struct cblink_ctrl_ping_output *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n29, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_ping_call(cbl_conn *c, const struct cblink_ctrl_ping_input *in,
+    struct cblink_ctrl_ping_output *out, cbl_yarena *a, int timeout_ms)
+{
+	cbl_msg *m, *r;
+	int error;
+
+	if ((error = cbl_msg_new(cbl_conn_ctx(c), CBL_YANG_FAMILY,
+	    CBL_YCMD_RPC, 0, &m)) != 0)
+		return (error);
+	if ((error = cbl_msg_put_ynode(m, &n27, in)) != 0) {
+		cbl_msg_free(m);
+		return (error);
+	}
+	if ((error = cbl_request(c, m, &r, timeout_ms)) == 0)
+		error = cbl_msg_ydecode(r, &n29, out, a, CBL_YD_STRICT, NULL,
+		    0);
+	cbl_msg_free(r);
+	return (error);
 }
 
 int
@@ -972,10 +1206,32 @@ cblink_ctrl_family_added_decode(const void *data, size_t len, struct cblink_ctrl
 }
 
 int
+cblink_ctrl_family_added_put(cbl_msg *m, const struct cblink_ctrl_family_added *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n31, p));
+}
+
+int
+cblink_ctrl_family_added_parse(const cbl_msg *m, struct cblink_ctrl_family_added *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n31, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_family_added_notification(const struct cblink_ctrl_family_added *p, struct cbl_ybuf *b)
 {
 
 	return (cbl_yencode_sid(&n31, p, b));
+}
+
+int
+cblink_ctrl_family_added_notify(cbl_ctx *ctx, const struct cblink_ctrl_family_added *p)
+{
+
+	return (cbl_ynotify(ctx, &n31, p));
 }
 
 int
@@ -995,6 +1251,21 @@ cblink_ctrl_family_added_group_decode(const void *data, size_t len, struct cblin
 }
 
 int
+cblink_ctrl_family_added_group_put(cbl_msg *m, const struct cblink_ctrl_family_added_group *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n32, p));
+}
+
+int
+cblink_ctrl_family_added_group_parse(const cbl_msg *m, struct cblink_ctrl_family_added_group *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n32, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_family_added_op_encode(const struct cblink_ctrl_family_added_op *p, struct cbl_ybuf *b)
 {
 
@@ -1008,6 +1279,21 @@ cblink_ctrl_family_added_op_decode(const void *data, size_t len, struct cblink_c
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n38, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_ctrl_family_added_op_put(cbl_msg *m, const struct cblink_ctrl_family_added_op *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n38, p));
+}
+
+int
+cblink_ctrl_family_added_op_parse(const cbl_msg *m, struct cblink_ctrl_family_added_op *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n38, p, a, flags, why, whylen));
 }
 
 int
@@ -1027,9 +1313,31 @@ cblink_ctrl_family_removed_decode(const void *data, size_t len, struct cblink_ct
 }
 
 int
+cblink_ctrl_family_removed_put(cbl_msg *m, const struct cblink_ctrl_family_removed *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n43, p));
+}
+
+int
+cblink_ctrl_family_removed_parse(const cbl_msg *m, struct cblink_ctrl_family_removed *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n43, p, a, flags, why, whylen));
+}
+
+int
 cblink_ctrl_family_removed_notification(const struct cblink_ctrl_family_removed *p, struct cbl_ybuf *b)
 {
 
 	return (cbl_yencode_sid(&n43, p, b));
+}
+
+int
+cblink_ctrl_family_removed_notify(cbl_ctx *ctx, const struct cblink_ctrl_family_removed *p)
+{
+
+	return (cbl_ynotify(ctx, &n43, p));
 }
 

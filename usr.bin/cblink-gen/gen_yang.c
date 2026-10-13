@@ -476,7 +476,10 @@ emit_struct(struct yg *g, const struct snode *n, const struct snode *first,
 		buf_printf(&g->codec, "int\t%s_encode(const struct %s *,\n"
 		    "\t    struct cbl_ybuf *);\nint\t%s_decode(const void *, "
 		    "size_t, struct %s *,\n\t    cbl_yarena *, int, char *, "
-		    "size_t);\n", sname, sname, sname, sname);
+		    "size_t);\nint\t%s_put(cbl_msg *, const struct %s *);\n"
+		    "int\t%s_parse(const cbl_msg *, struct %s *, cbl_yarena *,\n"
+		    "\t    int, char *, size_t);\n", sname, sname, sname, sname,
+		    sname, sname, sname, sname);
 	for (size_t i = 0; i < ms.n; i++)
 		free(ms.v[i]);
 	free(ms.v);
@@ -710,10 +713,16 @@ proto(void *arg, enum yc_handler kind, const struct snode *n,
 		    "\t    struct %s *, cbl_yarena *);\n", fn.p, kind ==
 		    YH_RPC ? "rpc" : "action", kind == YH_ACTION ?
 		    "const struct cbl_bytes *,\n\t    " : "", in.p, out.p);
+		/* The client's: the rpc called through family 1. */
+		if (kind == YH_RPC)
+			buf_printf(b, "int\t%s_call(cbl_conn *, const struct %s "
+			    "*,\n\t    struct %s *, cbl_yarena *, int);\n", fn.p,
+			    in.p, out.p);
 		break;
 	case YH_NOTIF:
 		buf_printf(b, "int\t%s_notification(const struct %s *,\n"
-		    "\t    struct cbl_ybuf *);\n", fn.p, fn.p);
+		    "\t    struct cbl_ybuf *);\nint\t%s_notify(cbl_ctx *, "
+		    "const struct %s *);\n", fn.p, fn.p, fn.p, fn.p);
 		break;
 	}
 	buf_free(&fn);

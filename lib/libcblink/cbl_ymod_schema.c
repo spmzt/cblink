@@ -563,6 +563,21 @@ cblink_error_decode(const void *data, size_t len, struct cblink_error *p,
 }
 
 int
+cblink_error_put(cbl_msg *m, const struct cblink_error *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n0, p));
+}
+
+int
+cblink_error_parse(const cbl_msg *m, struct cblink_error *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n0, p, a, flags, why, whylen));
+}
+
+int
 cblink_credit_encode(const struct cblink_credit *p, struct cbl_ybuf *b)
 {
 
@@ -576,6 +591,21 @@ cblink_credit_decode(const void *data, size_t len, struct cblink_credit *p,
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n9, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_credit_put(cbl_msg *m, const struct cblink_credit *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n9, p));
+}
+
+int
+cblink_credit_parse(const cbl_msg *m, struct cblink_credit *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n9, p, a, flags, why, whylen));
 }
 
 int
@@ -595,6 +625,21 @@ cblink_hello_decode(const void *data, size_t len, struct cblink_hello *p,
 }
 
 int
+cblink_hello_put(cbl_msg *m, const struct cblink_hello *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n11, p));
+}
+
+int
+cblink_hello_parse(const cbl_msg *m, struct cblink_hello *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n11, p, a, flags, why, whylen));
+}
+
+int
 cblink_hello_limits_encode(const struct cblink_hello_limits *p, struct cbl_ybuf *b)
 {
 
@@ -608,6 +653,21 @@ cblink_hello_limits_decode(const void *data, size_t len, struct cblink_hello_lim
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n12, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_hello_limits_put(cbl_msg *m, const struct cblink_hello_limits *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n12, p));
+}
+
+int
+cblink_hello_limits_parse(const cbl_msg *m, struct cblink_hello_limits *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n12, p, a, flags, why, whylen));
 }
 
 int
@@ -627,6 +687,21 @@ cblink_close_decode(const void *data, size_t len, struct cblink_close *p,
 }
 
 int
+cblink_close_put(cbl_msg *m, const struct cblink_close *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n20, p));
+}
+
+int
+cblink_close_parse(const cbl_msg *m, struct cblink_close *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n20, p, a, flags, why, whylen));
+}
+
+int
 cblink_get_encode(const struct cblink_get *p, struct cbl_ybuf *b)
 {
 
@@ -643,6 +718,21 @@ cblink_get_decode(const void *data, size_t len, struct cblink_get *p,
 }
 
 int
+cblink_get_put(cbl_msg *m, const struct cblink_get *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n23, p));
+}
+
+int
+cblink_get_parse(const cbl_msg *m, struct cblink_get *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n23, p, a, flags, why, whylen));
+}
+
+int
 cblink_notification_encode(const struct cblink_notification *p, struct cbl_ybuf *b)
 {
 
@@ -656,5 +746,20 @@ cblink_notification_decode(const void *data, size_t len, struct cblink_notificat
 
 	memset(p, 0, sizeof(*p));
 	return (cbl_ydecode(&n25, data, len, p, a, flags, why, whylen));
+}
+
+int
+cblink_notification_put(cbl_msg *m, const struct cblink_notification *p)
+{
+
+	return (cbl_msg_put_ynode(m, &n25, p));
+}
+
+int
+cblink_notification_parse(const cbl_msg *m, struct cblink_notification *p, cbl_yarena *a,
+    int flags, char *why, size_t whylen)
+{
+
+	return (cbl_msg_ydecode(m, &n25, p, a, flags, why, whylen));
 }
 

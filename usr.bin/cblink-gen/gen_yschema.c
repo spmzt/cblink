@@ -799,6 +799,51 @@ codec_emit(struct ys *y, const char *sname, size_t nn)
 	    "\tmemset(p, 0, sizeof(*p));\n\treturn (cbl_ydecode(&n%zu, data, "
 	    "len, p, a, flags, why, whylen));\n}\n\n", sname, sname, nn, sname,
 	    sname, nn);
+	/* In a message: {SID: value}, an input or output under its rpc's. */
+	buf_printf(&y->codec, "int\n%s_put(cbl_msg *m, const struct %s *p)\n"
+	    "{\n\n\treturn (cbl_msg_put_ynode(m, &n%zu, p));\n}\n\n"
+	    "int\n%s_parse(const cbl_msg *m, struct %s *p, cbl_yarena *a,\n"
+	    "    int flags, char *why, size_t whylen)\n{\n\n\treturn "
+	    "(cbl_msg_ydecode(m, &n%zu, p, a, flags, why, whylen));\n}\n\n",
+	    sname, sname, nn, sname, sname, nn);
+}
+
+/*
+ * rpc_call(conn, in, out, a, timeout): RPC of family 1, the input put,
+ * the output read back (cbl_schema.h).
+ */
+static void
+call_emit(struct ys *y, const struct snode *out, size_t onn)
+{
+	const struct snode *in = NULL;
+	struct buf fn, is, os;
+
+	for (const struct snode *c = out->parent->child; c != NULL;
+	    c = c->next)
+		if (c->kind == SN_INPUT)
+			in = c;
+	if (in == NULL)
+		return;
+	buf_init(&fn);
+	buf_init(&is);
+	buf_init(&os);
+	yc_struct(&fn, out->parent);
+	yc_struct(&is, in);
+	yc_struct(&os, out);
+	buf_printf(&y->codec, "int\n%s_call(cbl_conn *c, const struct %s *in,\n"
+	    "    struct %s *out, cbl_yarena *a, int timeout_ms)\n{\n"
+	    "\tcbl_msg *m, *r;\n\tint error;\n\n"
+	    "\tif ((error = cbl_msg_new(cbl_conn_ctx(c), CBL_YANG_FAMILY,\n"
+	    "\t    CBL_YCMD_RPC, 0, &m)) != 0)\n\t\treturn (error);\n"
+	    "\tif ((error = cbl_msg_put_ynode(m, &n%zu, in)) != 0) {\n"
+	    "\t\tcbl_msg_free(m);\n\t\treturn (error);\n\t}\n"
+	    "\tif ((error = cbl_request(c, m, &r, timeout_ms)) == 0)\n"
+	    "\t\terror = cbl_msg_ydecode(r, &n%zu, out, a, CBL_YD_STRICT, "
+	    "NULL,\n\t\t    0);\n\tcbl_msg_free(r);\n\treturn (error);\n}"
+	    "\n\n", fn.p, is.p, os.p, node_ref(y, in), onn);
+	buf_free(&fn);
+	buf_free(&is);
+	buf_free(&os);
 }
 
 /* The path of n, for what is said about it. */
@@ -867,10 +912,16 @@ node_ref(struct ys *y, const struct snode *n)
 		if (n->kind == SN_NOTIF)
 			buf_printf(&y->codec, "int\n%s_notification(const struct "
 			    "%s *p, struct cbl_ybuf *b)\n{\n\n\treturn "
-			    "(cbl_yencode_sid(&n%zu, p, b));\n}\n\n", list.p,
-			    list.p, nn);
+			    "(cbl_yencode_sid(&n%zu, p, b));\n}\n\nint\n"
+			    "%s_notify(cbl_ctx *ctx, const struct %s *p)\n{\n\n"
+			    "\treturn (cbl_ynotify(ctx, &n%zu, p));\n}\n\n",
+			    list.p, list.p, nn, list.p, list.p, nn);
 		buf_free(&list);
 	}
+	/* An rpc's output: the client's call, through family 1. */
+	if (n->kind == SN_OUTPUT && n->parent != NULL &&
+	    n->parent->kind == SN_RPC)
+		call_emit(y, n, nn);
 	if (n->type != NULL) {
 		struct buf cn;
 

@@ -159,13 +159,27 @@ writes, and for each struct but a module's data
 .Fn struct_encode
 and
 .Fn struct_decode ,
-its value in YANG-CBOR and back, which
-.Cm schema
-defines with
-.Xr cblink 3 Ns 's
-.Fn cbl_yencode
+its value in YANG-CBOR and back, and
+.Fn struct_put
 and
-.Fn cbl_ydecode .
+.Fn struct_parse ,
+the same in a message as
+.Brq SID : value ,
+an rpc's input and output under the rpc's SID; for each rpc
+.Fn rpc_call ,
+the rpc called through family 1, and for each notification
+.Fn notification_notify ,
+sent to its subscribers.
+.Cm schema
+defines them with
+.Xr cblink 3 Ns 's
+.Fn cbl_yencode ,
+.Fn cbl_ydecode ,
+.Fn cbl_msg_put_ynode ,
+.Fn cbl_msg_ydecode ,
+.Fn cbl_request
+and
+.Fn cbl_ynotify .
 .It Cm server
 .Ar base Ns _server.c :
 a server's handler table, the

@@ -103,29 +103,50 @@ int	cblink_error_encode(const struct cblink_error *,
 	    struct cbl_ybuf *);
 int	cblink_error_decode(const void *, size_t, struct cblink_error *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_error_put(cbl_msg *, const struct cblink_error *);
+int	cblink_error_parse(const cbl_msg *, struct cblink_error *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_credit_encode(const struct cblink_credit *,
 	    struct cbl_ybuf *);
 int	cblink_credit_decode(const void *, size_t, struct cblink_credit *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_credit_put(cbl_msg *, const struct cblink_credit *);
+int	cblink_credit_parse(const cbl_msg *, struct cblink_credit *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_hello_limits_encode(const struct cblink_hello_limits *,
 	    struct cbl_ybuf *);
 int	cblink_hello_limits_decode(const void *, size_t, struct cblink_hello_limits *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_hello_limits_put(cbl_msg *, const struct cblink_hello_limits *);
+int	cblink_hello_limits_parse(const cbl_msg *, struct cblink_hello_limits *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_hello_encode(const struct cblink_hello *,
 	    struct cbl_ybuf *);
 int	cblink_hello_decode(const void *, size_t, struct cblink_hello *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_hello_put(cbl_msg *, const struct cblink_hello *);
+int	cblink_hello_parse(const cbl_msg *, struct cblink_hello *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_close_encode(const struct cblink_close *,
 	    struct cbl_ybuf *);
 int	cblink_close_decode(const void *, size_t, struct cblink_close *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_close_put(cbl_msg *, const struct cblink_close *);
+int	cblink_close_parse(const cbl_msg *, struct cblink_close *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_get_encode(const struct cblink_get *,
 	    struct cbl_ybuf *);
 int	cblink_get_decode(const void *, size_t, struct cblink_get *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_get_put(cbl_msg *, const struct cblink_get *);
+int	cblink_get_parse(const cbl_msg *, struct cblink_get *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_notification_encode(const struct cblink_notification *,
 	    struct cbl_ybuf *);
 int	cblink_notification_decode(const void *, size_t, struct cblink_notification *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_notification_put(cbl_msg *, const struct cblink_notification *);
+int	cblink_notification_parse(const cbl_msg *, struct cblink_notification *, cbl_yarena *,
+	    int, char *, size_t);
 
 #endif /* !_CBL_YMOD_H_ */

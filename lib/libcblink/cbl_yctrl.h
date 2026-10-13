@@ -168,58 +168,100 @@ int	cblink_ctrl_get_family_input_encode(const struct cblink_ctrl_get_family_inpu
 	    struct cbl_ybuf *);
 int	cblink_ctrl_get_family_input_decode(const void *, size_t, struct cblink_ctrl_get_family_input *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_get_family_input_put(cbl_msg *, const struct cblink_ctrl_get_family_input *);
+int	cblink_ctrl_get_family_input_parse(const cbl_msg *, struct cblink_ctrl_get_family_input *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_get_family_output_op_encode(const struct cblink_ctrl_get_family_output_op *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_get_family_output_op_decode(const void *, size_t, struct cblink_ctrl_get_family_output_op *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_get_family_output_op_put(cbl_msg *, const struct cblink_ctrl_get_family_output_op *);
+int	cblink_ctrl_get_family_output_op_parse(const cbl_msg *, struct cblink_ctrl_get_family_output_op *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_get_family_output_group_encode(const struct cblink_ctrl_get_family_output_group *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_get_family_output_group_decode(const void *, size_t, struct cblink_ctrl_get_family_output_group *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_get_family_output_group_put(cbl_msg *, const struct cblink_ctrl_get_family_output_group *);
+int	cblink_ctrl_get_family_output_group_parse(const cbl_msg *, struct cblink_ctrl_get_family_output_group *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_get_family_output_encode(const struct cblink_ctrl_get_family_output *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_get_family_output_decode(const void *, size_t, struct cblink_ctrl_get_family_output *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_get_family_output_put(cbl_msg *, const struct cblink_ctrl_get_family_output *);
+int	cblink_ctrl_get_family_output_parse(const cbl_msg *, struct cblink_ctrl_get_family_output *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_subscribe_input_encode(const struct cblink_ctrl_subscribe_input *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_subscribe_input_decode(const void *, size_t, struct cblink_ctrl_subscribe_input *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_subscribe_input_put(cbl_msg *, const struct cblink_ctrl_subscribe_input *);
+int	cblink_ctrl_subscribe_input_parse(const cbl_msg *, struct cblink_ctrl_subscribe_input *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_subscribe_output_encode(const struct cblink_ctrl_subscribe_output *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_subscribe_output_decode(const void *, size_t, struct cblink_ctrl_subscribe_output *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_subscribe_output_put(cbl_msg *, const struct cblink_ctrl_subscribe_output *);
+int	cblink_ctrl_subscribe_output_parse(const cbl_msg *, struct cblink_ctrl_subscribe_output *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_unsubscribe_input_encode(const struct cblink_ctrl_unsubscribe_input *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_unsubscribe_input_decode(const void *, size_t, struct cblink_ctrl_unsubscribe_input *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_unsubscribe_input_put(cbl_msg *, const struct cblink_ctrl_unsubscribe_input *);
+int	cblink_ctrl_unsubscribe_input_parse(const cbl_msg *, struct cblink_ctrl_unsubscribe_input *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_unsubscribe_output_encode(const struct cblink_ctrl_unsubscribe_output *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_unsubscribe_output_decode(const void *, size_t, struct cblink_ctrl_unsubscribe_output *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_unsubscribe_output_put(cbl_msg *, const struct cblink_ctrl_unsubscribe_output *);
+int	cblink_ctrl_unsubscribe_output_parse(const cbl_msg *, struct cblink_ctrl_unsubscribe_output *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_ping_input_encode(const struct cblink_ctrl_ping_input *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_ping_input_decode(const void *, size_t, struct cblink_ctrl_ping_input *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_ping_input_put(cbl_msg *, const struct cblink_ctrl_ping_input *);
+int	cblink_ctrl_ping_input_parse(const cbl_msg *, struct cblink_ctrl_ping_input *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_ping_output_encode(const struct cblink_ctrl_ping_output *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_ping_output_decode(const void *, size_t, struct cblink_ctrl_ping_output *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_ping_output_put(cbl_msg *, const struct cblink_ctrl_ping_output *);
+int	cblink_ctrl_ping_output_parse(const cbl_msg *, struct cblink_ctrl_ping_output *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_family_added_op_encode(const struct cblink_ctrl_family_added_op *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_family_added_op_decode(const void *, size_t, struct cblink_ctrl_family_added_op *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_family_added_op_put(cbl_msg *, const struct cblink_ctrl_family_added_op *);
+int	cblink_ctrl_family_added_op_parse(const cbl_msg *, struct cblink_ctrl_family_added_op *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_family_added_group_encode(const struct cblink_ctrl_family_added_group *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_family_added_group_decode(const void *, size_t, struct cblink_ctrl_family_added_group *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_family_added_group_put(cbl_msg *, const struct cblink_ctrl_family_added_group *);
+int	cblink_ctrl_family_added_group_parse(const cbl_msg *, struct cblink_ctrl_family_added_group *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_family_added_encode(const struct cblink_ctrl_family_added *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_family_added_decode(const void *, size_t, struct cblink_ctrl_family_added *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_family_added_put(cbl_msg *, const struct cblink_ctrl_family_added *);
+int	cblink_ctrl_family_added_parse(const cbl_msg *, struct cblink_ctrl_family_added *, cbl_yarena *,
+	    int, char *, size_t);
 int	cblink_ctrl_family_removed_encode(const struct cblink_ctrl_family_removed *,
 	    struct cbl_ybuf *);
 int	cblink_ctrl_family_removed_decode(const void *, size_t, struct cblink_ctrl_family_removed *,
 	    cbl_yarena *, int, char *, size_t);
+int	cblink_ctrl_family_removed_put(cbl_msg *, const struct cblink_ctrl_family_removed *);
+int	cblink_ctrl_family_removed_parse(const cbl_msg *, struct cblink_ctrl_family_removed *, cbl_yarena *,
+	    int, char *, size_t);
 
 /*
  * A server's handlers (-m server, cbl_schema.h): the program defines
@@ -227,15 +269,25 @@ int	cblink_ctrl_family_removed_decode(const void *, size_t, struct cblink_ctrl_f
  */
 int	cblink_ctrl_get_family_rpc(cbl_req *, const struct cblink_ctrl_get_family_input *,
 	    struct cblink_ctrl_get_family_output *, cbl_yarena *);
+int	cblink_ctrl_get_family_call(cbl_conn *, const struct cblink_ctrl_get_family_input *,
+	    struct cblink_ctrl_get_family_output *, cbl_yarena *, int);
 int	cblink_ctrl_subscribe_rpc(cbl_req *, const struct cblink_ctrl_subscribe_input *,
 	    struct cblink_ctrl_subscribe_output *, cbl_yarena *);
+int	cblink_ctrl_subscribe_call(cbl_conn *, const struct cblink_ctrl_subscribe_input *,
+	    struct cblink_ctrl_subscribe_output *, cbl_yarena *, int);
 int	cblink_ctrl_unsubscribe_rpc(cbl_req *, const struct cblink_ctrl_unsubscribe_input *,
 	    struct cblink_ctrl_unsubscribe_output *, cbl_yarena *);
+int	cblink_ctrl_unsubscribe_call(cbl_conn *, const struct cblink_ctrl_unsubscribe_input *,
+	    struct cblink_ctrl_unsubscribe_output *, cbl_yarena *, int);
 int	cblink_ctrl_ping_rpc(cbl_req *, const struct cblink_ctrl_ping_input *,
 	    struct cblink_ctrl_ping_output *, cbl_yarena *);
+int	cblink_ctrl_ping_call(cbl_conn *, const struct cblink_ctrl_ping_input *,
+	    struct cblink_ctrl_ping_output *, cbl_yarena *, int);
 int	cblink_ctrl_family_added_notification(const struct cblink_ctrl_family_added *,
 	    struct cbl_ybuf *);
+int	cblink_ctrl_family_added_notify(cbl_ctx *, const struct cblink_ctrl_family_added *);
 int	cblink_ctrl_family_removed_notification(const struct cblink_ctrl_family_removed *,
 	    struct cbl_ybuf *);
+int	cblink_ctrl_family_removed_notify(cbl_ctx *, const struct cblink_ctrl_family_removed *);
 
 #endif /* !_CBL_YCTRL_H_ */

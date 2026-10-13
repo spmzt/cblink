@@ -63,6 +63,20 @@ type_free(struct sntype *t)
 	free(t);
 }
 
+static void	snode_free(struct snode *n);
+
+static void
+exts_free(struct sext *e, size_t n)
+{
+
+	for (size_t i = 0; i < n; i++) {
+		free(e[i].ext);
+		free(e[i].arg);
+		snode_free(e[i].data);
+	}
+	free(e);
+}
+
 static void
 snode_free(struct snode *n)
 {
@@ -87,6 +101,7 @@ snode_free(struct snode *n)
 			free(n->musts[i].eapptag);
 		}
 		free(n->musts);
+		exts_free(n->exts, n->nexts);
 		free(n);
 	}
 }
@@ -114,6 +129,7 @@ schema_free(struct schema *s)
 		snode_free(m->data);
 		snode_free(m->rpcs);
 		snode_free(m->notifs);
+		exts_free(m->exts, m->nexts);
 		free(m->name);
 		free(m->revision);
 		free(m->ns);
@@ -154,6 +170,16 @@ schema_ident(struct schema *s, const char *module, const char *name)
 	if ((m = schema_module(s, module, NULL)) == NULL)
 		return (NULL);
 	return (schema_ident_in(m, name));
+}
+
+const struct sext *
+snode_ext(const struct snode *n, const char *ext)
+{
+
+	for (size_t i = 0; i < n->nexts; i++)
+		if (strcmp(n->exts[i].ext, ext) == 0)
+			return (&n->exts[i]);
+	return (NULL);
 }
 
 const char *
@@ -244,6 +270,9 @@ path_add(struct buf *b, const struct snode *n)
 
 	if (n->parent != NULL)
 		path_add(b, n->parent);
+	else if (n->in != NULL)
+		buf_printf(b, "{%s %s}", n->in->ext, n->in->arg != NULL ?
+		    n->in->arg : "");
 	buf_puts(b, "/");
 	if (n->parent == NULL || n->parent->module != n->module)
 		buf_printf(b, "%s:", n->module->name);
@@ -350,6 +379,23 @@ dump_type(const struct sntype *t)
 	}
 }
 
+static void	dump_node(struct snode *n, void *arg);
+
+/* Extension instances as tools/yangwalk prints them, and their nodes. */
+static void
+dump_exts(const struct sext *e, size_t n, const char *owner,
+    const char *where)
+{
+
+	for (size_t i = 0; i < n; i++) {
+		printf("%s extension %s %s%s%s%s\n", e[i].inherited ? owner :
+		    e[i].module->name, where, e[i].ext,
+		    e[i].arg != NULL ? " " : "", e[i].arg != NULL ? e[i].arg :
+		    "", e[i].inherited ? " inherited" : "");
+		walk(e[i].data, dump_node, NULL);
+	}
+}
+
 static void
 dump_node(struct snode *n, void *arg __unused)
 {
@@ -358,7 +404,6 @@ dump_node(struct snode *n, void *arg __unused)
 	buf_init(&b);
 	path_add(&b, n);
 	printf("%s %s %s", n->module->name, snode_kind_name(n->kind), b.p);
-	buf_free(&b);
 	switch (n->kind) {
 	case SN_RPC: case SN_ACTION: case SN_NOTIF:
 		break;
@@ -398,6 +443,8 @@ dump_node(struct snode *n, void *arg __unused)
 	for (size_t i = 0; i < n->nmusts; i++)
 		dump_expr("must", n->musts[i].expr);
 	printf("\n");
+	dump_exts(n->exts, n->nexts, n->module->name, b.p);
+	buf_free(&b);
 }
 
 void
@@ -407,6 +454,8 @@ schema_dump(struct schema *s)
 
 	for (size_t i = 0; i < s->nmods; i++) {
 		m = s->mods[i];
+		if (!m->implemented)
+			continue;	/* imported only: no nodes */
 		printf("module %s@%s\n", m->name, m->revision != NULL ?
 		    m->revision : "-");
 		for (size_t j = 0; j < m->nfeatures; j++)
@@ -417,5 +466,6 @@ schema_dump(struct schema *s)
 		walk(m->data, dump_node, NULL);
 		walk(m->rpcs, dump_node, NULL);
 		walk(m->notifs, dump_node, NULL);
+		dump_exts(m->exts, m->nexts, m->name, m->name);
 	}
 }

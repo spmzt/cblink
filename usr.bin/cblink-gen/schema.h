@@ -20,6 +20,23 @@
 
 struct smodule;
 struct sident;
+struct snode;
+
+/*
+ * An extension instance on a node or a module: the extension (its
+ * module's name and its own), its argument, the module whose text
+ * carries the instance, and, for one that holds data nodes
+ * (sx:structure, rc:yang-data; an sx:augment-structure's nodes are put
+ * into the structure they augment), those nodes.  libyang copies some
+ * down from an ancestor (NACM's default-deny-*): a copy is inherited.
+ */
+struct sext {
+	char		*ext;		/* "module:name" */
+	char		*arg;		/* NULL: none */
+	struct smodule	*module;	/* where it is written */
+	bool		 inherited;
+	struct snode	*data;		/* the nodes it holds */
+};
 
 enum snode_kind {
 	SN_CONTAINER,
@@ -157,6 +174,9 @@ struct snode {
 	size_t		 nwhen;
 	struct smust	*musts;
 	size_t		 nmusts;
+	struct sext	*exts;		/* its extension instances */
+	size_t		 nexts;
+	struct sext	*in;		/* the instance holding it, or NULL */
 };
 
 /* An identity, and those derived from it directly. */
@@ -188,6 +208,8 @@ struct smodule {
 	struct snode	*data;		/* top-level data nodes */
 	struct snode	*rpcs;
 	struct snode	*notifs;
+	struct sext	*exts;		/* instances at the top of the module */
+	size_t		 nexts;
 };
 
 struct schema {
@@ -203,6 +225,8 @@ struct sident	*schema_ident(struct schema *s, const char *module,
 		    const char *name);
 struct sident	*schema_ident_in(struct smodule *m, const char *name);
 const char	*snode_kind_name(enum snode_kind kind);
+/* The node's instance of the extension "module:name", or NULL. */
+const struct sext *snode_ext(const struct snode *n, const char *ext);
 const char	*sntype_base_name(enum sntype_base base);
 bool		 sntype_signed(enum sntype_base base);
 

@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include <libyang/libyang.h>
+#include <libyang/plugins_exts.h>
 
 #include "gen.h"
 #include "schema.h"
@@ -335,6 +336,7 @@ struct conv {
 	struct schema		 *s;
 	const struct ly_ctx	 *ctx;
 	const struct lys_module **lmods;	/* parallel to s->mods */
+	struct sext		 *in;		/* the instance being walked */
 };
 
 static struct smodule *
@@ -536,6 +538,44 @@ conv_type(struct conv *c, const struct lysc_type *lt)
 	return (t);
 }
 
+/*
+ * Extension instances, and the data nodes an instance holds (found with
+ * lyplg_ext_get_storage(), as libyang's structure and yang-data plugins
+ * keep them).  An instance without a module is a copy libyang made from
+ * an ancestor.
+ */
+static struct sext *
+conv_exts(struct conv *c, struct lysc_ext_instance *le, size_t *np)
+{
+	const struct lysc_node *first;
+	struct sext *e;
+	LY_ARRAY_COUNT_TYPE u;
+
+	*np = LY_ARRAY_COUNT(le);
+	if (*np == 0)
+		return (NULL);
+	e = xcalloc(*np, sizeof(*e));
+	LY_ARRAY_FOR(le, u) {
+		e[u].ext = xasprintf("%s:%s", le[u].def->module->name,
+		    le[u].def->name);
+		e[u].arg = xstrdup_or_null(le[u].argument);
+		e[u].inherited = le[u].module == NULL;
+		e[u].module = le[u].module != NULL ?
+		    smod_of(c, le[u].module) : NULL;
+		first = NULL;
+		if (lyplg_ext_get_storage(&le[u], LY_STMT_DATA_NODE_MASK,
+		    sizeof(first), (const void **)&first) == LY_SUCCESS &&
+		    first != NULL) {
+			struct sext *saved = c->in;
+
+			c->in = &e[u];
+			e[u].data = conv_list(c, first, NULL);
+			c->in = saved;
+		}
+	}
+	return (e);
+}
+
 static void
 add_dflt(struct conv *c, struct snode *n, const struct lyd_value *v)
 {
@@ -556,6 +596,7 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 	n->name = xstrdup(ln->name);
 	n->module = smod_of(c, ln->module);
 	n->parent = parent;
+	n->in = c->in;
 	if ((ln->nodetype & (LYS_RPC | LYS_ACTION | LYS_NOTIF | LYS_INPUT |
 	    LYS_OUTPUT)) == 0 && (ln->flags & LYS_CONFIG_W) != 0)
 		n->flags |= SNF_CONFIG;
@@ -611,6 +652,8 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 			n->musts[u].eapptag = xstrdup_or_null(must[u].eapptag);
 		}
 	}
+
+	n->exts = conv_exts(c, ln->exts, &n->nexts);
 
 	/* Data children, then actions, then notifications. */
 	n->child = conv_list(c, lysc_node_child(ln), n);
@@ -756,6 +799,8 @@ yang_schema(struct ly_ctx *ctx)
 		c.s->mods[i]->notifs = conv_list(&c,
 		    lm->compiled->notifs != NULL ? &lm->compiled->notifs->node :
 		    NULL, NULL);
+		c.s->mods[i]->exts = conv_exts(&c, lm->compiled->exts,
+		    &c.s->mods[i]->nexts);
 	}
 	free(c.lmods);
 	return (c.s);

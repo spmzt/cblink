@@ -230,6 +230,12 @@ good leaf /good:things/thing/name rw key string length 1..63
 	# A deviation applied, and said.
 	atf_check -o match:'^deviated-by good-dev$' -o not-match:'/seen ' \
 	    $gen -d "$y/good@2026-10-13.yang" "$y/good-dev@2026-10-13.yang"
+	# Extensions: a structure and its nodes, a mount point.
+	atf_check -o save:ext $gen -d "$y/ext@2026-10-13.yang"
+	atf_check -o inline:"ext extension /ext:root ietf-yang-schema-mount:mount-point inner
+ext extension ext ietf-yang-structure-ext:structure note
+ext leaf {ietf-yang-structure-ext:structure note}/ext:text ro string
+" grep '^ext .*\(extension\|{\)' ext
 	# A module file's name says its module.
 	cp "$y/good@2026-10-13.yang" ".yang"
 	atf_check -s exit:2 -e match:'not a YANG module file' $gen -n .yang

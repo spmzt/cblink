@@ -74,7 +74,7 @@ CBLMK=		${.CURDIR}/../../../share/cblink/cblink.mk
 CBLMKDIR=	${TESTSDIR}
 # YANG modules for the front end.
 YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
-		yang/good-dev@2026-10-13.yang
+		yang/good-dev@2026-10-13.yang yang/ext@2026-10-13.yang
 YANGDIR=	${TESTSDIR}/yang
 
 .for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG

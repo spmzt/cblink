@@ -2,7 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "cblink",
     "module-revision": "2026-10-13",
-    "sid-file-version": 0,
+    "sid-file-version": 1,
     "sid-file-status": "unpublished",
     "description": "SIDs of cblink, assigned by hand from Arcana's provisional block (2^40, until IANA assigns a mega-range): numbers are forever, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
     "dependency-revision": [
@@ -261,6 +261,16 @@
         "namespace": "data",
         "identifier": "/cblink:notification/event",
         "sid": "1099511627823"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:get",
+        "sid": "1099511627824"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:get/target",
+        "sid": "1099511627825"
       }
     ]
   }

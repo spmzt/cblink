@@ -22,6 +22,7 @@ struct cblink_credit;
 struct cblink_hello_limits;
 struct cblink_hello;
 struct cblink_close;
+struct cblink_get;
 struct cblink_notification;
 
 enum cblink_error_error_type {
@@ -81,6 +82,14 @@ struct cblink_close {
 };
 
 /* structure */
+struct cblink_get {
+	struct {
+		size_t		 n;
+		const struct cbl_bytes	 *v;
+	}			 target;	/* instance-identifier, in CBOR */
+};
+
+/* structure */
 struct cblink_notification {
 	const char	*event_time;
 	struct cbl_bytes	 event;	/* anydata, in CBOR */
@@ -109,6 +118,10 @@ int	cblink_hello_decode(const void *, size_t, struct cblink_hello *,
 int	cblink_close_encode(const struct cblink_close *,
 	    struct cbl_ybuf *);
 int	cblink_close_decode(const void *, size_t, struct cblink_close *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_get_encode(const struct cblink_get *,
+	    struct cbl_ybuf *);
+int	cblink_get_decode(const void *, size_t, struct cblink_get *,
 	    cbl_yarena *, int, char *, size_t);
 int	cblink_notification_encode(const struct cblink_notification *,
 	    struct cbl_ybuf *);

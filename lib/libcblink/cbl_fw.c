@@ -25,8 +25,8 @@
 #include "cbl_ymod.h"
 
 /* The cblink module's structure named name. */
-static const struct cbl_ynode *
-fw_node(const char *name)
+const struct cbl_ynode *
+cbl_fw_node(const char *name)
 {
 	const struct cbl_ymodule *m = cbl_ymod_schema.mod[0];
 
@@ -162,56 +162,78 @@ cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len)
 	return (0);
 }
 
+/* Family 1's: the node at fault by its SID alone, and the tag. */
+void
+cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag)
+{
+	struct cbl_fwout *o = &msg->fwout;
+
+	o->has = true;
+	o->ysid = sid;
+	o->ytag = tag;
+}
+
+/* An unsigned integer's CBOR head, into p: its length. */
+static size_t
+put_uint(uint8_t *p, uint64_t v)
+{
+	size_t n;
+
+	if (v < 24) {
+		p[0] = (uint8_t)v;
+		return (1);
+	}
+	n = v <= UINT8_MAX ? 1 : v <= UINT16_MAX ? 2 : v <= UINT32_MAX ? 4 :
+	    8;
+	p[0] = (uint8_t)(n == 1 ? 0x18 : n == 2 ? 0x19 : n == 4 ? 0x1a : 0x1b);
+	for (size_t i = 0; i < n; i++)
+		p[1 + i] = (uint8_t)(v >> (8 * (n - 1 - i)));
+	return (1 + n);
+}
+
 /* As the message is encoded: the error structure, if one was asked. */
 int
 cbl_fw_flush(cbl_msg *msg)
 {
 	struct cbl_fwout *o = &msg->fwout;
 	struct cblink_error e;
-	uint8_t pathbuf[CBL_PATH_MAX * 9 + 9];
+	uint8_t pathbuf[(CBL_PATH_MAX + 1) * 9 + 2];
 	size_t plen = 0;
 
 	if (!o->has)
 		return (0);
 	o->has = false;
 	memset(&e, 0, sizeof(e));
-	if (o->code > 0 || o->miss >= 0) {
+	if (o->code > 0 || o->miss >= 0 || o->ytag != NULL) {
 		e.has_error_type = true;
 		e.error_type = CBLINK_ERROR_ERROR_TYPE_APPLICATION;
 		e.has_error_tag = true;
 		e.error_tag = tag_of(o->code, o->miss >= 0);
+		if (o->ytag != NULL && fw_tag(o->ytag) != 0)
+			e.error_tag = fw_tag(o->ytag);
 	}
 	if (o->code > 0) {
 		e.has_errno_ = true;
 		e.errno_ = (uint32_t)o->code;
 	}
 	e.error_message = o->text;
-	/* The path, an instance-identifier's array shape: [a, b, ...]. */
-	if (o->npath > 0) {
+	/*
+	 * The path: a node's SID alone, as an instance-identifier is for
+	 * one not in a list; else the array shape, [a, b, ...].
+	 */
+	if (o->ysid != 0) {
+		plen = put_uint(pathbuf, o->ysid);
+		e.error_path.p = pathbuf;
+		e.error_path.len = plen;
+	} else if (o->npath > 0) {
 		if (o->npath < 24)
 			pathbuf[plen++] = (uint8_t)(0x80 | o->npath);
 		else {
 			pathbuf[plen++] = 0x98;
 			pathbuf[plen++] = (uint8_t)o->npath;
 		}
-		for (size_t i = 0; i < o->npath; i++) {
-			uint64_t v = o->path[i];
-
-			if (v < 24)
-				pathbuf[plen++] = (uint8_t)v;
-			else if (v <= UINT8_MAX) {
-				pathbuf[plen++] = 0x18;
-				pathbuf[plen++] = (uint8_t)v;
-			} else if (v <= UINT16_MAX) {
-				pathbuf[plen++] = 0x19;
-				pathbuf[plen++] = (uint8_t)(v >> 8);
-				pathbuf[plen++] = (uint8_t)v;
-			} else {
-				pathbuf[plen++] = 0x1a;
-				for (int k = 3; k >= 0; k--)
-					pathbuf[plen++] = (uint8_t)(v >> (8 * k));
-			}
-		}
+		for (size_t i = 0; i < o->npath; i++)
+			plen += put_uint(pathbuf + plen, o->path[i]);
 		e.error_path.p = pathbuf;
 		e.error_path.len = plen;
 	}
@@ -219,7 +241,7 @@ cbl_fw_flush(cbl_msg *msg)
 	e.cookie.len = o->cookielen;
 	if (o->cookie != NULL && o->cookielen == 0)
 		e.cookie.p = "";
-	return (cbl_msg_put_ynode(msg, fw_node("error"), &e));
+	return (cbl_msg_put_ynode(msg, cbl_fw_node("error"), &e));
 }
 
 int
@@ -228,7 +250,7 @@ cbl_fw_credit(cbl_msg *msg, uint32_t increment)
 	struct cblink_credit c = { .has_increment = true,
 	    .increment = increment };
 
-	return (cbl_msg_put_ynode(msg, fw_node("credit"), &c));
+	return (cbl_msg_put_ynode(msg, cbl_fw_node("credit"), &c));
 }
 
 int
@@ -237,7 +259,7 @@ cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text)
 	struct cblink_close c = { .has_code = code != 0, .code = code,
 	    .message = text };
 
-	return (cbl_msg_put_ynode(msg, fw_node("close"), &c));
+	return (cbl_msg_put_ynode(msg, cbl_fw_node("close"), &c));
 }
 
 /*
@@ -258,7 +280,7 @@ msg_yarena(cbl_msg *msg)
 static int
 fw_get(cbl_msg *msg, const char *name, void *p)
 {
-	const struct cbl_ynode *n = fw_node(name);
+	const struct cbl_ynode *n = cbl_fw_node(name);
 	cbl_yarena *a;
 
 	if (n == NULL || (a = msg_yarena(msg)) == NULL)
@@ -274,6 +296,18 @@ fw_path(cbl_msg *msg, const struct cbl_bytes *b)
 	uint64_t n, v;
 	size_t k;
 
+	/* A SID alone: a node of family 1's. */
+	if (b->len >= 1 && (*p & 0xe0) == 0) {
+		n = *p & 0x1f;
+		if (n < 24)
+			msg->err_ysid = n;
+		else if (n <= 27 && b->len == 1 + ((size_t)1 << (n - 24))) {
+			for (v = 0, k = 1; k < b->len; k++)
+				v = v << 8 | p[k];
+			msg->err_ysid = v;
+		}
+		return;
+	}
 	if (b->len < 2 || (*p & 0xe0) != 0x80)
 		return;
 	if ((n = *p & 0x1f) == 24) {

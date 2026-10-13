@@ -71,6 +71,13 @@ YANGH_SID=	-s ${.CURDIR}/yang/shapes@2026-10-13.sid \
 SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c yfill.c
 CFLAGS.yang_h_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yang_h_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+# yfamily_test: family 1 serving those tables over a connection.
+ATF_TESTS_C+=	yfamily_test
+SRCS.yfamily_test=	yangh.h yfamily_test.c yangh_schema.c
+CFLAGS.yfamily_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
+LDADD.yfamily_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+# Built once for both.
+CFLAGS.yangh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 CLEANFILES+=	yangh.h yangh_schema.c ietf-system.sid
 yangh.h: ${YANGH_SRC} ${GEN}
 	cat ${.CURDIR}/yang/ietf-system@2014-08-06.sid > ${.OBJDIR}/ietf-system.sid

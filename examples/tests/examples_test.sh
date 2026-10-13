@@ -151,8 +151,8 @@ notify_cleanup()
 atf_test_case kvy
 kvy_head()
 {
-	atf_set "descr" "cbl-kvy: the kv example in YANG, its handlers" \
-	    "through cblink-gen's table, its store in YANG-CBOR and back"
+	atf_set "descr" "cbl-kvy: the kv example in YANG, its table served" \
+	    "by family 1: an edit, the store read back, an rpc"
 }
 kvy_body()
 {

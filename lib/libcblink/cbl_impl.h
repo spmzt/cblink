@@ -162,6 +162,14 @@ struct cbl_ctx {
 	uint32_t		 next_fam;
 	uint32_t		 next_group;
 	cbl_family		*ctrl;
+
+	/* Family 1, "cblink.yang", and the servers it serves (famlock). */
+	cbl_family		*yfam;
+	struct cbl_yserved {
+		const struct cbl_yserver *srv;
+		void		*arg;
+	}			*ysrv;
+	size_t			 nysrv;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);
@@ -172,6 +180,9 @@ cbl_family *cbl_family_next(cbl_ctx *ctx, uint32_t from);
 void	cbl_family_free_all(cbl_ctx *ctx);
 int	cbl_ctx_add_builtin(cbl_ctx *ctx, const struct cbl_family_def *def,
 	    void *arg);
+int	cbl_ctx_add_fixed(cbl_ctx *ctx, const struct cbl_family_def *def,
+	    uint16_t id, void *arg, cbl_family **famp);
+void	cbl_yfamily_free(cbl_ctx *ctx);
 void	cbl_ctrl_notify_family(cbl_ctx *ctx, cbl_family *fam, bool added);
 int	cbl_sub_change(cbl_req *req, uint16_t family, uint32_t group,
 	    bool subscribe);
@@ -202,6 +213,10 @@ struct cbl_req {
 	bool			 has_cookie;
 	struct cbl_dump_state	 dump;
 	TAILQ_ENTRY(cbl_req)	 dump_link;
+	/* Family 1's (cbl_yfamily.c): the node at fault, its tag, arg. */
+	uint64_t		 err_ysid;
+	const char		*err_ytag;
+	void			*yarg;
 };
 
 /* Peer identity. */
@@ -303,6 +318,7 @@ struct cbl_msg {
 	const char		*err_str;
 	uint64_t		*err_pathv;
 	size_t			 err_npath;
+	uint64_t		 err_ysid;	/* error-path a SID alone */
 	int			 err_miss;
 	const void		*err_cookiep;
 	size_t			 err_cookielen;
@@ -319,6 +335,8 @@ struct cbl_msg {
 		int		 miss;
 		const void	*cookie;
 		size_t		 cookielen;
+		uint64_t	 ysid;	/* error-path: a SID, not path */
+		const char	*ytag;	/* error-tag, not the errno's */
 	}			 fwout;
 
 	struct cbl_arena	 arena;
@@ -332,9 +350,11 @@ int	cbl_msg_fail(cbl_msg *msg, int error, const char *why);
 
 /* Version 2's framework: the cblink module's structures (cbl_fw.c). */
 bool	 cbl_fw_sid(uint64_t sid);
+const struct cbl_ynode *cbl_fw_node(const char *name);
 int	 cbl_fw_error(cbl_msg *msg, int code, const char *text,
 	    const struct cbl_path_elem *path, size_t pathlen, int miss_type);
 int	 cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len);
+void	 cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag);
 int	 cbl_fw_flush(cbl_msg *msg);
 int	 cbl_fw_credit(cbl_msg *msg, uint32_t increment);
 int	 cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text);

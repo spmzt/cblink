@@ -350,15 +350,40 @@ int		 cbl_ydecode(const struct cbl_ynode *n, const void *data,
 		    size_t whylen);
 
 /*
+ * A node as a member of its parent's struct: a module's top-level node
+ * in the module's data struct (a container's pointer, a list's array, a
+ * leaf's value), its value alone.  ENOENT from the encoder: not there
+ * (cbl_ymember_present()).
+ */
+int		 cbl_yencode_member(const struct cbl_ynode *n,
+		    const void *parent, struct cbl_ybuf *b);
+bool		 cbl_ymember_present(const struct cbl_ynode *n,
+		    const void *parent);
+int		 cbl_ydecode_member(const struct cbl_ynode *n,
+		    const void *data, size_t len, void *parent, cbl_yarena *a,
+		    int flags, char *why, size_t whylen);
+
+/*
  * A version 2 body: one map whose top-level keys are SIDs (RFC 9254
  * section 3.2), each a node's value.  cbl_msg_put_ynode() adds {n's
  * SID: the value of its struct p}, cbl_msg_put_sid_raw() one already
  * encoded; cbl_msg_ydecode() reads the value under n's SID of a
  * received body into p (ENOENT: none), cbl_msg_sid_raw() gives its
- * bytes.
+ * bytes.  An rpc's or an action's input and output are under the rpc's
+ * or the action's SID, and null is an empty one (CORECONF).
+ * cbl_msg_put_ymember() and cbl_msg_ydecode_member() do a top-level
+ * node in its module's data struct (cbl_yencode_member()); not there,
+ * the encoder adds nothing.  cbl_msg_put_ynull() adds {sid: null}: in
+ * an EDIT, the node deleted.
  */
 int		 cbl_msg_put_ynode(cbl_msg *msg, const struct cbl_ynode *n,
 		    const void *p);
+int		 cbl_msg_put_ymember(cbl_msg *msg, const struct cbl_ynode *n,
+		    const void *parent);
+int		 cbl_msg_put_ynull(cbl_msg *msg, uint64_t sid);
+int		 cbl_msg_ydecode_member(const cbl_msg *msg,
+		    const struct cbl_ynode *n, void *parent, cbl_yarena *a,
+		    int flags, char *why, size_t whylen);
 int		 cbl_msg_put_sid_raw(cbl_msg *msg, uint64_t sid,
 		    const void *cbor, size_t len);
 int		 cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n,
@@ -396,5 +421,35 @@ struct cbl_yserver {
 	uint32_t		 nhandler;
 	const struct cbl_yhandler *handler;	/* by SID */
 };
+
+/*
+ * Family 1, "cblink.yang": the handlers of the servers added served by
+ * SID, as CORECONF (draft-ietf-core-comi) has its methods.  GET reads
+ * {cblink:get: {target: [SID...]}}, or the whole datastore, as {SID:
+ * value}, a dump one frame a node; EDIT is {SID: value or null}, the
+ * node created or replaced, or deleted, all or nothing; RPC {SID(rpc):
+ * input} gives {SID(rpc): output}, null when it has none.
+ *
+ * cbl_yserver_add() serves srv's modules, arg its handlers'
+ * (cbl_req_yarg()).  cbl_msg_put_yget() puts a GET's targets.  A handler names the node at fault with
+ * cbl_req_set_yerr(), the error's error-path; a client reads it with
+ * cbl_msg_err_sid().
+ */
+#define	CBL_YANG_FAMILY		1
+
+enum cbl_ycmd {
+	CBL_YCMD_GET = 1,
+	CBL_YCMD_EDIT = 2,
+	CBL_YCMD_RPC = 3,
+};
+
+int		 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv,
+		    void *arg);
+int		 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids,
+		    size_t n);
+void		*cbl_req_yarg(const cbl_req *req);
+int		 cbl_req_set_yerr(cbl_req *req, const char *text,
+		    uint64_t sid);
+uint64_t	 cbl_msg_err_sid(const cbl_msg *msg);
 
 #endif /* !_CBL_SCHEMA_H_ */

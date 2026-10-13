@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "cbl_impl.h"
+#include "cbl_schema.h"
 
 static bool
 is_family_key(int64_t key)
@@ -287,6 +288,14 @@ cbl_msg_err_str(const cbl_msg *msg)
 {
 
 	return (msg != NULL ? msg->err_str : NULL);
+}
+
+/* The error's node of family 1's: error-path a SID alone (cbl_fw.c). */
+uint64_t
+cbl_msg_err_sid(const cbl_msg *msg)
+{
+
+	return (msg != NULL ? msg->err_ysid : 0);
 }
 
 /* The error's path: error-path's elements (cbl_fw.c). */

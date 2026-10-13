@@ -96,9 +96,13 @@ def_check(const struct cbl_family_def *def, bool builtin)
 	return (0);
 }
 
+/*
+ * Insert a family: a built-in one at its fixed id (0, the control family;
+ * 1, "cblink.yang"), any other at the next free id from 2.
+ */
 static int
 fam_insert(cbl_ctx *ctx, const struct cbl_family_def *def, void *arg,
-    bool builtin, cbl_family **famp)
+    bool builtin, uint16_t fixed, cbl_family **famp)
 {
 	struct cbl_family key, *fam, *f;
 	uint32_t id;
@@ -121,18 +125,24 @@ fam_insert(cbl_ctx *ctx, const struct cbl_family_def *def, void *arg,
 			return (EEXIST);
 		}
 	}
-	if (builtin)
-		id = 0;
-	else {
-		/* Next unused id in 1..65535. */
+	if (builtin) {
+		id = fixed;
+		key.id = fixed;
+		if (RB_FIND(cbl_fam_tree, &ctx->fams, &key) != NULL) {
+			pthread_rwlock_unlock(&ctx->famlock);
+			free(fam);
+			return (EEXIST);
+		}
+	} else {
+		/* Next unused id in 2..65535. */
 		for (uint32_t n = 0;; n++) {
-			if (n == 65535) {
+			if (n == 65534) {
 				pthread_rwlock_unlock(&ctx->famlock);
 				free(fam);
 				return (ENOSPC);
 			}
 			id = ctx->next_fam;
-			ctx->next_fam = ctx->next_fam == 65535 ? 1 :
+			ctx->next_fam = ctx->next_fam == 65535 ? 2 :
 			    ctx->next_fam + 1;
 			key.id = (uint16_t)id;
 			if (RB_FIND(cbl_fam_tree, &ctx->fams, &key) == NULL)
@@ -166,7 +176,7 @@ cbl_family_register(cbl_ctx *ctx, const struct cbl_family_def *def,
 
 	if (ctx == NULL)
 		return (EINVAL);
-	if ((error = fam_insert(ctx, def, arg, false, &fam)) != 0)
+	if ((error = fam_insert(ctx, def, arg, false, 0, &fam)) != 0)
 		return (error);
 	cbl_ctrl_notify_family(ctx, fam, true);
 	if (famp != NULL)
@@ -183,9 +193,25 @@ cbl_ctx_add_builtin(cbl_ctx *ctx, const struct cbl_family_def *def,
 	int error;
 
 	ctx->next_group = CBL_CTRL_GROUP_NOTIFY;
-	error = fam_insert(ctx, def, arg, true, &ctx->ctrl);
+	error = fam_insert(ctx, def, arg, true, CBL_CTRL_FAMILY, &ctx->ctrl);
 	ctx->next_group = saved > ctx->next_group ? saved : ctx->next_group;
 	return (error);
+}
+
+/* Another built-in family at its fixed id, told of as any other. */
+int
+cbl_ctx_add_fixed(cbl_ctx *ctx, const struct cbl_family_def *def,
+    uint16_t id, void *arg, cbl_family **famp)
+{
+	cbl_family *fam;
+	int error;
+
+	if ((error = fam_insert(ctx, def, arg, true, id, &fam)) != 0)
+		return (error);
+	cbl_ctrl_notify_family(ctx, fam, true);
+	if (famp != NULL)
+		*famp = fam;
+	return (0);
 }
 
 cbl_family *

@@ -7,18 +7,21 @@
 /*
  * cbl-kvy: the kv example in YANG (kv@2026-10-13.yang), its handlers
  * the ones cblink-gen -m server declares in kv.h and tables in
- * kv_server.c.  Until cblink 2's protocol serves the table (PLAN-SDN-YANG
- * 1.7), the program calls its handlers through it as the library will,
- * and says what came back: an edit, a get, the store's value in
- * YANG-CBOR and back, an action, an rpc, a notification.
+ * kv_server.c, served by family 1 ("cblink.yang") on a unix: socket of
+ * its own: a client edits the store, reads it back (its value in
+ * YANG-CBOR, and decoded), and calls an rpc, and the program says what
+ * came back.  The action is called through the table, as family 1 does
+ * not carry actions yet; and the notification's bytes are shown.
  */
 
 #include <err.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "kv.h"
 
@@ -150,14 +153,64 @@ handler(const char *name)
 	errx(1, "no handler for %s", name);
 }
 
+static const struct cbl_ynode *
+node(const char *name)
+{
+
+	return (cbl_yschema_node(kv_server.schema, handler(name)->sid));
+}
+
+/* The input or the output of an rpc. */
+static const struct cbl_ynode *
+io(const struct cbl_ynode *rpc, int kind)
+{
+
+	for (uint32_t i = 0; i < rpc->nchild; i++)
+		if (rpc->child[i]->kind == kind)
+			return (rpc->child[i]);
+	errx(1, "%s: no input or output", rpc->name);
+}
+
 static void
-hex(const char *what, const struct cbl_ybuf *b)
+hex(const char *what, const void *p, size_t len)
 {
 
 	printf("%s:", what);
-	for (size_t i = 0; i < b->len; i++)
-		printf(" %02x", b->p[i]);
+	for (size_t i = 0; i < len; i++)
+		printf(" %02x", ((const unsigned char *)p)[i]);
 	printf("\n");
+}
+
+static void *
+serve(void *loop)
+{
+
+	(void)cbl_loop_run(loop);
+	return (NULL);
+}
+
+static cbl_msg *
+call(cbl_conn *c, enum cbl_ycmd cmd, cbl_msg **mp)
+{
+	cbl_msg *r;
+	int error;
+
+	if ((error = cbl_request(c, *mp, &r, 5000)) != 0)
+		errx(1, "command %d: %s: %s", cmd, strerror(error),
+		    r != NULL && cbl_msg_err_str(r) != NULL ?
+		    cbl_msg_err_str(r) : "");
+	*mp = NULL;
+	return (r);
+}
+
+static cbl_msg *
+request(cbl_ctx *ctx, enum cbl_ycmd cmd)
+{
+	cbl_msg *m;
+
+	if (cbl_msg_new(ctx, CBL_YANG_FAMILY, cmd, 0, &m) != 0)
+		errx(1, "cbl_msg_new");
+	return (m);
 }
 
 int
@@ -170,8 +223,7 @@ main(void)
 		{ .key = "beta", .has_persistent = true, .persistent = true },
 	};
 	struct kv_store st = { .entry = { 2, e } };
-	struct kv before = { 0 }, after = { .store = &st }, data = { 0 };
-	struct kv_store back;
+	struct kv after = { .store = &st }, back = { 0 };
 	struct kv_clear_input cin = { .prefix = "al" };
 	struct kv_clear_output cout = { 0 };
 	struct kv_store_entry_touch_output tout = { 0 };
@@ -184,40 +236,73 @@ main(void)
 	 */
 	unsigned char iid[16] = { 0x82, 0x1b };
 	struct cbl_bytes target = { iid, sizeof(iid) };
-	const struct cbl_ynode *list;
+	const struct cbl_ynode *kvs, *list, *clear;
+	char dir[] = "/tmp/cbl-kvy.XXXXXX", uri[64], why[256];
+	cbl_ctx *sctx, *cctx;
+	cbl_listener *l;
+	cbl_loop *loop;
+	cbl_conn *c;
+	cbl_msg *m, *r;
 	cbl_yarena *a;
-	char why[256];
+	pthread_t thr;
+	uint64_t sid;
+	const void *v;
+	size_t len;
 
 	if ((a = cbl_yarena_new()) == NULL)
 		err(1, "cbl_yarena_new");
-	if (handler("store")->edit(NULL, &before, &after) != 0)
-		errx(1, "edit");
-	printf("edit: %zu entries\n", nstore);
-	if (handler("store")->get(NULL, &data, a) != 0)
-		errx(1, "get");
-	printf("get: %zu entries, count %u\n", data.store->entry.n,
-	    data.store->count);
+	kvs = node("store");
+	clear = node("clear");
 
-	if (kv_store_encode(data.store, &b) != 0)
-		errx(1, "encode");
-	hex("store", &b);
-	if (kv_store_decode(b.p, b.len, &back, a, CBL_YD_STRICT, why,
+	/* The server: kv's table, served by family 1. */
+	if (mkdtemp(dir) == NULL)
+		err(1, "mkdtemp");
+	snprintf(uri, sizeof(uri), "unix:%s/s", dir);
+	if (cbl_ctx_new(&sctx) != 0 || cbl_ctx_new(&cctx) != 0)
+		errx(1, "cbl_ctx_new");
+	if (cbl_yserver_add(sctx, &kv_server, NULL) != 0)
+		errx(1, "cbl_yserver_add");
+	if (cbl_loop_new(sctx, &loop) != 0 ||
+	    cbl_listener_new(sctx, uri, CBL_PLAINTEXT, &l) != 0 ||
+	    cbl_listener_start(l, loop) != 0)
+		errx(1, "%s: cannot listen", uri);
+	if (pthread_create(&thr, NULL, serve, loop) != 0)
+		errx(1, "pthread_create");
+	if (cbl_conn_new(cctx, uri, CBL_PLAINTEXT, &c) != 0 ||
+	    cbl_conn_connect(c) != 0)
+		errx(1, "%s: cannot connect", uri);
+
+	/* EDIT: the store, its two entries. */
+	m = request(cctx, CBL_YCMD_EDIT);
+	if (cbl_msg_put_ymember(m, kvs, &after) != 0)
+		errx(1, "edit");
+	cbl_msg_free(call(c, CBL_YCMD_EDIT, &m));
+	printf("edit: %zu entries\n", nstore);
+
+	/* GET: the store, as YANG-CBOR and decoded. */
+	m = request(cctx, CBL_YCMD_GET);
+	sid = kvs->sid;
+	if (cbl_msg_put_yget(m, &sid, 1) != 0)
+		errx(1, "get");
+	r = call(c, CBL_YCMD_GET, &m);
+	if (cbl_msg_sid_raw(r, kvs->sid, &v, &len) != 0)
+		errx(1, "get: no store");
+	if (cbl_msg_ydecode_member(r, kvs, &back, a, CBL_YD_STRICT, why,
 	    sizeof(why)) != 0)
 		errx(1, "decode: %s", why);
-	printf("decoded: %s ttl %u, %s%s\n", back.entry.v[0].key,
-	    back.entry.v[0].ttl, back.entry.v[1].key,
-	    back.entry.v[1].persistent ? " persistent" : "");
-	cbl_ybuf_free(&b);
+	printf("get: %zu entries, count %u\n", back.store->entry.n,
+	    back.store->count);
+	hex("store", v, len);
+	printf("decoded: %s ttl %u, %s%s\n", back.store->entry.v[0].key,
+	    back.store->entry.v[0].ttl, back.store->entry.v[1].key,
+	    back.store->entry.v[1].persistent ? " persistent" : "");
+	cbl_msg_free(r);
 
+	/* touch, an action: through the table, as family 1 has none yet. */
 	list = NULL;
-	{
-		const struct cbl_ynode *n = cbl_yschema_node(kv_server.schema,
-		    handler("store")->sid);
-
-		for (uint32_t i = 0; n != NULL && i < n->nchild; i++)
-			if (strcmp(n->child[i]->name, "entry") == 0)
-				list = n->child[i];
-	}
+	for (uint32_t i = 0; i < kvs->nchild; i++)
+		if (strcmp(kvs->child[i]->name, "entry") == 0)
+			list = kvs->child[i];
 	if (list == NULL)
 		errx(1, "no /kv:store/entry");
 	for (int i = 0; i < 8; i++)
@@ -227,14 +312,32 @@ main(void)
 	if (handler("touch")->action(NULL, &target, NULL, &tout, a) != 0)
 		errx(1, "touch");
 	printf("touch: ttl %u\n", tout.ttl);
-	if (handler("clear")->rpc(NULL, &cin, &cout, a) != 0)
+
+	/* RPC: clear, its input and output under its SID. */
+	m = request(cctx, CBL_YCMD_RPC);
+	if (cbl_msg_put_ynode(m, io(clear, CBL_YN_INPUT), &cin) != 0)
 		errx(1, "clear");
+	r = call(c, CBL_YCMD_RPC, &m);
+	if (cbl_msg_ydecode(r, io(clear, CBL_YN_OUTPUT), &cout, a,
+	    CBL_YD_STRICT, why, sizeof(why)) != 0)
+		errx(1, "clear: %s", why);
 	printf("clear al: %u removed, %zu left\n", cout.removed, nstore);
+	cbl_msg_free(r);
 
 	if (kv_changed_notification(&ch, &b) != 0)
 		errx(1, "notification");
-	hex("changed", &b);
+	hex("changed", b.p, b.len);
 	cbl_ybuf_free(&b);
+
+	cbl_conn_free(c);
+	cbl_loop_stop(loop);
+	(void)pthread_join(thr, NULL);
+	cbl_listener_free(l);
+	cbl_loop_free(loop);
+	cbl_ctx_free(cctx);
+	cbl_ctx_free(sctx);
+	(void)unlink(uri + 5);
+	(void)rmdir(dir);
 	cbl_yarena_free(a);
 	return (0);
 }

@@ -217,4 +217,15 @@ CBLINK_1.0 {
 	cbl_msg_put_ynode;
 	cbl_msg_sid_raw;
 	cbl_msg_ydecode;
+	cbl_yencode_member;
+	cbl_ymember_present;
+	cbl_ydecode_member;
+	cbl_msg_put_ymember;
+	cbl_msg_put_ynull;
+	cbl_msg_ydecode_member;
+	cbl_msg_err_sid;
+	cbl_yserver_add;
+	cbl_msg_put_yget;
+	cbl_req_yarg;
+	cbl_req_set_yerr;
 };

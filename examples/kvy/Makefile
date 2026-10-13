@@ -1,5 +1,6 @@
 PROG=		cbl-kvy
 SRCS=		main.c
+LDADD+=		-lpthread
 CBLINK_YANG=	kv@2026-10-13.yang
 CBLINK_SIDS=	kv@2026-10-13.sid
 

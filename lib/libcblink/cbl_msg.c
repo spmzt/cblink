@@ -743,9 +743,36 @@ cbl_msg_put_ynode(cbl_msg *msg, const struct cbl_ynode *n, const void *p)
 		return (EINVAL);
 	if ((error = cbl_yencode(n, p, &b)) != 0)
 		return (cbl_msg_fail(msg, error, "cannot encode the value"));
+	/* An input or an output goes under its rpc's SID (CORECONF). */
+	error = cbl_msg_put_sid_raw(msg, cbl_ynode_base(n), b.p, b.len);
+	cbl_ybuf_free(&b);
+	return (error);
+}
+
+int
+cbl_msg_put_ymember(cbl_msg *msg, const struct cbl_ynode *n,
+    const void *parent)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (msg == NULL || n == NULL || parent == NULL)
+		return (EINVAL);
+	if ((error = cbl_yencode_member(n, parent, &b)) == ENOENT)
+		return (0);	/* not there: nothing to say */
+	if (error != 0)
+		return (cbl_msg_fail(msg, error, "cannot encode the value"));
 	error = cbl_msg_put_sid_raw(msg, n->sid, b.p, b.len);
 	cbl_ybuf_free(&b);
 	return (error);
+}
+
+int
+cbl_msg_put_ynull(cbl_msg *msg, uint64_t sid)
+{
+	static const uint8_t null = 0xf6;
+
+	return (cbl_msg_put_sid_raw(msg, sid, &null, 1));
 }
 
 int
@@ -776,10 +803,32 @@ cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n, void *p,
 		why[0] = '\0';
 	if (n == NULL || p == NULL || a == NULL)
 		return (EINVAL);
-	if ((error = cbl_msg_sid_raw(msg, n->sid, &v, &len)) != 0)
+	if ((error = cbl_msg_sid_raw(msg, cbl_ynode_base(n), &v, &len)) != 0)
 		return (error);
 	memset(p, 0, n->size);
+	/* No input or no output: null, as CORECONF sends it. */
+	if ((n->kind == CBL_YN_INPUT || n->kind == CBL_YN_OUTPUT) &&
+	    len == 1 && *(const uint8_t *)v == 0xf6)
+		return (0);
 	return (cbl_ydecode(n, v, len, p, a, flags, why, whylen));
+}
+
+int
+cbl_msg_ydecode_member(const cbl_msg *msg, const struct cbl_ynode *n,
+    void *parent, cbl_yarena *a, int flags, char *why, size_t whylen)
+{
+	const void *v;
+	size_t len;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || parent == NULL || a == NULL)
+		return (EINVAL);
+	if ((error = cbl_msg_sid_raw(msg, n->sid, &v, &len)) != 0)
+		return (error);
+	return (cbl_ydecode_member(n, v, len, parent, a, flags, why,
+	    whylen));
 }
 
 int

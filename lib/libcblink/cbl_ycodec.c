@@ -503,6 +503,25 @@ cbl_yencode_sid(const struct cbl_ynode *n, const void *p, struct cbl_ybuf *b)
 	return (enc_map(b, n, p, 0));
 }
 
+int
+cbl_yencode_member(const struct cbl_ynode *n, const void *parent,
+    struct cbl_ybuf *b)
+{
+
+	if (n == NULL || parent == NULL || b == NULL)
+		return (EINVAL);
+	if (!present(n, parent))
+		return (ENOENT);
+	return (enc_child(b, n, parent, 0));
+}
+
+bool
+cbl_ymember_present(const struct cbl_ynode *n, const void *parent)
+{
+
+	return (n != NULL && parent != NULL && present(n, parent));
+}
+
 /*
  * Decoding.
  */
@@ -1237,6 +1256,25 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
 	if (n == NULL || data == NULL || p == NULL || a == NULL)
 		return (EINVAL);
 	if ((error = dec_map(&r, n, p, 0)) != 0)
+		return (error);
+	if (r.p != r.end)
+		return (fail(&r, EINVAL, "bytes after the value"));
+	return (0);
+}
+
+int
+cbl_ydecode_member(const struct cbl_ynode *n, const void *data, size_t len,
+    void *parent, cbl_yarena *a, int flags, char *why, size_t whylen)
+{
+	struct yrd r = { data, (const uint8_t *)data + len, data, a, flags,
+	    why, whylen, NULL };
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || data == NULL || parent == NULL || a == NULL)
+		return (EINVAL);
+	if ((error = dec_child(&r, n, parent, 0)) != 0)
 		return (error);
 	if (r.p != r.end)
 		return (fail(&r, EINVAL, "bytes after the value"));

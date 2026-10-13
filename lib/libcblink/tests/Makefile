@@ -17,6 +17,7 @@ ATF_TESTS_C=	attr_test \
 		proxy_test \
 		sctp_raw_test \
 		sid_test \
+		ybody_test \
 		stream_test \
 		tcp_test \
 		pattern_test \

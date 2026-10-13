@@ -32,6 +32,7 @@ The suite has about 130 test cases.
 |---------|--------|
 | `frame_test` | The wire format: every hex example in WIRE-FORMAT.md, header fields and extensions, flag combinations, error frames, frame sequences. |
 | `attr_test` | Building and reading attributes: scalars, nesting, large containers and strings, copying, builder errors and limits, extended acks. |
+| `ybody_test` | Version 2 bodies: SID keys past 65535 to 2^63 - 1, negative and large nested keys, each value's bytes found again exactly after an out-of-order body is sorted, a key twice refused, SIDs out of range and a SID key below the top refused, the depth, value and frame limits on such bodies. |
 | `malformed_test` | Hostile input: bad headers and lengths, truncation, invalid CBOR, profile violations (tags, indefinite lengths, duplicate keys, bad UTF-8), YANG-CBOR's tags under `CBL_CTX_YANG_TAGS` and every other tag still refused, excessive nesting and attribute counts, and systematic mutations of valid frames. |
 | `policy_test` | Policies, validation errors with paths, declarative parsers. |
 | `family_test` | The registry, the control family, dispatch, dumps with backpressure, deferred replies completed out of order, deferred requests completed before their handler returned and cancelled when their client left, read backpressure (a client that does not read its replies, a slow dump consumer), the in-flight limit. |

@@ -336,6 +336,24 @@ int		 cbl_ydecode(const struct cbl_ynode *n, const void *data,
 		    size_t whylen);
 
 /*
+ * A version 2 body: one map whose top-level keys are SIDs (RFC 9254
+ * section 3.2), each a node's value.  cbl_msg_put_ynode() adds {n's
+ * SID: the value of its struct p}, cbl_msg_put_sid_raw() one already
+ * encoded; cbl_msg_ydecode() reads the value under n's SID of a
+ * received body into p (ENOENT: none), cbl_msg_sid_raw() gives its
+ * bytes.
+ */
+int		 cbl_msg_put_ynode(cbl_msg *msg, const struct cbl_ynode *n,
+		    const void *p);
+int		 cbl_msg_put_sid_raw(cbl_msg *msg, uint64_t sid,
+		    const void *cbor, size_t len);
+int		 cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n,
+		    void *p, cbl_yarena *a, int flags, char *why,
+		    size_t whylen);
+int		 cbl_msg_sid_raw(const cbl_msg *msg, uint64_t sid,
+		    const void **pp, size_t *lenp);
+
+/*
  * A server's handlers for the nodes of its modules, by SID: cblink-gen
  * -m server writes the table, the program the handlers, the library
  * calls them.  data is the module's data struct; get fills its member

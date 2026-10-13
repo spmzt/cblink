@@ -310,13 +310,10 @@ ATF_TC_BODY(yang_tags, tc)
 	uint64_t tag;
 	cbl_msg *msg;
 
-	/* Off by default: every tag refused, as profile_violations has. */
+	/* Version 2 takes them as they are, no flag asked (D-1). */
 	ATF_REQUIRE_EQ(0, cbl_ctx_get_flags(ctx, &flags));
 	ATF_REQUIRE_EQ(0, flags);
-	for (size_t i = 0; i < nitems(accepted); i++)
-		require_body_error(ctx, accepted[i], EPROTO);
 	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_flags(ctx, 0x2));
-	ATF_REQUIRE_EQ(0, cbl_ctx_set_flags(ctx, CBL_CTX_YANG_TAGS));
 
 	for (size_t i = 0; i < nitems(accepted); i++) {
 		a = yang_value(ctx, accepted[i], &msg);

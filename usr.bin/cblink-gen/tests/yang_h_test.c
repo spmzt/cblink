@@ -636,6 +636,50 @@ ATF_TC_BODY(kinds, tc)
 	cbl_yarena_free(a);
 }
 
+/*
+ * A version 2 message: {SID of shapes: its value}, through a frame and
+ * back, its decimal64 tagged 4 and its union's enumeration 44, which the
+ * body decoder takes as it is.
+ */
+ATF_TC_WITHOUT_HEAD(message);
+ATF_TC_BODY(message, tc)
+{
+	struct shapes_shapes sh = {
+		.has_ratio = true, .ratio = 3165,
+		.has_either = true,
+		.either = { .which = 1, .v.m1 = SHAPES_SHAPES_EITHER_M1_VERY_HIGH },
+		.how = SHAPES_SHAPES_HOW_FAST, .has_speed = true, .speed = 9,
+	}, back;
+	const struct cbl_ynode *n;
+	const void *frame;
+	size_t len, used;
+	cbl_ctx *ctx;
+	cbl_msg *msg, *got;
+	cbl_yarena *a;
+	char why[256];
+
+	ATF_REQUIRE((n = top(module("shapes"), "shapes")) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_ctx_new(&ctx));
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 1, 1, CBL_F_REQUEST, &msg));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(msg, n, &sh));
+	ATF_REQUIRE_EQ(0, cbl_msg_encode(msg, &frame, &len));
+	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, frame, len, &used, &got));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ_MSG(0, cbl_msg_ydecode(got, n, &back, a, CBL_YD_STRICT,
+	    why, sizeof(why)), "%s", why);
+	ATF_CHECK(back.has_ratio && back.ratio == 3165);
+	ATF_CHECK(back.has_either && back.either.which == 1 &&
+	    back.either.v.m1 == SHAPES_SHAPES_EITHER_M1_VERY_HIGH);
+	ATF_CHECK(back.how == SHAPES_SHAPES_HOW_FAST && back.speed == 9);
+	/* Another node's SID: not in this body. */
+	ATF_CHECK_EQ(ENOENT, cbl_msg_ydecode(got, top(module("shapes"),
+	    "note"), &back, a, 0, why, sizeof(why)));
+	cbl_yarena_free(a);
+	cbl_msg_free(got);
+	cbl_msg_free(msg);
+	cbl_ctx_free(ctx);
+}
+
 ATF_TC_WITHOUT_HEAD(identities);
 ATF_TC_BODY(identities, tc)
 {
@@ -698,5 +742,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, roundtrip);
 	ATF_TP_ADD_TC(tp, arena_limit);
 	ATF_TP_ADD_TC(tp, kinds);
+	ATF_TP_ADD_TC(tp, message);
 	return (atf_no_error());
 }

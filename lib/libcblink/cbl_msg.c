@@ -21,6 +21,7 @@
 #include <cbor.h>
 
 #include "cbl_impl.h"
+#include "cbl_schema.h"
 
 #define	CBL_HEAD_MAX	9	/* largest CBOR item head */
 
@@ -292,10 +293,12 @@ msg_note_key(cbl_msg *msg, struct cbl_bframe *f, int64_t key)
 /*
  * Start a value: open the root map if needed, emit the key when the
  * current container is a map, and account for limits.  "fw" allows the
- * negative framework keys.
+ * negative framework keys; KEY_SID a SID at the body's top (version 2).
  */
+#define	KEY_SID		2
+
 static int
-msg_begin_value(cbl_msg *msg, int64_t key, bool fw)
+msg_begin_value(cbl_msg *msg, int64_t key, int fw)
 {
 	struct cbl_bframe *f;
 	int error;
@@ -310,7 +313,11 @@ msg_begin_value(cbl_msg *msg, int64_t key, bool fw)
 		return (error);
 	f = &msg->stack[msg->depth - 1];
 	if (f->is_map) {
-		if (fw) {
+		if (fw == KEY_SID) {
+			if (msg->depth != 1 || key < 1)
+				return (cbl_msg_fail(msg, EINVAL, "a SID keys "
+				    "the body's top, 1 to 2^63 - 1"));
+		} else if (fw) {
 			if (key >= 0 || key < CBL_FW_MIN)
 				return (cbl_msg_fail(msg, EINVAL,
 				    "invalid framework key"));
@@ -738,6 +745,74 @@ cbl_msg_put_error(cbl_msg *msg, int code, const char *text,
 	    (uint64_t)miss_type)) != 0)
 		return (error);
 	return (0);
+}
+
+/*
+ * Version 2: a top-level item {sid: value}, the value YANG-CBOR as it is
+ * (one well-formed item; the receiver checks it, as any body).
+ */
+int
+cbl_msg_put_sid_raw(cbl_msg *msg, uint64_t sid, const void *cbor,
+    size_t len)
+{
+	int error;
+
+	if (msg == NULL || cbor == NULL || len == 0)
+		return (EINVAL);
+	if (sid == 0 || sid > INT64_MAX)
+		return (cbl_msg_fail(msg, EINVAL, "a SID is 1 to 2^63 - 1"));
+	if ((error = msg_begin_value(msg, (int64_t)sid, KEY_SID)) != 0)
+		return (error);
+	return (msg_emit_raw(msg, cbor, len));
+}
+
+int
+cbl_msg_put_ynode(cbl_msg *msg, const struct cbl_ynode *n, const void *p)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (msg == NULL || n == NULL || p == NULL)
+		return (EINVAL);
+	if ((error = cbl_yencode(n, p, &b)) != 0)
+		return (cbl_msg_fail(msg, error, "cannot encode the value"));
+	error = cbl_msg_put_sid_raw(msg, n->sid, b.p, b.len);
+	cbl_ybuf_free(&b);
+	return (error);
+}
+
+int
+cbl_msg_sid_raw(const cbl_msg *msg, uint64_t sid, const void **pp,
+    size_t *lenp)
+{
+	const cbl_attr *a;
+
+	if (msg == NULL || pp == NULL || lenp == NULL || sid == 0 ||
+	    sid > INT64_MAX || !msg->decoded)
+		return (EINVAL);
+	if ((a = cbl_map_lookup(cbl_msg_body(msg), (int64_t)sid)) == NULL)
+		return (ENOENT);
+	*pp = msg->buf + msg->hdr.hdrlen + a->off;
+	*lenp = a->len;
+	return (0);
+}
+
+int
+cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n, void *p,
+    cbl_yarena *a, int flags, char *why, size_t whylen)
+{
+	const void *v;
+	size_t len;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || p == NULL || a == NULL)
+		return (EINVAL);
+	if ((error = cbl_msg_sid_raw(msg, n->sid, &v, &len)) != 0)
+		return (error);
+	memset(p, 0, n->size);
+	return (cbl_ydecode(n, v, len, p, a, flags, why, whylen));
 }
 
 int

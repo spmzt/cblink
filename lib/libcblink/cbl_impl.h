@@ -247,6 +247,8 @@ struct cbl_attr {
 	uint8_t		 inmap;		/* 1: child of a map */
 	uint8_t		 tag;		/* CBOR tag, 0: none (CBL_CTX_YANG_TAGS) */
 	uint32_t	 count;		/* containers: number of children */
+	uint32_t	 off;		/* received: its bytes in the body */
+	uint32_t	 len;
 	cbl_attr	*child;		/* containers: first child */
 	const cbl_attr	*parent;	/* NULL for the body root */
 	union {

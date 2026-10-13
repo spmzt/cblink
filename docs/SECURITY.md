@@ -91,7 +91,7 @@ data they receive.
   two passes. The first pass allocates nothing and checks:
   - well-formedness;
   - definite lengths only;
-  - no tags (with `CBL_CTX_YANG_TAGS`, only YANG-CBOR's 4 and 43 to 47,
+  - no tags but YANG-CBOR's 4 and 43 to 47 (version 2, always:
     each on the kind of value it belongs to);
   - integer map keys;
   - no duplicate keys;

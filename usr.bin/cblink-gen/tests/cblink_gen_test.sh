@@ -484,6 +484,13 @@ yang_tree_body()
 	    cat good.md
 }
 
+# The modules a module's import or include statements name: a statement,
+# not the word in a description.
+stmts()
+{
+	sed -nE "s/^[[:space:]]*$1[[:space:]]+([A-Za-z_][A-Za-z0-9_.-]*)[[:space:]]*[{;].*/\\1/p" "$2"
+}
+
 # A module and every module it imports, its submodules' imports too, by
 # name, from the directory: the modules whose features it may use.
 imports()
@@ -499,10 +506,10 @@ imports()
 		seen="$seen $m"
 		for f in "$dir/$m"@*.yang; do
 			[ -f "$f" ] || continue
-			todo="$todo $(awk '$1 == "import" { print $2 }' "$f")"
-			for i in $(awk '$1 == "include" { print $2 }' "$f"); do
-				todo="$todo $(cat "$dir/$i"@*.yang | awk \
-				    '$1 == "import" { print $2 }')"
+			todo="$todo $(stmts import "$f")"
+			for i in $(stmts include "$f"); do
+				todo="$todo $(cat "$dir/$i"@*.yang |
+				    stmts import /dev/stdin)"
 			done
 		done
 	done
@@ -576,10 +583,12 @@ corpus_body()
 	atf_check -o match:'^in all: ' $gen -m h,schema,server -b corpus \
 	    -p "$c" "$@"
 	printf '#include "corpus.h"\n' > use.c
+	# CC, CFLAGS, LDFLAGS as the library was built with: a sanitizer's.
 	for f in use.c corpus_schema.c corpus_server.c; do
-		atf_check cc -std=c23 -Wall -Wextra -Werror -Wshadow \
-		    -Wcast-qual -Wwrite-strings -Wmissing-variable-declarations \
-		    -I"$prefix/include" -I. -c "$f" -o "$f.o"
+		atf_check ${CC:-cc} ${CFLAGS:-} -std=c23 -Wall -Wextra -Werror \
+		    -Wshadow -Wcast-qual -Wwrite-strings \
+		    -Wmissing-variable-declarations -I"$prefix/include" -I. \
+		    -c "$f" -o "$f.o"
 	done
 	cat > round.c <<'EOF'
 #include <stdio.h>
@@ -600,9 +609,10 @@ main(void)
 	return (bad != 0);
 }
 EOF
-	atf_check cc -std=c23 -Wall -Werror -I"$prefix/include" -I. \
-	    -I"$(atf_get_srcdir)" -o round round.c "$(atf_get_srcdir)/yfill.c" \
-	    corpus_schema.c.o -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
+	atf_check ${CC:-cc} ${CFLAGS:-} ${LDFLAGS:-} -std=c23 -Wall -Werror \
+	    -I"$prefix/include" -I. -I"$(atf_get_srcdir)" -o round round.c \
+	    "$(atf_get_srcdir)/yfill.c" corpus_schema.c.o -L"$prefix/lib" \
+	    -Wl,-rpath,"$prefix/lib" -lcblink
 	atf_check -o match:'^[0-9]+ round trips, 0 not the same$' ./round
 }
 

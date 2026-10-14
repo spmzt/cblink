@@ -618,6 +618,92 @@ EOF
 	    "$(atf_get_srcdir)/yfill.c" corpus_schema.c.o -L"$prefix/lib" \
 	    -Wl,-rpath,"$prefix/lib" -lcblink
 	atf_check -o match:'^[0-9]+ round trips, 0 not the same$' ./round
+
+	# The leafrefs' paths on sample data (PLAN-SDN-YANG 2.2.1): every
+	# top-level node filled by yfill, three ways, in one tree; each
+	# leafref's path, as the tables hold it, evaluated from it; what it
+	# finds, every node its target's.
+	cat > paths.c <<'EOF'
+#include <stdio.h>
+#include <string.h>
+
+#include "cbl_data.h"
+#include "corpus.h"
+#include "yfill.h"
+
+static size_t npaths, nfound, nwrong;
+
+static void
+walk(const cbl_dtree *t, const cbl_dnode *n)
+{
+	for (const cbl_dnode *c = cbl_dnode_first(n); c != NULL;
+	    c = cbl_dnode_next(c)) {
+		const struct cbl_ynode *s = cbl_dnode_schema(c);
+		struct cbl_xval v;
+		char why[256];
+
+		if (s->type != NULL && (s->type->flags & CBL_YTF_LEAFREF) &&
+		    s->type->path >= 0) {
+			npaths++;
+			if (cbl_xp_eval(t, corpus_schema.xpath[s->type->path],
+			    c, c, &v, why, sizeof(why)) != 0) {
+				printf("%s: %s: %s\n", s->name,
+				    corpus_schema.xpath[s->type->path], why);
+				nwrong++;
+			} else {
+				for (size_t i = 0; i < v.n; i++)
+					if (s->lref != NULL &&
+					    cbl_dnode_schema(v.nodes[i]) !=
+					    s->lref) {
+						printf("%s: found %s\n", s->name,
+						    cbl_dnode_schema(
+						    v.nodes[i])->name);
+						nwrong++;
+					}
+				nfound += v.n;
+				cbl_xval_free(&v);
+			}
+		}
+		walk(t, c);
+	}
+}
+
+int
+main(void)
+{
+	for (int pass = 0; pass < 3; pass++) {
+		cbl_dtree *t = cbl_dtree_new(&corpus_schema);
+
+		for (uint32_t i = 0; i < corpus_schema.nmod; i++)
+			for (uint32_t j = 0; j < corpus_schema.mod[i]->ntop;
+			    j++) {
+				const struct cbl_ynode *n =
+				    corpus_schema.mod[i]->top[j];
+				struct cbl_ybuf b = { 0 };
+
+				if (n->size == 0 || (n->kind !=
+				    CBL_YN_CONTAINER && n->kind != CBL_YN_LIST))
+					continue;
+				if (yencoded(n, pass, true, &b) == 0)
+					(void)cbl_dnode_decode(cbl_dtree_root(t),
+					    n, b.p, b.len, CBL_YD_STRICT, NULL, 0,
+					    NULL);
+				cbl_ybuf_free(&b);
+			}
+		walk(t, cbl_dtree_root(t));
+		cbl_dtree_free(t);
+	}
+	printf("%zu paths evaluated, %zu nodes found, %zu wrong\n", npaths,
+	    nfound, nwrong);
+	return (nwrong != 0 || npaths == 0);
+}
+EOF
+	atf_check ${CC:-cc} ${CFLAGS:-} ${LDFLAGS:-} -std=c23 -Wall -Werror \
+	    -I"$prefix/include" -I. -I"$(atf_get_srcdir)" -o paths paths.c \
+	    "$(atf_get_srcdir)/yfill.c" corpus_schema.c.o -L"$prefix/lib" \
+	    -Wl,-rpath,"$prefix/lib" -lcblink
+	atf_check -o match:'^[0-9]+ paths evaluated, [0-9]+ nodes found, 0 wrong$' \
+	    ./paths
 }
 
 atf_init_test_cases()

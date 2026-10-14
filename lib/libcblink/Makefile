@@ -33,6 +33,7 @@ SRCS=		cbl_arena.c \
 		cbl_tls.c \
 		cbl_uri.c \
 		cbl_xpath.c \
+		cbl_xpeval.c \
 		cbl_ycodec.c \
 		cbl_yctrl_schema.c \
 		cbl_yfamily.c \
@@ -48,7 +49,7 @@ CFLAGS+=	-I${.CURDIR} ${SSL_CFLAGS} ${CBOR_CFLAGS}
 PACKAGE=	cblink
 LIBADD+=	cbor ssl crypto pthread
 .else
-LDADD+=		${CBOR_LDADD} ${SSL_LDFLAGS} -lssl -lcrypto -lpthread
+LDADD+=		${CBOR_LDADD} ${SSL_LDFLAGS} -lssl -lcrypto -lpthread -lm
 # No mtree(8) hierarchy outside the tree: create the directories first.
 beforeinstall: .PHONY
 	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 0755 ${DESTDIR}${LIBDIR} \

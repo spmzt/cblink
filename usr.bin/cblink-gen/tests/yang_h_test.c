@@ -239,7 +239,9 @@ ATF_TC_BODY(tables, tc)
 	ATF_CHECK(n->type->flags & CBL_YTF_LEAFREF);
 	ATF_REQUIRE(n->type->path >= 0 &&
 	    (uint32_t)n->type->path < yangh_schema.nxpath);
-	ATF_CHECK_STREQ("../id", yangh_schema.xpath[n->type->path]);
+	/* As the evaluator reads it: each step's axis, each name's module. */
+	ATF_CHECK_STREQ("parent::node()/child::shapes:id",
+	    yangh_schema.xpath[n->type->path]);
 	n = child(child(s, "tuned"), "max");
 	ATF_CHECK(n != NULL && (n->flags & CBL_YNF_MANDATORY));
 	ATF_CHECK(child(s, "tuned")->flags & CBL_YNF_PRESENCE);

@@ -222,7 +222,7 @@ type_key(struct buf *k, const struct sntype *t)
 {
 
 	if (t->base == ST_LEAFREF && t->real != NULL) {
-		buf_printf(k, "leafref(%s,%d)", t->path != NULL ? t->path : "",
+		buf_printf(k, "leafref(%s,%d)", t->cpath != NULL ? t->cpath : "",
 		    t->require_instance);
 		type_key(k, t->real);
 		return;
@@ -384,8 +384,9 @@ type_ref(struct ys *y, const struct sntype *t, const char *where,
 		buf_puts(&init, "\t.flags = CBL_YTF_REQUIRE,\n");
 	if (real->fdigits != 0)
 		buf_printf(&init, "\t.fdigits = %u,\n", real->fdigits);
-	buf_printf(&init, "\t.path = %d,\n", t != real && t->path != NULL ?
-	    xpath_id(y, t->path) : -1);
+	/* The expressions by module (xp_canon()), which the tables resolve. */
+	buf_printf(&init, "\t.path = %d,\n", t != real && t->cpath != NULL ?
+	    xpath_id(y, t->cpath) : -1);
 	restrict_emit(y, &init, "range", real->range,
 	    sntype_signed(real->base), tn);
 	restrict_emit(y, &init, "length", real->length, false, tn);
@@ -526,7 +527,7 @@ whens_emit(struct ys *y, const struct snode *n, const char *name)
 		return;
 	buf_init(&list);
 	for (size_t i = 0; i < n->nwhen; i++)
-		buf_printf(&list, "\t{ %d, %s },\n", xpath_id(y, n->when[i]),
+		buf_printf(&list, "\t{ %d, %s },\n", xpath_id(y, n->cwhen[i]),
 		    n->whenctx[i] == SWC_SELF ? "CBL_YWC_SELF" :
 		    n->whenctx[i] == SWC_ROOT ? "CBL_YWC_ROOT" :
 		    "CBL_YWC_PARENT");
@@ -1016,7 +1017,7 @@ node_ref(struct ys *y, const struct snode *n)
 		buf_init(&list);
 		for (size_t i = 0; i < n->nmusts; i++) {
 			buf_printf(&list, "\t{ %d, ", xpath_id(y,
-			    n->musts[i].expr));
+			    n->musts[i].cexpr));
 			cstr(&list, n->musts[i].emsg);
 			buf_puts(&list, ", ");
 			cstr(&list, n->musts[i].eapptag);

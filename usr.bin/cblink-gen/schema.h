@@ -152,6 +152,7 @@ struct sntype {
 	struct sident	**bases;	/* identityref */
 	size_t		 nbases;
 	char		*path;		/* leafref */
+	char		*cpath;		/* ... its names by module (xp_canon) */
 	struct sntype	*real;		/* leafref: the target's type */
 	bool		 require_instance; /* leafref, instance-identifier */
 	struct sntype	**members;	/* union */
@@ -161,6 +162,7 @@ struct sntype {
 /* A must statement. */
 struct smust {
 	char		*expr;		/* XPath, as written */
+	char		*cexpr;		/* ... its names by module (xp_canon) */
 	char		*emsg;
 	char		*eapptag;
 };
@@ -198,6 +200,7 @@ struct snode {
 	size_t		 ndflts;
 	struct snode	*dflt_case;	/* choice: its default case */
 	char		**when;		/* when expressions, as written */
+	char		**cwhen;	/* ... their names by module (xp_canon) */
 	uint8_t		*whenctx;	/* each one's context node: SWC_* */
 	size_t		 nwhen;
 	struct smust	*musts;

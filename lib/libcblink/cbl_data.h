@@ -201,6 +201,35 @@ int		 cbl_dtree_check_refs(const cbl_dtree *t,
 		    struct cbl_dederr *err);
 
 /*
+ * XPath-lite (YANG.md section 5) over a tree: expr, as the tables hold
+ * one (its names by module), evaluated with context node ctx (NULL: the
+ * root) and current node cur (NULL: ctx), current()'s.  The value is a
+ * node set (its nodes each once, the array the value's), a boolean, a
+ * number or a string (the value's); cbl_xval_free() frees it.  0, or an
+ * errno and why (of whylen bytes).
+ */
+enum cbl_xv_kind {
+	CBL_XV_NODES = 1,
+	CBL_XV_BOOL,
+	CBL_XV_NUMBER,
+	CBL_XV_STRING,
+};
+
+struct cbl_xval {
+	enum cbl_xv_kind	 kind;
+	bool			 b;
+	double			 num;
+	char			*s;
+	const cbl_dnode		**nodes;
+	size_t			 n;
+};
+
+int		 cbl_xp_eval(const cbl_dtree *t, const char *expr,
+		    const cbl_dnode *ctx, const cbl_dnode *cur,
+		    struct cbl_xval *out, char *why, size_t whylen);
+void		 cbl_xval_free(struct cbl_xval *v);
+
+/*
  * The edit that makes tree a tree b, applied to a with the default
  * operation none (a YANG Patch's changes, RFC 8072): creates of what only
  * b has, merges of leaves that differ, removes of what only a has, an

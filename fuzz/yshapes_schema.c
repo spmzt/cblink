@@ -835,7 +835,7 @@ static const struct cbl_ynode *const nodes[] = {
 };
 
 static const char *const xpaths[] = {
-	"../id",
+	"parent::node()/child::shapes:id",
 };
 
 extern const struct cbl_yschema yshapes_schema;

@@ -441,6 +441,12 @@ int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
 cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
 /* leafrefs and instance-identifiers that require an instance: there? */
 int	cbl_dtree_check_refs(const cbl_dtree *, struct cbl_dederr *);
+/* XPath-lite: an expression as the tables hold one, over a tree */
+struct cbl_xval { enum cbl_xv_kind kind; bool b; double num; char *s;
+    const cbl_dnode **nodes; size_t n; };	/* NODES, BOOL, NUMBER, STRING */
+int	cbl_xp_eval(const cbl_dtree *, const char *expr, const cbl_dnode *ctx,
+	    const cbl_dnode *cur, struct cbl_xval *, char *why, size_t whylen);
+void	cbl_xval_free(struct cbl_xval *);
 ```
 
 - **A tree's shape** is kept: a node only where its schema node is, one

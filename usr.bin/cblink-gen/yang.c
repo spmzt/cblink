@@ -28,6 +28,7 @@
 #include <libyang/libyang.h>
 #include <libyang/plugins_exts.h>
 
+#include "cbl_xpath.h"
 #include "gen.h"
 #include "schema.h"
 #include "yang.h"
@@ -343,7 +344,111 @@ struct conv {
 	const struct ly_ctx	 *ctx;
 	const struct lys_module **lmods;	/* parallel to s->mods */
 	struct sext		 *in;		/* the instance being walked */
+	const char		 *cur;		/* the node's module, while made */
 };
+
+/* A prefix of an expression, by libyang's map of them: its module. */
+static const char *
+prefix_module(const struct lysc_prefix *prefixes, const char *prefix)
+{
+	/* A sized array: its count before it, read without libyang's
+	 * macro, which drops const. */
+	LY_ARRAY_COUNT_TYPE n = prefixes != NULL ?
+	    ((const LY_ARRAY_COUNT_TYPE *)(const void *)prefixes)[-1] : 0;
+
+	for (LY_ARRAY_COUNT_TYPE u = 0; u < n; u++)
+		if (prefixes[u].prefix != NULL &&
+		    strcmp(prefixes[u].prefix, prefix) == 0)
+			return (prefixes[u].mod->name);
+	return (NULL);
+}
+
+static void
+canon_walk(struct cbl_xp *x, const struct lysc_prefix *prefixes,
+    const char *cur)
+{
+	const char *m;
+
+	if (x == NULL)
+		return;
+	/* A name test: its module's name for its prefix; none, the node's
+	 * (RFC 7950 section 6.4.1).  "*" alone stays any module's. */
+	if (x->kind == CBL_XP_STEP && (x->test == CBL_XT_NAME ||
+	    (x->test == CBL_XT_ANY && x->prefix != NULL))) {
+		m = x->prefix != NULL ? prefix_module(prefixes, x->prefix) : cur;
+		if (m != NULL) {
+			free(x->prefix);
+			x->prefix = xstrdup(m);
+		}
+	}
+	/* A literal "prefix:name" whose prefix is one of the module's: an
+	 * identity's name, compared with an identityref, which the tables
+	 * give as "module:name". */
+	if (x->kind == CBL_XP_LITERAL && x->s != NULL &&
+	    strchr(x->s, ':') != NULL) {
+		char *colon = strchr(x->s, ':'), *nl;
+
+		*colon = '\0';
+		m = prefix_module(prefixes, x->s);
+		*colon = ':';
+		if (m != NULL) {
+			nl = xasprintf("%s:%s", m, colon + 1);
+			free(x->s);
+			x->s = nl;
+		}
+	}
+	/* derived-from()'s identity, a literal "prefix:name". */
+	if (x->kind == CBL_XP_FUNC && x->nargs == 2 &&
+	    (strcmp(x->s, "derived-from") == 0 ||
+	    strcmp(x->s, "derived-from-or-self") == 0) &&
+	    x->args[1]->kind == CBL_XP_LITERAL) {
+		char *lit = x->args[1]->s, *colon = strchr(lit, ':'), *nl;
+
+		if (colon != NULL) {
+			*colon = '\0';
+			m = prefix_module(prefixes, lit);
+			*colon = ':';
+		} else
+			m = cur;
+		if (m != NULL) {
+			nl = xasprintf("%s:%s", m, colon != NULL ? colon + 1 :
+			    lit);
+			free(x->args[1]->s);
+			x->args[1]->s = nl;
+		}
+	}
+	for (size_t i = 0; i < x->nargs; i++)
+		canon_walk(x->args[i], prefixes, cur);
+	for (size_t i = 0; i < x->npreds; i++)
+		canon_walk(x->preds[i], prefixes, cur);
+	canon_walk(x->base, prefixes, cur);
+}
+
+/*
+ * An expression with its names by module, not by the prefixes of the
+ * module that wrote it, which the tables cannot resolve: printed again,
+ * each step with its axis.  One that does not parse is kept as written,
+ * for the profile check to refuse.
+ */
+static char *
+xp_canon(const char *expr, const struct lysc_prefix *prefixes,
+    const char *cur)
+{
+	struct cbl_xp *x;
+	char why[128], *out = NULL;
+	size_t pos, len;
+	FILE *fp;
+
+	if ((x = cbl_xp_parse(expr, why, sizeof(why), &pos)) == NULL)
+		return (xstrdup(expr));
+	canon_walk(x, prefixes, cur);
+	if ((fp = open_memstream(&out, &len)) == NULL)
+		err(2, "open_memstream");
+	cbl_xp_print(x, fp);
+	fclose(fp);
+	cbl_xp_free(x);
+	return (out);
+}
 
 static struct smodule *
 smod_of(struct conv *c, const struct lys_module *lm)
@@ -620,6 +725,7 @@ conv_type(struct conv *c, const struct lysc_type *lt)
 		break;
 	case ST_LEAFREF:
 		t->path = xstrdup(lyxp_get_expr(lr->path));
+		t->cpath = xp_canon(t->path, lr->prefixes, c->cur);
 		t->require_instance = lr->require_instance;
 		t->real = conv_type(c, lr->realtype);
 		break;
@@ -752,6 +858,7 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 	n->parent = parent;
 	n->in = c->in;
 	n->lyn = ln;
+	c->cur = n->module->name;
 	if ((ln->nodetype & (LYS_RPC | LYS_ACTION | LYS_NOTIF | LYS_INPUT |
 	    LYS_OUTPUT)) == 0 && (ln->flags & LYS_CONFIG_W) != 0)
 		n->flags |= SNF_CONFIG;
@@ -797,9 +904,12 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 
 		n->nwhen = LY_ARRAY_COUNT(when);
 		n->when = xcalloc(n->nwhen, sizeof(*n->when));
+		n->cwhen = xcalloc(n->nwhen, sizeof(*n->cwhen));
 		n->whenctx = xcalloc(n->nwhen + 1, sizeof(*n->whenctx));
 		LY_ARRAY_FOR(when, u) {
 			n->when[u] = xstrdup(lyxp_get_expr(when[u]->cond));
+			n->cwhen[u] = xp_canon(n->when[u], when[u]->prefixes,
+			    n->module->name);
 			n->whenctx[u] = when[u]->context == ln ? SWC_SELF :
 			    when[u]->context == NULL ? SWC_ROOT : SWC_PARENT;
 		}
@@ -807,6 +917,8 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 		n->musts = xcalloc(n->nmusts, sizeof(*n->musts));
 		LY_ARRAY_FOR(must, u) {
 			n->musts[u].expr = xstrdup(lyxp_get_expr(must[u].cond));
+			n->musts[u].cexpr = xp_canon(n->musts[u].expr,
+			    must[u].prefixes, n->module->name);
 			n->musts[u].emsg = xstrdup_or_null(must[u].emsg);
 			n->musts[u].eapptag = xstrdup_or_null(must[u].eapptag);
 		}

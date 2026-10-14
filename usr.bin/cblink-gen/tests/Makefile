@@ -51,6 +51,10 @@ SRCS.ydata_test=	yangh.h ydata_test.c yangh_schema.c yfill.c
 CFLAGS.ydata_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.ydata_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 SRCS.yedit_test=	yangh.h yedit_test.c yangh_schema.c yfill.c
+ATF_TESTS_C+=	yxpath_test
+SRCS.yxpath_test=	yangh.h yxpath_test.c yangh_schema.c
+CFLAGS.yxpath_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+LDADD.yxpath_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread -lm
 CFLAGS.yedit_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yedit_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 # yvalid_test: the static validator on the module rules.

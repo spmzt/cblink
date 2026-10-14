@@ -111,7 +111,15 @@ where they require an instance.
 ## 5. Expressions and patterns
 
 `when`, `must` and a leafref's `path` are recorded in the schema tables
-as written, for the evaluator (what they say needs more than one tree). They must lie within **XPath-lite**; the
+for the evaluator (what they say needs more than one tree), each name
+by its module rather than by a prefix (libyang's map of the prefixes
+the expression was written with; an unprefixed name the node's module,
+RFC 7950 section 6.4.1), and each step with its axis:
+`parent::node()/child::shapes:id` for `../id`. `cbl_xp_eval()`
+evaluates them over an instance tree (API.md section 7): node sets,
+paths on the four axes, predicates, comparisons with node sets,
+arithmetic, `and`, `or`, `|`, `current()` and the core functions so far.
+They must lie within **XPath-lite**; the
 generator refuses one that does not, naming the node and what is outside:
 
 - the axes `child`, `parent`, `self` and `descendant-or-self`, with their

@@ -3,9 +3,8 @@
 #
 # Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
 #
-# cblink-gen: golden files, determinism, every validation error with its
-# exact location, malformed YAML, the committed control family,
-# cblink.mk, and the YANG front end.
+# cblink-gen: the YANG front end, determinism, the command line,
+# cblink.mk, the committed tables of cblink's own modules, .sid files.
 #
 
 # The generator under test is installed next to this script.
@@ -16,77 +15,26 @@ setup()
 	gen="$(atf_get_srcdir)/cblink-gen"
 }
 
-atf_test_case golden
-golden_head()
-{
-	atf_set "descr" "Generated output matches the golden files"
-}
-golden_body()
-{
-	setup
-
-	for spec in types kv; do
-		mkdir "out_${spec}"
-		atf_check $gen -o "out_${spec}" \
-		    "$(atf_get_srcdir)/golden/${spec}.yaml"
-		for f in "$(atf_get_srcdir)/golden/${spec}"/*; do
-			atf_check -o file:"${f}" cat "out_${spec}/${f##*/}"
-		done
-		atf_check -o inline:"5\n" \
-		    sh -c "ls out_${spec} | wc -l | tr -d ' '"
-	done
-}
-
 atf_test_case determinism
 determinism_head()
 {
-	atf_set "descr" "The same spec gives byte-identical output"
+	atf_set "descr" "The same modules give byte-identical output"
 }
 determinism_body()
 {
 	setup
-	mkdir a b
-	atf_check $gen -o a "$(atf_get_srcdir)/golden/types.yaml"
-	atf_check $gen -o b "$(atf_get_srcdir)/golden/types.yaml"
-	atf_check diff -r a b
-	# The output does not depend on where the spec lives.
-	mkdir -p c sub/dir
-	cp "$(atf_get_srcdir)/golden/types.yaml" sub/dir/
-	atf_check $gen -o c sub/dir/types.yaml
-	atf_check diff -r a c
-}
-
-atf_test_case errors
-errors_head()
-{
-	atf_set "descr" "Validation and YAML errors, with exact locations"
-}
-errors_body()
-{
-	setup
-	n=0
-
-	for f in "$(atf_get_srcdir)"/errors/*.yaml; do
-		atf_check -s exit:1 -e file:"${f%.yaml}.err" $gen -n "${f}"
-		n=$((n + 1))
+	y="$(atf_get_srcdir)/yang"
+	mkdir a b c sub
+	for d in a b; do
+		atf_check -o ignore $gen -m h,schema,server,md,tree -b s -o $d \
+		    -s "$y/shapes@2026-10-13.sid" "$y/shapes@2026-10-13.yang"
 	done
-	[ "${n}" -ge 40 ] || atf_fail "only ${n} error cases found"
-}
-
-# Written here, not stored: a stored CRLF file is at the mercy of git's
-# end-of-line conversion (core.autocrlf), which would quietly make it LF.
-atf_test_case crlf
-crlf_head()
-{
-	atf_set "descr" "CRLF line endings are refused with their location"
-}
-crlf_body()
-{
-	setup
-
-	printf 'name: t\r\nversion: 1\r\n' > crlf.yaml
-	msg="crlf.yaml:1:8: error: carriage return; use LF line endings"
-	atf_check -s exit:1 -e inline:"${msg}\n" $gen -n crlf.yaml
+	atf_check diff -r a b
+	# The output does not depend on where the module lives.
+	cp "$y/shapes@2026-10-13.yang" "$y/shapes@2026-10-13.sid" sub/
+	atf_check -o ignore $gen -m h,schema,server,md,tree -b s -o c \
+	    -s sub/shapes@2026-10-13.sid sub/shapes@2026-10-13.yang
+	atf_check diff -r a c
 }
 
 atf_test_case ymod_regen
@@ -100,10 +48,6 @@ ymod_regen_body()
 	setup
 	y="$(atf_get_srcdir)/yang"
 
-	if $gen -n "$y/cblink@2026-10-13.yang" 2>&1 |
-	    grep -q 'needs cblink-gen built with libyang'; then
-		atf_skip "cblink-gen built without libyang"
-	fi
 	mkdir out
 	atf_check -o ignore $gen -m h,schema -b cbl_ymod -o out \
 	    -s "$y/cblink@2026-10-13.sid" "$y/cblink@2026-10-13.yang"
@@ -126,84 +70,90 @@ cli_head()
 cli_body()
 {
 	setup
+	y="$(atf_get_srcdir)/yang"
+	m="$y/shapes@2026-10-13.yang"
+	sid="$y/shapes@2026-10-13.sid"
+
 	atf_check -o match:"^cblink-gen [0-9]" $gen -V
 	atf_check -s exit:2 -e match:"usage" $gen
-	atf_check -s exit:2 -e match:"usage" $gen -x foo.yaml
-	atf_check -s exit:2 -e match:"nosuch.yaml" $gen nosuch.yaml
-	atf_check -s exit:2 -e match:"not a regular file" $gen -n .
+	atf_check -s exit:2 -e match:"usage" $gen -x "$m"
+	# A YANG module, nothing else.
+	atf_check -s exit:2 -e match:"usage" $gen spec.yaml
+	atf_check -s exit:2 -e match:"nosuch.yang" $gen -n nosuch.yang
 	mkdir out
-	atf_check $gen -m h -o out "$(atf_get_srcdir)/golden/kv.yaml"
-	atf_check -o inline:"kv.h\n" ls out
-	atf_check $gen -m md -b other -o out \
-	    "$(atf_get_srcdir)/golden/kv.yaml"
-	atf_check -o inline:"kv.h\nother.md\n" ls out
-	atf_check -s exit:2 -e match:"invalid output base" $gen -b a/b -o out \
-	    "$(atf_get_srcdir)/golden/kv.yaml"
-	atf_check -s exit:2 -e ignore $gen -o nosuchdir \
-	    "$(atf_get_srcdir)/golden/kv.yaml"
+	atf_check $gen -m h -s "$sid" -o out "$m"
+	atf_check -o inline:"shapes.h\n" ls out
+	atf_check $gen -m md -b other -s "$sid" -o out "$m"
+	atf_check -o inline:"other.md\nshapes.h\n" ls out
+	atf_check -s exit:2 -e match:"invalid output base" \
+	    $gen -m h -b a/b -s "$sid" -o out "$m"
+	atf_check -s exit:2 -e ignore $gen -m h -s "$sid" -o nosuchdir "$m"
 	# -n checks without writing anything.
 	mkdir empty
-	atf_check -o empty $gen -n -o empty "$(atf_get_srcdir)/golden/kv.yaml"
+	atf_check -o match:"compiled" $gen -n -s "$sid" -o empty "$m"
 	atf_check -o empty ls empty
 }
 
 atf_test_case big_input
 big_input_head()
 {
-	atf_set "descr" "Oversized spec files are refused"
+	atf_set "descr" "An oversized .sid file is refused"
 }
 big_input_body()
 {
 	setup
-	dd if=/dev/zero bs=1024 count=1100 2>/dev/null | tr '\0' '#' > big.yaml
-	atf_check -s exit:1 -e match:"too large" $gen -n big.yaml
+	dd if=/dev/zero bs=1024 count=17000 2>/dev/null | tr '\0' ' ' \
+	    > big.sid
+	atf_check -s exit:1 -e match:"too large" $gen -n -s big.sid \
+	    "$(atf_get_srcdir)/yang/shapes@2026-10-13.yang"
 }
 
 atf_test_case cblink_mk
 cblink_mk_head()
 {
 	atf_set "descr" \
-	    "cblink.mk finds specs given relative, with ../, or absolute"
+	    "cblink.mk finds a module given relative, with ../, or absolute"
 	atf_set "require.progs" "make"
 }
 cblink_mk_body()
 {
 	setup
+	y="$(atf_get_srcdir)/yang"
 	# Build here, whatever object directory the caller's make uses.
 	unset MAKEOBJDIRPREFIX MAKEOBJDIR
 
-	mkdir prog specs
-	cp "$(atf_get_srcdir)/golden/kv.yaml" prog/rel.yaml
-	cp "$(atf_get_srcdir)/golden/kv.yaml" up.yaml
-	cp "$(atf_get_srcdir)/golden/kv.yaml" specs/abs.yaml
-	cat > prog/Makefile <<EOF
-CBLINK_SPECS=	rel.yaml ../up.yaml $(pwd)/specs/abs.yaml
+	mkdir rel up abs mods
+	cp "$y/shapes@2026-10-13.yang" "$y/shapes@2026-10-13.sid" rel/
+	cp "$y/shapes@2026-10-13.yang" "$y/shapes@2026-10-13.sid" .
+	cp "$y/shapes@2026-10-13.yang" "$y/shapes@2026-10-13.sid" mods/
+	for d in rel up abs; do
+		case $d in
+		rel)	p= ;;
+		up)	p=../ ;;
+		abs)	p="$(pwd)/mods/" ;;
+		esac
+		cat > $d/Makefile <<EOF
+CBLINK_YANG=	${p}shapes@2026-10-13.yang
+CBLINK_SIDS=	${p}shapes@2026-10-13.sid
 CBLINK_GEN=	${gen}
 .include "$(atf_get_srcdir)/cblink.mk"
 EOF
-	for s in rel up abs; do
-		atf_check -o ignore -e ignore make -C prog ${s}.h
-		atf_check test -s prog/${s}.h -a -s prog/${s}_server.c
+		atf_check -o ignore -e ignore make -C $d shapes.h
+		atf_check test -s $d/shapes.h -a -s $d/shapes_schema.c \
+		    -a -s $d/shapes_server.c
 	done
 }
 
 atf_test_case yang_frontend
 yang_frontend_head()
 {
-	atf_set "descr" "A YANG module is compiled through libyang, or" \
-	    "refused by a generator built without it"
+	atf_set "descr" "A YANG module is compiled through libyang"
 }
 yang_frontend_body()
 {
 	setup
 	y="$(atf_get_srcdir)/yang"
 
-	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
-	    grep -q 'needs cblink-gen built with libyang'; then
-		atf_check -s exit:2 -e match:'CBLINK_GEN_LIBYANG=yes' \
-		    $gen -n "$y/good@2026-10-13.yang"
-		return
-	fi
 	# Its import, ietf-yang-types, is libyang's own.
 	atf_check -o match:'^good@2026-10-13.yang: compiled, .* schema nodes' \
 	    $gen -n "$y/good@2026-10-13.yang"
@@ -331,10 +281,6 @@ sid_cbor_body()
 	y="$(atf_get_srcdir)/yang"
 	m="$y/ietf-system@2014-08-06.yang"
 
-	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
-	    grep -q 'needs cblink-gen built with libyang'; then
-		atf_skip "cblink-gen built without libyang"
-	fi
 	# ietf-sid-file's own SIDs: IANA's range, numbered by Appendix B,
 	# and the ones the encoder keys by.
 	cat "$y/ietf-sid-file@2024-07-31.sid" > sf.sid
@@ -440,10 +386,6 @@ yang_h_body()
 	setup
 	y="$(atf_get_srcdir)/yang"
 
-	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
-	    grep -q 'needs cblink-gen built with libyang'; then
-		atf_skip "cblink-gen built without libyang"
-	fi
 	# Named after the first module, or -b; the modules named only,
 	# not what libyang implements of its own.
 	atf_check $gen -m h "$y/ietf-system@2014-08-06.yang"
@@ -490,10 +432,6 @@ yang_tree_body()
 	setup
 	y="$(atf_get_srcdir)/yang"
 
-	if $gen -n "$y/good@2026-10-13.yang" 2>&1 |
-	    grep -q 'needs cblink-gen built with libyang'; then
-		atf_skip "cblink-gen built without libyang"
-	fi
 	# Each alone, then a module with another's augments in its tree,
 	# then a deviation: line for line what yanglint prints.  tree has
 	# every kind of node and mark, compiled and as written.
@@ -536,10 +474,7 @@ yang_tree_body()
 
 atf_init_test_cases()
 {
-	atf_add_test_case golden
 	atf_add_test_case determinism
-	atf_add_test_case errors
-	atf_add_test_case crlf
 	atf_add_test_case ymod_regen
 	atf_add_test_case cli
 	atf_add_test_case big_input

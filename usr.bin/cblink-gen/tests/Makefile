@@ -16,49 +16,13 @@ CSTD?=		c23
 WARNS?=		6
 
 ATF_TESTS_SH=	cblink_gen_test
-ATF_TESTS_C=	roundtrip_test
 
 GEN=		${.OBJDIR:H}/cblink-gen
 LIBCBLINK_SRC=	${.CURDIR}/../../../lib/libcblink
 LIBCBLINK_OBJ=	${.OBJDIR:H:H:H}/lib/libcblink
 
-# roundtrip_test is built from code generated at build time.
-GENERATED=	types.h types.c types_client.c types_server.c
-CLEANFILES+=	${GENERATED}
-SRCS.roundtrip_test=	types.h roundtrip_test.c types.c types_client.c \
-			types_server.c
-CFLAGS.roundtrip_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
-LDADD.roundtrip_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread -lm
-
-.ORDER: types.h types.c types_client.c types_server.c
-${GENERATED}: ${.CURDIR}/golden/types.yaml ${GEN}
-	${GEN} -m h,c,client,server -o ${.OBJDIR} ${.CURDIR}/golden/types.yaml
-
-# minimal_test: families with one kind of operation each must compile at
-# WARNS=6, so the generator may not emit helpers that go unused.
-ATF_TESTS_C+=	minimal_test
-SRCS.minimal_test=	minimal_test.c
-CFLAGS.minimal_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
-LDADD.minimal_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
-.for _m in onlydo onlystreams onlyevents
-SRCS.minimal_test+=	${_m}.h ${_m}.c ${_m}_client.c ${_m}_server.c
-CLEANFILES+=	${_m}.h ${_m}.c ${_m}_client.c ${_m}_server.c
-${_m}.h: ${.CURDIR}/minimal/${_m}.yaml ${GEN}
-	${GEN} -m h,c,client,server -o ${.OBJDIR} ${.CURDIR}/minimal/${_m}.yaml
-${_m}.c ${_m}_client.c ${_m}_server.c: ${_m}.h
-.endfor
-
 # yang_h_test: the structs of YANG modules, every shape and type, must
-# compile at WARNS=6; with a generator built with libyang only.
-LOCALBASE?=	/usr/local
-.if !defined(CBLINK_GEN_LIBYANG)
-.if exists(${LOCALBASE}/include/libyang/libyang.h)
-CBLINK_GEN_LIBYANG=	yes
-.else
-CBLINK_GEN_LIBYANG=	no
-.endif
-.endif
-.if ${CBLINK_GEN_LIBYANG} == "yes"
+# compile at WARNS=6.
 ATF_TESTS_C+=	yang_h_test
 YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 		${.CURDIR}/yang/ietf-system@2014-08-06.yang \
@@ -86,29 +50,20 @@ yangh.h: ${YANGH_SRC} ${GEN}
 	${GEN} -m h,schema -b yangh -o ${.OBJDIR} ${YANGH_SID} ${YANGH_SRC} \
 	    > /dev/null
 yangh_schema.c: yangh.h
-.endif
 
-# Test data: the generator itself, golden files, error cases, and the
-# files committed in lib/libcblink and docs from the cblink modules.
+# Test data: the generator itself, and the files committed in
+# lib/libcblink and docs from the cblink modules.
 ${PACKAGE}FILES+=	${GEN}
 ${PACKAGE}FILESMODE_${GEN}= 0555
 
-FILESGROUPS+=	GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG
-GOLDEN=		golden/types.yaml golden/kv.yaml
-GOLDENDIR=	${TESTSDIR}/golden
-GOLDENTYPES!=	cd ${.CURDIR} && echo golden/types/*
-GOLDENTYPESDIR=	${TESTSDIR}/golden/types
-GOLDENKV!=	cd ${.CURDIR} && echo golden/kv/*
-GOLDENKVDIR=	${TESTSDIR}/golden/kv
-ERRORS!=	cd ${.CURDIR} && echo errors/*.yaml errors/*.err
-ERRORSDIR=	${TESTSDIR}/errors
+FILESGROUPS+=	CTRL CBLMK YANG
 CTRL=		${LIBCBLINK_SRC}/cbl_yctrl.h \
 		${LIBCBLINK_SRC}/cbl_yctrl_schema.c \
 		${LIBCBLINK_SRC}/cbl_ymod.h \
 		${LIBCBLINK_SRC}/cbl_ymod_schema.c \
 		${.CURDIR}/../../../docs/ctrl.md
 CTRLDIR=	${TESTSDIR}/ctrl
-# cblink.mk, to build from specs given in each form of path.
+# cblink.mk, to build from modules given in each form of path.
 CBLMK=		${.CURDIR}/../../../share/cblink/cblink.mk
 CBLMKDIR=	${TESTSDIR}
 # YANG modules for the front end.
@@ -128,7 +83,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/cblink-ctrl@2026-10-13.sid
 YANGDIR=	${TESTSDIR}/yang
 
-.for g in GOLDEN GOLDENTYPES GOLDENKV ERRORS CTRL CBLMK YANG
+.for g in CTRL CBLMK YANG
 ${g}PACKAGE=	${PACKAGE}
 .endfor
 

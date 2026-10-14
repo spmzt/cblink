@@ -1,1 +1,0 @@
-yaml-dup-key.yaml:3:1: error: duplicate key 'name' (first defined at 1:1)

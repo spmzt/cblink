@@ -5,10 +5,9 @@
  */
 
 /*
- * cblink-gen: generate C code and documentation from a cblink family
- * spec.  See cblink-gen(1) and docs/GENERATOR.md.  A YANG module
- * (name.yang or name@revision.yang) is read through libyang when the
- * generator is built with it (CBLINK_GEN_LIBYANG).
+ * cblink-gen: C code, schema tables, .sid files and documentation from
+ * YANG modules (name.yang or name@revision.yang), compiled by libyang.
+ * See cblink-gen(1) and docs/GENERATOR.md.
  */
 
 #include <sys/capsicum.h>
@@ -24,8 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "spec.h"
-#ifdef CBLINK_GEN_LIBYANG
+#include "gen.h"
 #include "cbl_pattern.h"
 #include "schema.h"
 #include "sid.h"
@@ -58,9 +56,7 @@ doc_emit(const struct schema *s, int dirfd, const char *base,
 	buf_free(&b);
 	return (rv);
 }
-#endif
 
-#define	DEFAULT_PARTS	"h,c,client,server,md"
 /* .sid files: one a module, a module set's modules. */
 #define	MAX_SIDS	256
 
@@ -68,16 +64,15 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "usage: cblink-gen [-BnV] [-b base] [-m parts] "
-	    "[-o dir] spec.yaml\n"
-	    "       cblink-gen [-adn] [-F module:feature,...] ... "
-	    "[-b base] [-m h,md,sid,sidjson,tree]\n"
-	    "                  [-o dir] [-p dir] ... [-s file.sid] ... "
-	    "module.yang ...\n");
+	fprintf(stderr, "usage: cblink-gen [-adnV] [-F module:feature,...] ... "
+	    "[-b base]\n"
+	    "                  [-m h,schema,server,md,sid,sidjson,tree] "
+	    "[-o dir] [-p dir] ...\n"
+	    "                  [-s file.sid] ... module.yang ...\n");
 	exit(2);
 }
 
-/* Read the whole file, refusing anything larger than the YAML limit. */
+/* Read the whole file, refusing anything larger than MAX_FILE. */
 static char *
 read_file(int fd, const char *path, size_t *lenp)
 {
@@ -90,16 +85,16 @@ read_file(int fd, const char *path, size_t *lenp)
 		err(2, "%s", path);
 	if (!S_ISREG(sb.st_mode))
 		errx(2, "%s: not a regular file", path);
-	if (sb.st_size > YAML_MAX_FILE)
+	if (sb.st_size > MAX_FILE)
 		errx(1, "%s: file too large (limit %d bytes)", path,
-		    YAML_MAX_FILE);
+		    MAX_FILE);
 	cap = (size_t)sb.st_size + 1;
 	data = xcalloc(cap + 1, 1);
 	while ((n = read(fd, data + len, cap - len)) > 0) {
 		len += (size_t)n;
-		if (len > YAML_MAX_FILE)
+		if (len > MAX_FILE)
 			errx(1, "%s: file too large (limit %d bytes)", path,
-			    YAML_MAX_FILE);
+			    MAX_FILE);
 		if (len == cap) {
 			data = xreallocarray(data, cap * 2 + 1, 1);
 			cap *= 2;
@@ -111,7 +106,6 @@ read_file(int fd, const char *path, size_t *lenp)
 	return (data);
 }
 
-#ifdef CBLINK_GEN_LIBYANG
 /* A .sid file as asked: name@revision.sid, and .sid.cbor its CBOR. */
 static int
 sid_emit(const struct sidfile *sf, int dirfd, bool cbor, bool json)
@@ -412,42 +406,21 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	free(bname);
 	return (0);
 }
-#else
-static int
-yang_main(int argc __unused, char *argv[], const char **paths __unused,
-    size_t npaths __unused, const char **feats __unused,
-    size_t nfeats __unused, const char **sids __unused,
-    size_t nsids __unused, const char *parts __unused,
-    const char *outdir __unused, const char *base __unused,
-    bool assign __unused, bool check __unused, bool dump __unused)
-{
-
-	errx(2, "%s: YANG input needs cblink-gen built with libyang "
-	    "(CBLINK_GEN_LIBYANG=yes, net/libyang3)", argv[0]);
-}
-#endif
 
 int
 main(int argc, char *argv[])
 {
-	const char *outdir = ".", *parts = DEFAULT_PARTS, *base = NULL;
-	struct diags d = { 0 };
-	struct ynode *root;
-	struct spec *s;
-	bool assign = false, builtin = false, check = false, dump = false;
-	bool mflag = false;
-	char *data, *pathcopy, *file, *dot, *bname = NULL;
+	const char *outdir = ".", *parts = "", *base = NULL;
+	bool assign = false, check = false, dump = false;
 	const char *paths[16], *feats[64], *sids[MAX_SIDS];
-	size_t len, npaths = 0, nfeats = 0, nsids = 0;
-	int ch, fd, dirfd, rv;
+	size_t npaths = 0, nfeats = 0, nsids = 0;
+	char *dot;
+	int ch;
 
-	while ((ch = getopt(argc, argv, "aBb:dF:m:no:p:s:V")) != -1) {
+	while ((ch = getopt(argc, argv, "ab:dF:m:no:p:s:V")) != -1) {
 		switch (ch) {
 		case 'a':
 			assign = true;
-			break;
-		case 'B':
-			builtin = true;
 			break;
 		case 'b':
 			base = optarg;
@@ -462,7 +435,6 @@ main(int argc, char *argv[])
 			break;
 		case 'm':
 			parts = optarg;
-			mflag = true;
 			break;
 		case 'n':
 			check = true;
@@ -489,57 +461,9 @@ main(int argc, char *argv[])
 	}
 	argc -= optind;
 	argv += optind;
-	if (argc >= 1 && (dot = strrchr(argv[0], '.')) != NULL &&
-	    strcmp(dot, ".yang") == 0)
-		return (yang_main(argc, argv, paths, npaths, feats, nfeats,
-		    sids, nsids, mflag ? parts : "", outdir, base, assign,
-		    check, dump));
-	if (argc != 1 || assign || dump || nfeats > 0 || nsids > 0)
+	if (argc < 1 || (dot = strrchr(argv[0], '.')) == NULL ||
+	    strcmp(dot, ".yang") != 0)
 		usage();
-
-	if ((fd = open(argv[0], O_RDONLY | O_CLOEXEC)) == -1)
-		err(2, "%s", argv[0]);
-	dirfd = -1;
-	if (!check && (dirfd = open(outdir, O_DIRECTORY | O_SEARCH |
-	    O_CLOEXEC)) == -1)
-		err(2, "%s", outdir);
-	pathcopy = xstrdup(argv[0]);
-	file = xstrdup(basename(pathcopy));
-	free(pathcopy);
-	if (base == NULL) {
-		bname = xstrdup(file);
-		if ((dot = strrchr(bname, '.')) != NULL &&
-		    strcmp(dot, ".yaml") == 0)
-			*dot = '\0';
-		base = bname;
-	}
-	if (*base == '\0' || strchr(base, '/') != NULL)
-		errx(2, "invalid output base name '%s'", base);
-
-	/* The spec is untrusted input: parse it in capability mode. */
-	caph_cache_catpages();
-	if (caph_limit_stdio() != 0 || caph_enter() != 0)
-		err(2, "capsicum");
-
-	data = read_file(fd, argv[0], &len);
-	close(fd);
-	d.file = file;
-	root = yaml_parse(data, len, &d);
-	free(data);
-	if (root == NULL) {
-		diag_print(&d);
-		return (1);
-	}
-	s = spec_load(root, file, builtin, &d);
-	yaml_free(root);
-	if (s == NULL) {
-		diag_print(&d);
-		return (1);
-	}
-	rv = check ? 0 : gen_c(s, base, dirfd, parts) != 0 ? 2 : 0;
-	spec_free(s);
-	diag_free(&d);
-	free(file);
-	free(bname);
-	return (rv);
+	return (yang_main(argc, argv, paths, npaths, feats, nfeats, sids,
+	    nsids, parts, outdir, base, assign, check, dump));
 }

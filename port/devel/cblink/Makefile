@@ -10,7 +10,9 @@ WWW=		https://github.com/spmzt/cblink
 LICENSE=	BSD2CLAUSE
 LICENSE_FILE=	${WRKSRC}/LICENSE
 
-LIB_DEPENDS=	libcbor.so:devel/libcbor
+# cblink-gen compiles YANG modules with libyang.
+LIB_DEPENDS=	libcbor.so:devel/libcbor \
+		libyang.so:net/libyang3
 
 USES=		ssl uidfix
 USE_LDCONFIG=	yes
@@ -35,7 +37,8 @@ post-install-DOCS-on:
 	@${MKDIR} ${STAGEDIR}${DOCSDIR}
 	${INSTALL_DATA} ${WRKSRC}/docs/*.md ${STAGEDIR}${DOCSDIR}
 
-# Each example is a spec, a main.c and a Makefile that uses cblink.mk.
+# Each example is a YANG module and its .sid file, a main.c and a Makefile
+# that uses cblink.mk.
 post-install-EXAMPLES-on:
 	@${MKDIR} ${STAGEDIR}${EXAMPLESDIR}
 	cd ${WRKSRC}/examples && ${COPYTREE_SHARE} "echo kv notify stream" \

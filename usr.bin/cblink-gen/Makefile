@@ -1,39 +1,33 @@
 PROG=		cblink-gen
 SRCS=		main.c \
-		gen_c.c \
-		gen_md.c \
-		spec.c \
+		gen_yang.c \
+		gen_ymd.c \
+		gen_yschema.c \
+		gen_yserver.c \
+		gen_ytree.c \
+		schema.c \
+		sid.c \
+		sidcbor.c \
 		util.c \
-		yaml.c
+		yang.c
 MAN=		cblink-gen.1
 
-# The YANG front end needs libyang 3 (net/libyang3), a developer's
-# dependency only: without it the generator reads YAML specs and refuses
-# YANG modules.  CBLINK_GEN_LIBYANG is yes when libyang is found, unless
-# set; set to yes, it must be found.
+# YANG modules are compiled by libyang 3 (net/libyang3), the generator's
+# one dependency beyond base: a developer's, not a program's.
 LOCALBASE?=	/usr/local
-.if !defined(CBLINK_GEN_LIBYANG)
-.if exists(${LOCALBASE}/include/libyang/libyang.h)
-CBLINK_GEN_LIBYANG=	yes
-.else
-CBLINK_GEN_LIBYANG=	no
-.endif
-.endif
-.if ${CBLINK_GEN_LIBYANG} == "yes"
 .if !exists(${LOCALBASE}/include/libyang/libyang.h)
-.error CBLINK_GEN_LIBYANG=yes, but libyang is not in ${LOCALBASE}: pkg install libyang3
+.error cblink-gen needs libyang in ${LOCALBASE}: pkg install libyang3
 .endif
-SRCS+=		gen_yschema.c gen_yserver.c gen_yang.c gen_ymd.c gen_ytree.c schema.c sid.c sidcbor.c yang.c
+CFLAGS+=	-idirafter ${LOCALBASE}/include
+LDADD+=		-L${LOCALBASE}/lib -lyang
 # .sid files are JSON, read with base's libucl (private, with its header).
 CFLAGS+=	-I/usr/include/private/ucl
 LDADD+=		-lprivateucl
-# The XPath parser is libcblink's, compiled in.
+# The XPath parser and the pattern translator are libcblink's, compiled
+# in.
 .PATH:		${.CURDIR}/../../lib/libcblink
 SRCS+=		cbl_pattern.c cbl_xpath.c
 CFLAGS+=	-I${.CURDIR}/../../lib/libcblink
-CFLAGS+=	-DCBLINK_GEN_LIBYANG -idirafter ${LOCALBASE}/include
-LDADD+=		-L${LOCALBASE}/lib -lyang
-.endif
 
 CSTD?=		c23
 WARNS?=		6

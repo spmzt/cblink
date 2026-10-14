@@ -30,6 +30,13 @@ struct ly_ctx	*yang_ctx_new(const char **dirs, size_t ndirs);
  */
 int		 yang_load(struct ly_ctx *ctx, struct diags *d,
 		    const char **specs, size_t nspecs);
+/*
+ * The module named alone, of those given, its imports from the others,
+ * every feature on: what its .sid file numbers, whatever another module
+ * deviates.  1: none such given.
+ */
+int		 yang_load_one(struct ly_ctx *ctx, struct diags *d,
+		    const char *name, const char *rev);
 struct schema	*yang_schema(struct ly_ctx *ctx);
 
 #endif /* !_CBLINK_GEN_YANG_H_ */

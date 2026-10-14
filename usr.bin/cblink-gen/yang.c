@@ -232,23 +232,30 @@ yang_ctx_new(const char **dirs, size_t ndirs)
  * the deviations of the modules loaded and leaves out what a disabled
  * feature guards.
  */
-int
-yang_load(struct ly_ctx *ctx, struct diags *d, const char **specs,
-    size_t nspecs)
+static int
+load(struct ly_ctx *ctx, struct diags *d, const char **specs,
+    size_t nspecs, const char *only, const char *onlyrev)
 {
 	const char *all[] = { "*", NULL }, *none[] = { NULL };
 	struct lys_module *mod, **impl = NULL;
 	struct ly_in *in;
 	const char *file;
-	size_t nimpl = 0;
+	size_t nimpl = 0, nparsed = 0;
 	uint32_t idx = 0;
 	LY_ERR e;
 
 	for (size_t i = 0; i < nsrcs; i++) {
-		if (!srcs[i].given)
+		const char *text = srcs[i].text;
+
+		/* Alone: its text as an import would find it, given or not. */
+		if (only != NULL) {
+			if (nparsed > 0 || (text = find(only, onlyrev)) == NULL)
+				break;
+		} else if (!srcs[i].given)
 			continue;
-		d->file = srcs[i].file;
-		if (ly_in_new_memory(srcs[i].text, &in) != LY_SUCCESS)
+		nparsed++;
+		d->file = only != NULL ? only : srcs[i].file;
+		if (ly_in_new_memory(text, &in) != LY_SUCCESS)
 			errx(2, "libyang: no memory");
 		logto = d;
 		e = lys_parse(ctx, in, LYS_IN_YANG, NULL, &mod);
@@ -261,6 +268,8 @@ yang_load(struct ly_ctx *ctx, struct diags *d, const char **specs,
 		}
 	}
 
+	if (only != NULL && nparsed == 0)
+		return (1);
 	file = d->file;
 	d->file = "-F";
 	for (size_t i = 0; i < nspecs; i++) {
@@ -333,6 +342,22 @@ yang_load(struct ly_ctx *ctx, struct diags *d, const char **specs,
 	free(impl);
 	d->file = file;
 	return (0);
+}
+
+int
+yang_load(struct ly_ctx *ctx, struct diags *d, const char **specs,
+    size_t nspecs)
+{
+
+	return (load(ctx, d, specs, nspecs, NULL, NULL));
+}
+
+int
+yang_load_one(struct ly_ctx *ctx, struct diags *d, const char *name,
+    const char *rev)
+{
+
+	return (load(ctx, d, NULL, 0, name, rev));
 }
 
 /*

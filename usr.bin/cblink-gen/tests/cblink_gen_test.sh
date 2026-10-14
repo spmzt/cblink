@@ -388,6 +388,58 @@ sid_cbor_body()
 	atf_check -o ignore $gen -m h,schema -b sys -o four -F ietf-system: \
 	    -s full.sid "$m"
 	atf_check -o not-match:'radius' cat four/sys.h
+	# Nor whatever another module deviates: a file is verified and
+	# numbered against its module alone, and the tables made without
+	# what is deviated away.
+	cat > dvbase@2026-10-14.yang <<-EOF
+	module dvbase {
+	  yang-version 1.1;
+	  namespace "urn:test:dvbase";
+	  prefix dvb;
+	  revision 2026-10-14;
+	  container c {
+	    leaf kept { type string; }
+	    leaf dropped { type string; }
+	  }
+	}
+	EOF
+	cat > dvdev@2026-10-14.yang <<-EOF
+	module dvdev {
+	  yang-version 1.1;
+	  namespace "urn:test:dvdev";
+	  prefix dvd;
+	  import dvbase { prefix dvb; }
+	  revision 2026-10-14;
+	  deviation "/dvb:c/dvb:dropped" { deviate not-supported; }
+	}
+	EOF
+	cat > dvbase.sid <<-EOF
+	{
+	  "ietf-sid-file:sid-file": {
+	    "module-name": "dvbase",
+	    "module-revision": "2026-10-14",
+	    "assignment-range": [
+	      { "entry-point": "70000", "size": "10" }
+	    ],
+	    "item": [
+	      { "namespace": "module", "identifier": "dvbase", "sid": "70000" }
+	    ]
+	  }
+	}
+	EOF
+	cp dvbase.sid dvbase-dev.sid
+	atf_check -o match:'^dvbase.sid: 3 SIDs assigned' $gen -n -a -p . \
+	    -s dvbase.sid dvbase@2026-10-14.yang
+	atf_check -o match:'^dvbase-dev.sid: 3 SIDs assigned' $gen -n -a -p . \
+	    -s dvbase-dev.sid dvbase@2026-10-14.yang dvdev@2026-10-14.yang
+	atf_check cmp dvbase.sid dvbase-dev.sid
+	atf_check -o match:'/dvbase:c/dropped' cat dvbase.sid
+	atf_check -o match:', 4 SIDs from 1 .sid files$' $gen -n -p . \
+	    -s dvbase.sid dvbase@2026-10-14.yang dvdev@2026-10-14.yang
+	mkdir five
+	atf_check -o ignore $gen -m h,schema -b dv -o five -p . \
+	    -s dvbase.sid dvbase@2026-10-14.yang dvdev@2026-10-14.yang
+	atf_check -o match:'kept' -o not-match:'dropped' cat five/dv.h
 	# A .sid file with a status per item and a file status.
 	awk '{ print }
 	    /"sid-file-version": 1,/ {

@@ -163,8 +163,8 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	struct diags d = { 0 };
 	char *sidtext[MAX_SIDS];
 	size_t sidlen[MAX_SIDS], nattached = 0;
-	struct schema *s, *sall;
-	struct ly_ctx *ctx, *ctxall = NULL;
+	struct schema *s, *sall, *sref;
+	struct ly_ctx *ctx, *ctxall = NULL, *ctxone[MAX_SIDS];
 	char *pathcopy;
 	size_t nodes = 0, nmods = 0, nexprs, npats;
 	int fd, nassigned;
@@ -214,6 +214,13 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 	 */
 	if (nsids > 0 && nfeats > 0)
 		ctxall = yang_ctx_new(dirs, ndirs);
+	/*
+	 * Nor whatever another module deviates: each file is verified and
+	 * numbered against its own module alone, every feature on, a
+	 * context each, made here, out of capability mode.
+	 */
+	for (size_t i = 0; i < nsids; i++)
+		ctxone[i] = yang_ctx_new(dirs, ndirs);
 
 	/*
 	 * The parts written yet: "h", the structs; "md", the modules'
@@ -289,10 +296,26 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 
 		pathcopy = xstrdup(sids[i]);
 		d.file = basename(pathcopy);
+		sref = NULL;
 		if ((sf = sid_read(sidtext[i], sidlen[i], &d)) != NULL) {
-			if (sid_attach(sall, sf, &d, false) == 0 && assign &&
-			    (nassigned = sid_assign(sall, sf, &d)) > 0 &&
-			    sid_attach(sall, sf, &d, false) == 0) {
+			/* Its module alone; one not given, as all are. */
+			switch (yang_load_one(ctxone[i], &d, sf->module,
+			    sf->revision)) {
+			case 0:
+				sref = yang_schema(ctxone[i]);
+				d.file = basename(pathcopy);
+				break;
+			case 1:
+				sref = sall;
+				d.file = basename(pathcopy);
+				break;
+			default:
+				diag_print(&d);
+				return (1);
+			}
+			if (sid_attach(sref, sf, &d, false) == 0 && assign &&
+			    (nassigned = sid_assign(sref, sf, &d)) > 0 &&
+			    sid_attach(sref, sf, &d, false) == 0) {
 				struct buf b;
 
 				buf_init(&b);
@@ -305,15 +328,17 @@ yang_main(int argc, char *argv[], const char **paths, size_t npaths,
 				printf("%s: %d SIDs assigned, version %u\n",
 				    d.file, nassigned, sf->version);
 			}
-			if (d.n == 0 && sid_verify(sall, sf, &d) == 0)
+			if (d.n == 0 && sid_verify(sref, sf, &d) == 0)
 				nattached += sf->nitems;
-			if (d.n == 0 && sall != s)
+			if (d.n == 0 && sref != s)
 				sid_attach(s, sf, &d, true);
 			if (d.n == 0 && (cbor || json) &&
 			    sid_emit(sf, dirfd, cbor, json) != 0)
 				return (2);
 			sid_free(sf);
 		}
+		if (sref != NULL && sref != sall && sref != s)
+			schema_free(sref);
 		if (assign)
 			close(sidfd[i]);
 		free(sidtext[i]);

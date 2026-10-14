@@ -219,11 +219,15 @@ place(struct edit *e, cbl_dnode *x, const cbl_dnode *en)
 		after = k;
 		break;
 	default:
-		if ((pe = pointed(tn, en)) == NULL)
-			return (fail(e, en, "bad-attribute", ENOENT,
+		if ((pe = pointed(tn, en)) == NULL) {
+			error = fail(e, en, "bad-attribute", ENOENT,
 			    "%s: missing-instance, no entry to go %s",
 			    en->sn->name, en->where == CBL_DWHERE_BEFORE ?
-			    "before" : "after"));
+			    "before" : "after");
+			if (e->err != NULL)
+				e->err->apptag = "missing-instance";
+			return (error);
+		}
 		if (pe == x)
 			return (fail(e, en, "bad-attribute", EINVAL,
 			    "%s: before or after itself", en->sn->name));

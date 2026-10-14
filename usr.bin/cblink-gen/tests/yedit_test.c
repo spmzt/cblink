@@ -15,8 +15,9 @@
  * of a playlist ordered by the user inserted and moved, first, last,
  * before and after another.  And the difference of two trees, applied to
  * the first, makes it the second: trees of every struct filled three
- * ways, a playlist reordered, a choice's case changed.  A tree's state is
- * compared by its YANG-CBOR.
+ * ways, a playlist reordered, a choice's case changed.  References: a
+ * leafref and an instance-identifier to what is there, and dangling.  A
+ * tree's state is compared by its YANG-CBOR.
  */
 
 #include <errno.h>
@@ -745,6 +746,96 @@ ATF_TC_BODY(diff_cases, tc)
 	cbl_dtree_free(b);
 }
 
+/* A CBOR head, appended. */
+static void
+cbor_head(uint8_t *b, size_t *n, unsigned major, uint64_t v)
+{
+
+	if (v < 24)
+		b[(*n)++] = (uint8_t)(major << 5 | v);
+	else if (v <= UINT32_MAX) {
+		b[(*n)++] = (uint8_t)(major << 5 | 26);
+		for (int i = 3; i >= 0; i--)
+			b[(*n)++] = (uint8_t)(v >> (8 * i));
+	} else {
+		b[(*n)++] = (uint8_t)(major << 5 | 27);
+		for (int i = 7; i >= 0; i--)
+			b[(*n)++] = (uint8_t)(v >> (8 * i));
+	}
+}
+
+/* An instance-identifier's YANG-CBOR: [SID, text], or the SID alone. */
+static struct cbl_bytes
+iid(uint8_t *b, const char *path, const char *key)
+{
+	size_t n = 0;
+
+	if (key != NULL)
+		cbor_head(b, &n, 4, 2);
+	cbor_head(b, &n, 0, sn(path)->sid);
+	if (key != NULL) {
+		cbor_head(b, &n, 3, strlen(key));
+		memcpy(b + n, key, strlen(key));
+		n += strlen(key);
+	}
+	return ((struct cbl_bytes){ b, n });
+}
+
+ATF_TC_WITHOUT_HEAD(refs);
+ATF_TC_BODY(refs, tc)
+{
+	struct cbl_dederr err;
+	const char *name, *addr = "192.0.2.50", *tag = "blue";
+	uint8_t buf[64];
+	struct cbl_bytes v;
+	cbl_dnode *x, *mark;
+	cbl_dtree *t;
+
+	t = running();
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+	/* A leafref to an interface there; to one not, refused there;
+	 * one that requires none, not looked at. */
+	name = "Ethernet0/1";
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(t), sn("top/primary"), &name, &x));
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+	name = "Ethernet9/9";
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(x, &name));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_CHECK(err.node == x);
+	ATF_CHECK_STREQ("data-missing", err.tag);
+	ATF_CHECK_STREQ("instance-required", err.apptag);
+	ATF_REQUIRE_EQ(0, cbl_dnode_remove(x));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(t), sn("top/loose"), &name, NULL));
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+
+	/* An instance-identifier: an interface's MTU by its key, there and
+	 * not; a leaf of no list, there and not; a leaf-list's value. */
+	v = iid(buf, "top/interface/mtu", "Ethernet0/0");
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(t), sn("top/mark"), &v, &mark));
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+	v = iid(buf, "top/interface/mtu", "Ethernet9/9");
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(mark, &v));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_CHECK(err.node == mark);
+	v = iid(buf, "top/static-address", NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(mark, &v));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(t), sn("top/static-address"),
+	    &addr, NULL));
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+	v = iid(buf, "top/tags", "blue");
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(mark, &v));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(t), sn("top/tags"), &tag, NULL));
+	ATF_CHECK_EQ(0, cbl_dtree_check_refs(t, &err));
+	/* Keys missing from it: not one of the schema. */
+	v = iid(buf, "top/interface/mtu", NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(mark, &v));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_CHECK(strstr(err.msg, "not an instance-identifier") != NULL);
+	cbl_dtree_free(t);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -756,5 +847,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, rfc8072);
 	ATF_TP_ADD_TC(tp, diff_filled);
 	ATF_TP_ADD_TC(tp, diff_cases);
+	ATF_TP_ADD_TC(tp, refs);
 	return (atf_no_error());
 }

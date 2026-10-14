@@ -106,8 +106,10 @@ The structures of `<cbl_schema.h>` the library decodes, encodes and
 validates YANG-CBOR by:
 
 - every node with its SID, its kind and flags, its type, its children
-  sorted by SID, its keys, its choice and case, its `when` and `must`
-  expressions, its defaults and its limits, a list's `unique` statements
+  sorted by SID and its parent (the data node above it), its keys, its
+  choice and case, its `when` and `must` expressions, its defaults and
+  its limits, a leafref's target node as libyang resolves its path, a
+  list's `unique` statements
   (each leaf by the data nodes from an entry down to it); and where it is
   in the
   structs, with `offsetof()` and `sizeof()`, so that the two cannot

@@ -439,6 +439,8 @@ int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
 	    struct cbl_dederr *);
 /* the edit that makes a b, applied with none: a YANG Patch's changes */
 cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
+/* leafrefs and instance-identifiers that require an instance: there? */
+int	cbl_dtree_check_refs(const cbl_dtree *, struct cbl_dederr *);
 ```
 
 - **A tree's shape** is kept: a node only where its schema node is, one
@@ -463,6 +465,12 @@ cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
   edit says: first, last, or before or after another, by its keys or
   value (RFC 7950 section 7.8.6); YANG Patch's insert and move (RFC 8072)
   must say where, and a move's entry must be there.
+- **References**: `cbl_dtree_check_refs()` finds the first leafref
+  that requires an instance and has none of its value among its target
+  node's (the tables name the target), or instance-identifier naming no
+  node of the tree (read from its YANG-CBOR, found by its lists' keys):
+  data-missing, instance-required. A leafref path's predicates, which
+  may narrow its targets, are the evaluator's.
 - **A difference** of two trees is the edit that makes the first the
   second with the default none, what a YANG Patch carries: creates of
   what only the second has, merges of the leaves that differ, removes

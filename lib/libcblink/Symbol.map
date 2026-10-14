@@ -210,5 +210,6 @@ CBLINK_1.0 {
 	cbl_dnode_op;
 	cbl_dnode_set_where;
 	cbl_dtree_diff;
+	cbl_dtree_check_refs;
 	cbl_dtree_edit;
 };

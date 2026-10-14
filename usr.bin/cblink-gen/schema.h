@@ -208,6 +208,8 @@ struct snode {
 	size_t		 nexts;
 	struct sext	*in;		/* the instance holding it, or NULL */
 	uint64_t	 sid;		/* 0: none (choice, case, or unassigned) */
+	struct snode	*lref;		/* a leafref leaf: its target, or NULL */
+	const void	*lyn;		/* libyang's compiled node, while made */
 };
 
 /*

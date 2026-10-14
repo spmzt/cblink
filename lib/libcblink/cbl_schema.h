@@ -233,6 +233,11 @@ struct cbl_ynode {
 	const char		*const *dflt;	/* canonical */
 	const char		*units;
 	const struct cbl_ychoice *choice;	/* the one it is in, or NULL */
+	/* The data node it is a child of (choices and cases passed over,
+	 * an rpc's for its input): NULL at the top of its module. */
+	const struct cbl_ynode	*parent;
+	/* A leaf or leaf-list of type leafref: the node its path names. */
+	const struct cbl_ynode	*lref;
 };
 
 /*

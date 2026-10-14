@@ -12,7 +12,8 @@ module edits {
      RFC 6241 section 7.2's examples edit (top, its interfaces with an
      MTU and addresses, an OSPF area's interfaces), RFC 8072's (a
      playlist's songs, ordered by the user), and what else an edit
-     meets: a leaf-list, a choice, a default.";
+     meets: a leaf-list, a choice, a default; and references, a leafref
+     and an instance-identifier.";
 
   revision 2026-10-14 {
     description
@@ -68,6 +69,20 @@ module edits {
       leaf via {
         type string;
       }
+    }
+    leaf primary {
+      type leafref {
+        path "../interface/name";
+      }
+    }
+    leaf loose {
+      type leafref {
+        path "../interface/name";
+        require-instance false;
+      }
+    }
+    leaf mark {
+      type instance-identifier;
     }
     list playlist {
       key "name";

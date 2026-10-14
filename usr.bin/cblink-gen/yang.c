@@ -751,6 +751,7 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 	n->module = smod_of(c, ln->module);
 	n->parent = parent;
 	n->in = c->in;
+	n->lyn = ln;
 	if ((ln->nodetype & (LYS_RPC | LYS_ACTION | LYS_NOTIF | LYS_INPUT |
 	    LYS_OUTPUT)) == 0 && (ln->flags & LYS_CONFIG_W) != 0)
 		n->flags |= SNF_CONFIG;
@@ -949,6 +950,62 @@ conv_augments(struct smodule *m, const struct lys_module *lm)
 	}
 }
 
+/* Each node of the trees, structures' too, in turn. */
+static void
+walk_trees(struct snode *n, void (*visit)(struct snode *, void *),
+    void *arg)
+{
+
+	for (; n != NULL; n = n->next) {
+		visit(n, arg);
+		walk_trees(n->child, visit, arg);
+	}
+}
+
+static void
+walk_schema(struct schema *s, void (*visit)(struct snode *, void *),
+    void *arg)
+{
+
+	for (size_t i = 0; i < s->nmods; i++) {
+		walk_trees(s->mods[i]->data, visit, arg);
+		walk_trees(s->mods[i]->rpcs, visit, arg);
+		walk_trees(s->mods[i]->notifs, visit, arg);
+		for (size_t j = 0; j < s->mods[i]->nexts; j++)
+			walk_trees(s->mods[i]->exts[j].data, visit, arg);
+	}
+}
+
+struct lref {
+	struct schema	*s;
+	const void	*want;
+	struct snode	*found;
+};
+
+static void
+find_lyn(struct snode *n, void *arg)
+{
+	struct lref *l = arg;
+
+	if (l->found == NULL && n->lyn == l->want)
+		l->found = n;
+}
+
+/* A leafref leaf's target, as libyang resolved its path. */
+static void
+resolve_lref(struct snode *n, void *arg)
+{
+	struct lref l = { .s = arg };
+
+	if ((n->kind != SN_LEAF && n->kind != SN_LEAFLIST) || n->type == NULL ||
+	    n->type->base != ST_LEAFREF || n->lyn == NULL)
+		return;
+	if ((l.want = lysc_node_lref_target(n->lyn)) == NULL)
+		return;
+	walk_schema(l.s, find_lyn, &l);
+	n->lref = l.found;
+}
+
 struct schema *
 yang_schema(struct ly_ctx *ctx)
 {
@@ -1071,6 +1128,7 @@ yang_schema(struct ly_ctx *ctx)
 		    &c.s->mods[i]->nexts);
 		conv_augments(c.s->mods[i], lm);
 	}
+	walk_schema(c.s, resolve_lref, c.s);
 	free(c.lmods);
 	return (c.s);
 }

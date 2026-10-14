@@ -44,6 +44,7 @@ struct ys {
 	struct buf	 body;		/* the rest */
 	struct buf	 codec;		/* each struct's encoder and decoder */
 	struct pmap	 nodes;		/* snode -> its number */
+	struct pmap	 structs;	/* sx:structure sext -> its number */
 	struct pmap	 choices;	/* choice snode -> its number */
 	struct pmap	 mods;		/* smodule -> its number */
 	struct pmap	 bases;		/* identityref bases met, a set */
@@ -990,6 +991,17 @@ node_ref(struct ys *y, const struct snode *n)
 	}
 	(void)children_emit(y, nn, n->child, n->kind == SN_LIST ? n : NULL,
 	    &init);
+	/* Its data parent, choices and cases passed over, or its structure. */
+	for (c = n->parent; c != NULL && (c->kind == SN_CHOICE ||
+	    c->kind == SN_CASE); c = c->parent)
+		;
+	if (c != NULL)
+		buf_printf(&init, "\t.parent = &n%zu,\n", node_ref(y, c));
+	else if (n->in != NULL && pmap_get(&y->structs, n->in, &mn))
+		buf_printf(&init, "\t.parent = &n%zu,\n", mn);
+	/* A leafref's target, where its module's tables are these too. */
+	if (n->lref != NULL && smodule_emitted(n->lref->module))
+		buf_printf(&init, "\t.lref = &n%zu,\n", node_ref(y, n->lref));
 	if (n->kind == SN_LIST && n->nuniques > 0)
 		unique_emit(y, nn, n, &init);
 	if (n->nwhen > 0) {
@@ -1206,6 +1218,7 @@ structure_emit(struct ys *y, const struct smodule *m, size_t mn,
 	size_t nn;
 
 	nn = y->nnodes++;
+	pmap_put(&y->structs, e, nn);
 	top_add(&y->all, &y->nall, nn, e->sid);
 	y->mnodes++;
 	y->mbytes += sizeof(struct cbl_ynode) + strlen(e->arg) + 1;
@@ -1472,6 +1485,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	free(y.mref);
 	free(y.nodes.k);
 	free(y.nodes.v);
+	free(y.structs.k);
+	free(y.structs.v);
 	free(y.choices.k);
 	free(y.choices.v);
 	free(y.mods.k);

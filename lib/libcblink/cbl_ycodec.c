@@ -1311,3 +1311,79 @@ cbl_ydecode_member(const struct cbl_ynode *n, const void *data, size_t len,
 		return (fail(&r, EINVAL, "bytes after the value"));
 	return (0);
 }
+
+int
+cbl_yiid_read(const struct cbl_yschema *s, const struct cbl_bytes *v,
+    const struct cbl_ynode **node, const void ***vals, size_t *nvals,
+    cbl_yarena *a)
+{
+	struct yrd r = { v->p, (const uint8_t *)v->p + v->len, v->p, a, 0,
+	    NULL, 0, NULL };
+	const struct cbl_ynode *n, *chain[YDEPTH_MAX + 1];
+	const void **out;
+	uint64_t arg, sid, k = 1;
+	unsigned major;
+	size_t hlen, nc = 0, need = 0, j = 0;
+	int64_t ignored;
+	int error;
+
+	if (s == NULL || v == NULL || v->p == NULL || v->len == 0)
+		return (EINVAL);
+	if ((error = peek(&r, &major, &arg, &hlen)) != 0)
+		return (error);
+	/* [SID, values...], or the SID alone. */
+	if (major == 4) {
+		if (arg < 2)
+			return (EINVAL);
+		r.p += hlen;
+		k = arg;
+	}
+	if ((error = dec_int(&r, 0, UINT64_MAX, false, &sid, &ignored)) != 0)
+		return (error);
+	if ((n = cbl_yschema_node(s, sid)) == NULL)
+		return (ENOENT);
+	/* The lists from the top down, and how many values they take. */
+	for (const struct cbl_ynode *x = n; x != NULL; x = x->parent) {
+		if (nc == sizeof(chain) / sizeof(chain[0]))
+			return (ELOOP);
+		chain[nc++] = x;
+		if (x->kind == CBL_YN_LIST)
+			need += x->nkeys;
+	}
+	if (n->kind == CBL_YN_LEAFLIST)
+		need++;
+	if (k - 1 != need)
+		return (EINVAL);
+	if ((out = cbl_yarena_alloc(a, (need + 1) * sizeof(*out))) == NULL)
+		return (ENOMEM);
+	while (nc-- > 0) {
+		const struct cbl_ynode *x = chain[nc];
+
+		for (uint16_t i = 0; x->kind == CBL_YN_LIST && i < x->nkeys;
+		    i++) {
+			const struct cbl_ytype *t = x->child[x->keys[i]]->type;
+			void *val;
+
+			if ((val = cbl_yarena_alloc(a, t->csize)) == NULL)
+				return (ENOMEM);
+			if ((error = dec_value(&r, t, val, false)) != 0)
+				return (error);
+			out[j++] = val;
+		}
+	}
+	if (n->kind == CBL_YN_LEAFLIST) {
+		void *val;
+
+		if ((val = cbl_yarena_alloc(a, n->type->csize)) == NULL)
+			return (ENOMEM);
+		if ((error = dec_value(&r, n->type, val, false)) != 0)
+			return (error);
+		out[j++] = val;
+	}
+	if (r.p != r.end)
+		return (EINVAL);
+	*node = n;
+	*vals = out;
+	*nvals = j;
+	return (0);
+}

@@ -177,6 +177,7 @@ int		 cbl_dtree_to_module(const cbl_dtree *t,
 struct cbl_dederr {
 	const cbl_dnode	*node;
 	const char	*tag;
+	const char	*apptag;	/* RFC 7950's error-app-tag, or NULL */
 	char		 msg[160];
 };
 
@@ -186,6 +187,18 @@ int		 cbl_dnode_set_where(cbl_dnode *n, int where,
 		    const void *const *point);
 int		 cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit,
 		    int dflt, struct cbl_dederr *err);
+
+/*
+ * References (RFC 7950 sections 9.9.2, 9.13.2): every leafref of tree t
+ * with require-instance whose value no instance of its target node has,
+ * every instance-identifier with require-instance that names no node of
+ * t.  0, or ENOENT and err, if given, says the first: data-missing,
+ * instance-required.  A leafref's target is the node its path names, any
+ * instance of it: a path's predicates, which may narrow that, are the
+ * evaluator's; one in a union is not looked at.
+ */
+int		 cbl_dtree_check_refs(const cbl_dtree *t,
+		    struct cbl_dederr *err);
 
 /*
  * The edit that makes tree a tree b, applied to a with the default

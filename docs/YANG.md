@@ -104,7 +104,9 @@ shows them. Edits apply NETCONF's operations to it (RFC 6241 section
 7.2: merge, replace, create, delete, remove; none as the default) and
 YANG Patch's insert and move (RFC 8072), an ordered-by user list's
 entries where they say, all or nothing; the difference of two trees is
-such an edit.
+such an edit. Its references are checked against it: a leafref's value
+among its target's instances, an instance-identifier's node there,
+where they require an instance.
 
 ## 5. Expressions and patterns
 

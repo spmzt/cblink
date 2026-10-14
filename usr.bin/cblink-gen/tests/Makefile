@@ -68,7 +68,7 @@ yangh_schema.c: yangh.h
 ${PACKAGE}FILES+=	${GEN}
 ${PACKAGE}FILESMODE_${GEN}= 0555
 
-FILESGROUPS+=	CTRL CBLMK YANG
+FILESGROUPS+=	CTRL CBLMK YANG CORPUS FILL
 CTRL=		${LIBCBLINK_SRC}/cbl_yctrl.h \
 		${LIBCBLINK_SRC}/cbl_yctrl_schema.c \
 		${LIBCBLINK_SRC}/cbl_ymod.h \
@@ -95,8 +95,15 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/cblink-ctrl@2026-10-13.yang \
 		${.CURDIR}/../../../share/yang/cblink-ctrl@2026-10-13.sid
 YANGDIR=	${TESTSDIR}/yang
+# The corpus: the IETF and IANA modules Arcana builds on, as published
+# (corpus/README.md); and the filler the round trip over them is built
+# with.
+CORPUS!=	cd ${.CURDIR} && echo corpus/*.yang corpus/README.md
+CORPUSDIR=	${TESTSDIR}/corpus
+FILL=		yfill.c yfill.h
+FILLDIR=	${TESTSDIR}
 
-.for g in CTRL CBLMK YANG
+.for g in CTRL CBLMK YANG CORPUS FILL
 ${g}PACKAGE=	${PACKAGE}
 .endfor
 

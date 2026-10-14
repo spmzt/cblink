@@ -484,6 +484,128 @@ yang_tree_body()
 	    cat good.md
 }
 
+# A module and every module it imports, its submodules' imports too, by
+# name, from the directory: the modules whose features it may use.
+imports()
+{
+	local dir=$1 todo=$2 seen= m f i
+
+	while [ -n "$todo" ]; do
+		set -- $todo
+		m=$1
+		shift
+		todo="$*"
+		case " $seen " in *" $m "*) continue ;; esac
+		seen="$seen $m"
+		for f in "$dir/$m"@*.yang; do
+			[ -f "$f" ] || continue
+			todo="$todo $(awk '$1 == "import" { print $2 }' "$f")"
+			for i in $(awk '$1 == "include" { print $2 }' "$f"); do
+				todo="$todo $(cat "$dir/$i"@*.yang | awk \
+				    '$1 == "import" { print $2 }')"
+			done
+		done
+	done
+	echo $seen
+}
+
+atf_test_case corpus
+corpus_head()
+{
+	atf_set "descr" "The IETF and IANA modules of the corpus: each" \
+	    "tree as yanglint draws it, all their tables compiled and every" \
+	    "struct through YANG-CBOR and back"
+	atf_set "require.progs" "yanglint cc"
+	atf_set "timeout" "600"
+}
+corpus_body()
+{
+	local c prefix f m n i r mains
+
+	setup
+	c="$(atf_get_srcdir)/corpus"
+	prefix=$(cd "$(atf_get_srcdir)/../../.." && pwd)
+	mains=$(cd "$c" && grep -l '^module ' *.yang)
+
+	# Each tree, line for line, with every feature of the module and
+	# of those it imports on for both: without -F, yanglint turns off
+	# those of a module an import implements, cblink-gen turns on all
+	# (cblink-gen(1)).  cblink-gen implements an imported module only
+	# where the module refers to it, yanglint -i every one: those it
+	# does not, whose features cannot bear on its tree, are named by
+	# neither.
+	n=0
+	for f in $mains; do
+		m=${f%%@*}
+		feats=$(imports "$c" "$m")
+		while :; do
+			set --
+			for i in $feats; do
+				set -- "$@" -F "$i:*"
+			done
+			$gen -m tree -b "$m" "$@" "$c/$f" 2> err && break
+			x=$(sed -n "s/.*'\([^:']*\):\*': no module .* implemented\$/\1/p" err)
+			[ -n "$x" ] || atf_fail "$m: $(cat err)"
+			feats=$(echo $feats | tr ' ' '\n' | grep -vx "$x")
+		done
+		atf_check -o save:"$m.want" yanglint -i -p "$c" "$@" -f tree \
+		    "$c/$f"
+		atf_check -o file:"$m.want" cat "$m.tree"
+		n=$((n + 1))
+	done
+	[ "$n" -ge 50 ] || atf_fail "only $n modules in the corpus"
+
+	# The structs and tables of all of them together, their SIDs made
+	# up for the check (a range a module): compiled, and every struct,
+	# filled three ways, through YANG-CBOR and back to the same bytes.
+	set --
+	i=0
+	for f in $mains; do
+		m=${f%%@*}
+		r=$(sed -n 's/^ *revision \([0-9-]*\).*/\1/p' "$c/$f" | head -1)
+		printf '{"ietf-sid-file:sid-file": {"module-name": "%s",%s "assignment-range": [{"entry-point": "%s", "size": "100000"}]}}\n' \
+		    "$m" "${r:+ \"module-revision\": \"$r\",}" \
+		    $((1099511627776 + i * 100000)) > "$m.sid"
+		atf_check -o ignore $gen -n -a -p "$c" -s "$m.sid" "$c/$f"
+		set -- "$@" -s "$PWD/$m.sid"
+		i=$((i + 1))
+	done
+	for f in $mains; do
+		set -- "$@" "$c/$f"
+	done
+	atf_check -o match:'^in all: ' $gen -m h,schema,server -b corpus \
+	    -p "$c" "$@"
+	printf '#include "corpus.h"\n' > use.c
+	for f in use.c corpus_schema.c corpus_server.c; do
+		atf_check cc -std=c23 -Wall -Wextra -Werror -Wshadow \
+		    -Wcast-qual -Wwrite-strings -Wmissing-variable-declarations \
+		    -I"$prefix/include" -I. -c "$f" -o "$f.o"
+	done
+	cat > round.c <<'EOF'
+#include <stdio.h>
+
+#include "corpus.h"
+#include "yfill.h"
+
+int
+main(void)
+{
+	char why[512];
+	size_t n, bad;
+
+	bad = yround_all(&corpus_schema, &n, why, sizeof(why));
+	printf("%zu round trips, %zu not the same\n", n, bad);
+	if (bad != 0)
+		printf("%s\n", why);
+	return (bad != 0);
+}
+EOF
+	atf_check cc -std=c23 -Wall -Werror -I"$prefix/include" -I. \
+	    -I"$(atf_get_srcdir)" -o round round.c "$(atf_get_srcdir)/yfill.c" \
+	    corpus_schema.c.o -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
+	atf_check -o match:'^[0-9]+ round trips, 0 not the same$' ./round
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case determinism
@@ -495,4 +617,5 @@ atf_init_test_cases()
 	atf_add_test_case sid_cbor
 	atf_add_test_case yang_h
 	atf_add_test_case yang_tree
+	atf_add_test_case corpus
 }

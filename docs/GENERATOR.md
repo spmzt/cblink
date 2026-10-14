@@ -219,5 +219,9 @@ build time.
 - **determinism, cli, big_input, cblink_mk:** repeated runs give identical
   output, the command line, the size limit, and cblink.mk finding a
   module given in each form of path.
-- `tools/yangwalk/tablecheck.sh` runs the same round trip over a corpus
-  of modules (Arcana's `share/yang`: 51 modules, 8406 round trips).
+- **corpus:** the IETF and IANA modules Arcana builds on, as published
+  (`tests/corpus`, 51 modules): each tree as `yanglint -f tree` draws it
+  with the same features on, and the structs and tables of all of them
+  compiled, every struct through YANG-CBOR and back to the same bytes.
+- `tools/yangwalk/tablecheck.sh` runs that round trip over any
+  directory of modules; `treecheck.sh` sets yangwalk beside yanglint.

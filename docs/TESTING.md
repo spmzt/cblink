@@ -57,12 +57,13 @@ The suite has about 155 test cases.
 | `yfamily_test` | Family 1 serving those tables over a connection: GET and EDIT, an edit undone when another fails, refusals with the node at fault (the validator's among them), RPC, a dump, a notification heard. |
 | `yvalid_test` | The static validator on a module of RFC 7950's examples, a rule a case: ranges, lengths in characters, patterns and their app-tags, enums, bits, identities, unions, mandatory leaves and choices, counts, keys, `unique`, `config false` in edits; and the defaults of every kind. |
 | `yang_tree` | Tree diagrams equal to `yanglint -f tree`. |
+| `corpus` | The IETF and IANA modules Arcana builds on (`tests/corpus`, 51 of them, as published): each tree equal to `yanglint -f tree`'s with the same features on; the structs, tables and server table of all of them compiled at `-Werror`, and every struct through YANG-CBOR and back to the same bytes. |
 | `ymod_regen` | The structs and tables of cblink's own modules, and `docs/ctrl.md`, committed in `lib/libcblink` and `docs`, match what the generator produces now. |
 | `determinism`, `cli`, `big_input`, `cblink_mk` | Repeated runs give identical output; options and exit codes; the size limit; cblink.mk finds a module given relative, with `../`, or absolute. |
 
-`tools/yangwalk/tablecheck.sh` runs the same round trip over a corpus of
-modules, every struct filled as the tables say, encoded, decoded and
-encoded again to the same bytes.
+`tools/yangwalk/tablecheck.sh` runs the same round trip over any
+directory of modules, every struct filled as the tables say, encoded,
+decoded and encoded again to the same bytes.
 
 ### 2.3 Examples (`examples/tests`)
 

@@ -437,6 +437,8 @@ int	cbl_dnode_set_where(cbl_dnode *, int where, const void *const *point);
 struct cbl_dederr { const cbl_dnode *node; const char *tag; char msg[160]; };
 int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
 	    struct cbl_dederr *);
+/* the edit that makes a b, applied with none: a YANG Patch's changes */
+cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
 ```
 
 - **A tree's shape** is kept: a node only where its schema node is, one
@@ -460,7 +462,14 @@ int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
   ordered-by user list's entry, or leaf-list's value, goes where its
   edit says: first, last, or before or after another, by its keys or
   value (RFC 7950 section 7.8.6); YANG Patch's insert and move (RFC 8072)
-  must say where, and a move's entry must be there. Every
+  must say where, and a move's entry must be there.
+- **A difference** of two trees is the edit that makes the first the
+  second with the default none, what a YANG Patch carries: creates of
+  what only the second has, merges of the leaves that differ, removes
+  of what only the first has (but where another case's create takes its
+  place), and, where an ordered-by user list's order would not be the
+  second's, each of its entries said where. A keyless list's entries
+  cannot be named: the node they are in is replaced. Every
   change goes in an undo log as it is made, played back on an error:
   the target is as it was, and the error names the edit's node, its
   error-tag and why.

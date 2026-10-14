@@ -13,8 +13,10 @@
  * other's place; leaf-lists and an ordered list; and an edit that fails
  * halfway leaving the target as it was.  RFC 8072's (YANG Patch): songs
  * of a playlist ordered by the user inserted and moved, first, last,
- * before and after another.  A tree's state is compared by its
- * YANG-CBOR.
+ * before and after another.  And the difference of two trees, applied to
+ * the first, makes it the second: trees of every struct filled three
+ * ways, a playlist reordered, a choice's case changed.  A tree's state is
+ * compared by its YANG-CBOR.
  */
 
 #include <errno.h>
@@ -25,6 +27,7 @@
 
 #include "cbl_data.h"
 #include "yangh.h"
+#include "yfill.h"
 
 static const struct cbl_ynode *
 sn(const char *path)
@@ -436,8 +439,8 @@ songs(cbl_dtree *t)
 	    cbl_dnode_schema(x) == sn("top/playlist/song");
 	    x = cbl_dnode_next(x))
 		n += (size_t)snprintf(buf + n, sizeof(buf) - n, "%s%u",
-		    n > 0 ? " " : "",
-		    *(const uint32_t *)cbl_dnode_value(cbl_dnode_first(x)));
+		    n > 0 ? " " : "", *(const uint32_t *)cbl_dnode_value(
+		    cbl_dnode_child(x, sn("top/playlist/song/index"))));
 	return (buf);
 }
 
@@ -541,6 +544,207 @@ ATF_TC_BODY(rfc8072, tc)
 	cbl_dtree_free(t);
 }
 
+/* The node of y's parent q that x of p's is: by keys, value, or kind. */
+static const cbl_dnode *
+counterpart(const cbl_dnode *q, const cbl_dnode *x)
+{
+	const struct cbl_ynode *s = cbl_dnode_schema(x);
+	const void *keys[8];
+
+	if (s->kind == CBL_YN_LEAFLIST)
+		return (cbl_dnode_llentry(q, s, cbl_dnode_value(x)));
+	if (s->kind != CBL_YN_LIST)
+		return (cbl_dnode_child(q, s));
+	for (uint16_t k = 0; k < s->nkeys; k++)
+		keys[k] = cbl_dnode_value(cbl_dnode_child(x,
+		    s->child[s->keys[k]]));
+	return (cbl_dnode_entry(q, s, keys));
+}
+
+/*
+ * Whether two nodes are the same data, as YANG has it: the same
+ * children with the same values, a system-ordered list's entries in any
+ * order, a user-ordered one's in the same.
+ */
+static bool
+equal(const cbl_dnode *p, const cbl_dnode *q)
+{
+	const struct cbl_ynode *s = cbl_dnode_schema(p);
+	const cbl_dnode *x, *y;
+	size_t np = 0, nq = 0;
+
+	if (s != NULL && s->type != NULL &&
+	    !cbl_dvalue_equal(s->type, cbl_dnode_value(p), cbl_dnode_value(q)))
+		return (false);
+	for (x = cbl_dnode_first(p); x != NULL; x = cbl_dnode_next(x))
+		np++;
+	for (y = cbl_dnode_first(q); y != NULL; y = cbl_dnode_next(y))
+		nq++;
+	if (np != nq)
+		return (false);
+	for (x = cbl_dnode_first(p), y = cbl_dnode_first(q); x != NULL;
+	    x = cbl_dnode_next(x), y = cbl_dnode_next(y)) {
+		const struct cbl_ynode *xs = cbl_dnode_schema(x);
+		const cbl_dnode *m;
+
+		if (xs != cbl_dnode_schema(y))
+			return (false);
+		if ((xs->flags & CBL_YNF_USERORDER) || (xs->kind ==
+		    CBL_YN_LIST && xs->nkeys == 0))
+			m = y;
+		else
+			m = counterpart(q, x);
+		if (m == NULL || !equal(x, m))
+			return (false);
+	}
+	return (true);
+}
+
+static bool
+same_all(cbl_dtree *a, cbl_dtree *b)
+{
+
+	return (cbl_dtree_count(a) == cbl_dtree_count(b) &&
+	    equal(cbl_dtree_root(a), cbl_dtree_root(b)));
+}
+
+/* diff(a, b) applied to a: a is b; and a diff of the same, empty. */
+static void
+roundtrip(cbl_dtree *a, cbl_dtree *b, const char *what)
+{
+	struct cbl_dederr err;
+	cbl_dtree *d;
+
+	ATF_REQUIRE_MSG((d = cbl_dtree_diff(a, b)) != NULL, "%s: %s", what,
+	    strerror(errno));
+	ATF_REQUIRE_EQ_MSG(0, cbl_dtree_edit(a, d, CBL_DOP_NONE, &err),
+	    "%s: %s %s", what, err.tag != NULL ? err.tag : "", err.msg);
+	ATF_CHECK_MSG(same_all(a, b), "%s: not the same", what);
+	cbl_dtree_free(d);
+	ATF_REQUIRE((d = cbl_dtree_diff(a, b)) != NULL);
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_count(d), "%s: a difference left",
+	    what);
+	cbl_dtree_free(d);
+}
+
+/* A tree of top-level node n, filled by yfill (pass, all). */
+static cbl_dtree *
+filled(const struct cbl_ynode *n, int pass, bool all)
+{
+	struct cbl_ybuf b = { 0 };
+	cbl_dtree *t = tree();
+
+	ATF_REQUIRE_EQ(0, yencoded(n, pass, all, &b));
+	ATF_REQUIRE_EQ(0, cbl_dnode_decode(cbl_dtree_root(t), n, b.p, b.len,
+	    CBL_YD_STRICT, NULL, 0, NULL));
+	cbl_ybuf_free(&b);
+	return (t);
+}
+
+ATF_TC_WITHOUT_HEAD(diff_filled);
+ATF_TC_BODY(diff_filled, tc)
+{
+	char what[128];
+	size_t done = 0;
+
+	for (uint32_t i = 0; i < yangh_schema.nmod; i++) {
+		const struct cbl_ymodule *m = yangh_schema.mod[i];
+
+		for (uint32_t j = 0; j < m->ntop; j++) {
+			const struct cbl_ynode *n = m->top[j];
+
+			if (n->size == 0 || n->kind == CBL_YN_RPC ||
+			    n->kind == CBL_YN_NOTIF ||
+			    n->kind == CBL_YN_STRUCTURE)
+				continue;
+			for (int p = 0; p < 6; p++)
+				for (int q = 0; q < 6; q++) {
+					cbl_dtree *a = filled(n, p / 2, p % 2);
+					cbl_dtree *b = filled(n, q / 2, q % 2);
+
+					snprintf(what, sizeof(what),
+					    "%s %d to %d", n->name, p, q);
+					roundtrip(a, b, what);
+					cbl_dtree_free(a);
+					cbl_dtree_free(b);
+					done++;
+				}
+			/* From nothing, and to nothing. */
+			{
+				cbl_dtree *a = tree(), *b = filled(n, 1, true);
+
+				roundtrip(a, b, n->name);
+				cbl_dtree_free(b);
+				b = tree();
+				roundtrip(a, b, n->name);
+				cbl_dtree_free(a);
+				cbl_dtree_free(b);
+			}
+		}
+	}
+	ATF_CHECK(done >= 36 * 3);
+}
+
+ATF_TC_WITHOUT_HEAD(diff_cases);
+ATF_TC_BODY(diff_cases, tc)
+{
+	const char *addr = "192.0.2.50", *tag;
+	bool yes = true;
+	cbl_dtree *a, *b;
+	cbl_dnode *pl;
+
+	/* A playlist reordered, a song gone, one come, one changed. */
+	a = tree();
+	pl = playlist(a, "Foo-One");
+	for (uint32_t i = 1; i <= 4; i++)
+		song(pl, i);
+	tag = "x";
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(song(pl, 2), sn("top/playlist/song/id"),
+	    &tag, NULL));
+	b = tree();
+	pl = playlist(b, "Foo-One");
+	song(pl, 3);
+	song(pl, 5);
+	song(pl, 1);
+	tag = "y";
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(song(pl, 2), sn("top/playlist/song/id"),
+	    &tag, NULL));
+	roundtrip(a, b, "playlist");
+	ATF_CHECK_STREQ("3 5 1 2", songs(a));
+	cbl_dtree_free(a);
+	cbl_dtree_free(b);
+
+	/* A choice's case changed, both ways; a leaf-list's values. */
+	a = tree();
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(a), sn("top/static-address"),
+	    &addr, NULL));
+	tag = "blue";
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(a), sn("top/tags"), &tag, NULL));
+	b = tree();
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(b), sn("top/dhcp"), &yes, NULL));
+	tag = "red";
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(b), sn("top/tags"), &tag, NULL));
+	roundtrip(a, b, "case");
+	cbl_dtree_free(a);
+	a = tree();
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top(a), sn("top/static-address"),
+	    &addr, NULL));
+	roundtrip(b, a, "case back");
+	cbl_dtree_free(a);
+	cbl_dtree_free(b);
+
+	/* RFC 6241's running configuration, Ethernet0/0's address changed
+	 * and an OSPF interface gone. */
+	a = running();
+	b = tree();
+	address(iface(b, "Ethernet0/0", 1400), "192.0.2.2", 24);
+	address(iface(b, "Ethernet0/1", 1500), "192.0.2.9", 24);
+	ospf_iface(b, "0.0.0.0", "192.0.2.1");
+	roundtrip(a, b, "rfc6241");
+	cbl_dtree_free(a);
+	cbl_dtree_free(b);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -550,5 +754,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, choice);
 	ATF_TP_ADD_TC(tp, lists);
 	ATF_TP_ADD_TC(tp, rfc8072);
+	ATF_TP_ADD_TC(tp, diff_filled);
+	ATF_TP_ADD_TC(tp, diff_cases);
 	return (atf_no_error());
 }

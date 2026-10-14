@@ -103,7 +103,8 @@ nodes of them, non-presence containers too, as RFC 6243's report-all
 shows them. Edits apply NETCONF's operations to it (RFC 6241 section
 7.2: merge, replace, create, delete, remove; none as the default) and
 YANG Patch's insert and move (RFC 8072), an ordered-by user list's
-entries where they say, all or nothing.
+entries where they say, all or nothing; the difference of two trees is
+such an edit.
 
 ## 5. Expressions and patterns
 

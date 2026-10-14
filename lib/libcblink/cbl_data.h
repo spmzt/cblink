@@ -188,6 +188,15 @@ int		 cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit,
 		    int dflt, struct cbl_dederr *err);
 
 /*
+ * The edit that makes tree a tree b, applied to a with the default
+ * operation none (a YANG Patch's changes, RFC 8072): creates of what only
+ * b has, merges of leaves that differ, removes of what only a has, an
+ * ordered-by user list's entries said where when its order is not b's.
+ * NULL and errno: ENOTSUP where a list without keys at the top differs.
+ */
+cbl_dtree	*cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
+
+/*
  * YANG-CBOR: sn's value (as cbl_ydecode() reads it) made a child of
  * parent; a node's value written, as cbl_yencode() writes it.
  */

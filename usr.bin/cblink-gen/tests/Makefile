@@ -50,7 +50,7 @@ ATF_TESTS_C+=	ydata_test yedit_test
 SRCS.ydata_test=	yangh.h ydata_test.c yangh_schema.c yfill.c
 CFLAGS.ydata_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.ydata_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
-SRCS.yedit_test=	yangh.h yedit_test.c yangh_schema.c
+SRCS.yedit_test=	yangh.h yedit_test.c yangh_schema.c yfill.c
 CFLAGS.yedit_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yedit_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 # yvalid_test: the static validator on the module rules.

@@ -92,6 +92,18 @@ named(const cbl_dtree *t, const struct cbl_ynode *n, const void **vals)
 	return (x);
 }
 
+const cbl_dnode *
+cbl_d_iid_node(const cbl_dtree *t, const struct cbl_bytes *v, cbl_yarena *a)
+{
+	const struct cbl_ynode *target;
+	const void **vals;
+	size_t nvals;
+
+	if (cbl_yiid_read(t->schema, v, &target, &vals, &nvals, a) != 0)
+		return (NULL);
+	return (named(t, target, vals));
+}
+
 static int
 check(struct refs *r, const cbl_dnode *n, int depth)
 {

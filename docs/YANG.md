@@ -118,7 +118,15 @@ RFC 7950 section 6.4.1), and each step with its axis:
 `parent::node()/child::shapes:id` for `../id`. `cbl_xp_eval()`
 evaluates them over an instance tree (API.md section 7): node sets,
 paths on the four axes, predicates, comparisons with node sets,
-arithmetic, `and`, `or`, `|`, `current()` and the core functions so far.
+arithmetic, `and`, `or`, `|`; XPath 1.0's functions that XPath-lite
+has (`count`, `not`, `true`, `false`, `boolean`, `number`, `string`,
+`concat`, `contains`, `starts-with`, `substring`, `substring-before`,
+`substring-after`, `string-length`, `normalize-space`, `translate`,
+counting characters, not bytes) and YANG's (`current`, `deref`,
+`derived-from`, `derived-from-or-self`, `enum-value`, `bit-is-set`,
+`re-match` with an XSD pattern, as `pattern` takes one). A leaf's string
+value is its canonical form, an identityref's `module:name`, an
+instance-identifier's path with each name by its module.
 They must lie within **XPath-lite**; the
 generator refuses one that does not, naming the node and what is outside:
 

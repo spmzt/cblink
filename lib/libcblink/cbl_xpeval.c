@@ -35,7 +35,9 @@
 
 #include "cbl_data.h"
 #include "cbl_dimpl.h"
+#include "cbl_pattern.h"
 #include "cbl_xpath.h"
+#include "cbl_yimpl.h"
 
 struct ev {
 	const cbl_dtree		*t;
@@ -246,6 +248,87 @@ base64(struct sbuf *b, const struct cbl_bytes *by)
 	return (0);
 }
 
+static int	value_string(struct sbuf *, const struct cbl_yschema *,
+		    const struct cbl_ytype *, const void *);
+
+/* A literal of value v: in quotes it has none of. */
+static int
+quoted(struct sbuf *b, const struct cbl_yschema *s, const struct cbl_ytype *t,
+    const void *v)
+{
+	struct sbuf in = { 0 };
+	const char *q;
+	int error;
+
+	if ((error = sb_add(&in, "", 0)) != 0 ||
+	    (error = value_string(&in, s, t, v)) != 0) {
+		free(in.p);
+		return (error);
+	}
+	q = strchr(in.p, '\'') != NULL ? "\"" : "'";
+	if ((error = sb_add(b, q, 1)) == 0 &&
+	    (error = sb_add(b, in.p, in.n)) == 0)
+		error = sb_add(b, q, 1);
+	free(in.p);
+	return (error);
+}
+
+/*
+ * An instance-identifier's string (RFC 7950 section 9.13): from its
+ * YANG-CBOR, each node by its module, a list's keys and a leaf-list
+ * entry's value as predicates.
+ */
+static int
+iid_string(struct sbuf *b, const struct cbl_yschema *s, const void *v)
+{
+	const struct cbl_ynode *n, *chain[CBL_D_DEPTH_MAX + 1];
+	const void **vals;
+	cbl_yarena *a;
+	size_t nvals, nc = 0, j = 0;
+	int error;
+
+	if ((a = cbl_yarena_new()) == NULL)
+		return (ENOMEM);
+	if (cbl_yiid_read(s, v, &n, &vals, &nvals, a) != 0) {
+		cbl_yarena_free(a);
+		return (0);
+	}
+	for (const struct cbl_ynode *x = n; x != NULL && nc < CBL_D_DEPTH_MAX;
+	    x = x->parent)
+		chain[nc++] = x;
+	error = 0;
+	while (nc-- > 0 && error == 0) {
+		const struct cbl_ynode *x = chain[nc];
+
+		if ((error = sb_add(b, "/", 1)) != 0 ||
+		    (error = sb_add(b, x->module->name,
+		    strlen(x->module->name))) != 0 ||
+		    (error = sb_add(b, ":", 1)) != 0 ||
+		    (error = sb_add(b, x->name, strlen(x->name))) != 0)
+			break;
+		for (uint16_t k = 0; x->kind == CBL_YN_LIST && k < x->nkeys &&
+		    error == 0; k++) {
+			const struct cbl_ynode *kn = x->child[x->keys[k]];
+
+			if ((error = sb_add(b, "[", 1)) != 0 ||
+			    (error = sb_add(b, kn->module->name,
+			    strlen(kn->module->name))) != 0 ||
+			    (error = sb_add(b, ":", 1)) != 0 ||
+			    (error = sb_add(b, kn->name, strlen(kn->name))) !=
+			    0 || (error = sb_add(b, "=", 1)) != 0 ||
+			    (error = quoted(b, s, kn->type, vals[j++])) != 0)
+				break;
+			error = sb_add(b, "]", 1);
+		}
+		if (error == 0 && x->kind == CBL_YN_LEAFLIST && x == n &&
+		    (error = sb_add(b, "[.=", 3)) == 0 &&
+		    (error = quoted(b, s, x->type, vals[j++])) == 0)
+			error = sb_add(b, "]", 1);
+	}
+	cbl_yarena_free(a);
+	return (error);
+}
+
 /* A value of type t, in its canonical form (RFC 7950 section 9). */
 static int
 value_string(struct sbuf *b, const struct cbl_yschema *s,
@@ -335,8 +418,7 @@ value_string(struct sbuf *b, const struct cbl_yschema *s,
 			return (error);
 		return (sb_add(b, id->name, strlen(id->name)));
 	case CBL_YT_INSTANCEID:
-		/* Its path is the evaluator's to print: not yet (2.2.3). */
-		return (0);
+		return (iid_string(b, s, v));
 	case CBL_YT_UNION: {
 		unsigned w = *(const unsigned *)v;
 
@@ -673,6 +755,8 @@ test_ok(const struct cbl_xp *x, const cbl_dnode *n)
 
 static int	eval(struct ev *, const struct cbl_xp *, const cbl_dnode *,
 		    struct cbl_xval *);
+static int	eval_expr(struct ev *, const char *, const cbl_dnode *,
+		    const cbl_dnode *, struct cbl_xval *);
 
 /* The nodes of out that pass each predicate, as conditions. */
 static int
@@ -791,57 +875,399 @@ eval_path(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 }
 
 /*
- * Functions: those of XPath 1.0 the evaluator has so far.
+ * Functions: XPath 1.0's that XPath-lite has (section 4: count(), not(),
+ * true(), false(), boolean(), number(), string() and the string
+ * functions) and YANG's (RFC 7950 section 10: current(), deref(),
+ * derived-from(), derived-from-or-self(), enum-value(), bit-is-set(),
+ * re-match()).
  */
+
+/* The length of the UTF-8 character at s, 1 for what is not one. */
+static size_t
+u8len(const char *s)
+{
+	unsigned char c = (unsigned char)*s;
+	size_t n = c < 0x80 ? 1 : c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : c >= 0xc0 ?
+	    2 : 1;
+
+	for (size_t i = 1; i < n; i++)
+		if (((unsigned char)s[i] & 0xc0) != 0x80)
+			return (1);
+	return (n);
+}
+
+static size_t
+u8count(const char *s)
+{
+	size_t n = 0;
+
+	for (; *s != '\0'; s += u8len(s))
+		n++;
+	return (n);
+}
+
+/* The character of s at index i (from 0), and its length; NULL: none. */
+static const char *
+u8at(const char *s, size_t i, size_t *len)
+{
+
+	for (; *s != '\0'; s += u8len(s))
+		if (i-- == 0) {
+			*len = u8len(s);
+			return (s);
+		}
+	return (NULL);
+}
+
+/* XPath's round(): to the nearest, halves up (section 4.4). */
+static double
+xround(double d)
+{
+
+	if (isnan(d) || isinf(d))
+		return (d);
+	return (floor(d + 0.5));
+}
+
+static int
+str_arg(struct ev *e, const struct cbl_xval *v, char **out)
+{
+
+	return (to_string(e, v, out));
+}
+
+/* An identity by its "module:name", as the tables write one; 0: none. */
+static uint64_t
+ident_sid(const cbl_dtree *t, const char *qname)
+{
+	const char *colon = strchr(qname, ':'), *name;
+	size_t ml;
+
+	if (colon == NULL)
+		return (0);
+	ml = (size_t)(colon - qname);
+	name = colon + 1;
+	for (uint32_t i = 0; i < t->schema->nident; i++) {
+		const struct cbl_yident *id = &t->schema->ident[i];
+
+		if (strcmp(id->name, name) == 0 &&
+		    strlen(id->module->name) == ml &&
+		    strncmp(id->module->name, qname, ml) == 0)
+			return (id->sid);
+	}
+	return (0);
+}
+
+/* The member of a union, or the type, of kind k a node's value is. */
+static const struct cbl_ytype *
+value_of(const cbl_dnode *n, int kind, const void **v)
+{
+	const struct cbl_ytype *t;
+
+	if (n->sn == NULL || (t = n->sn->type) == NULL || n->value == NULL)
+		return (NULL);
+	*v = n->value;
+	if (t->kind == CBL_YT_UNION) {
+		unsigned w = *(const unsigned *)n->value;
+
+		if (w >= t->nmembers)
+			return (NULL);
+		*v = (const char *)n->value + t->voff;
+		t = t->members[w];
+	}
+	return (t->kind == kind ? t : NULL);
+}
+
+static int
+func_deref(struct ev *e, const struct cbl_xval *a, struct cbl_xval *out)
+{
+	const cbl_dnode *n, *x;
+	struct cbl_xval tv;
+	struct nset s = { 0 };
+	cbl_yarena *ar;
+	int error = 0;
+
+	if (a->kind != CBL_XV_NODES)
+		return (fail(e, EINVAL, "deref() of what is not a node set"));
+	if (a->n > 0 && (n = a->nodes[0])->sn != NULL &&
+	    n->sn->type != NULL) {
+		const struct cbl_ytype *t = n->sn->type;
+
+		if ((t->flags & CBL_YTF_LEAFREF) != 0 && t->path >= 0) {
+			/* Its path's nodes, those of its value. */
+			if ((error = eval_expr(e, e->t->schema->xpath[t->path],
+			    n, n, &tv)) != 0)
+				return (error);
+			for (size_t i = 0; i < tv.n && error == 0; i++)
+				if (tv.nodes[i]->value != NULL &&
+				    cbl_dvalue_equal(t, tv.nodes[i]->value,
+				    n->value))
+					error = ns_add(&s, tv.nodes[i]);
+			cbl_xval_free(&tv);
+		} else if (t->kind == CBL_YT_INSTANCEID) {
+			if ((ar = cbl_yarena_new()) == NULL)
+				return (ENOMEM);
+			if ((x = cbl_d_iid_node(e->t, n->value, ar)) != NULL)
+				error = ns_add(&s, x);
+			cbl_yarena_free(ar);
+		}
+	}
+	if (error != 0) {
+		ns_free(&s);
+		return (error);
+	}
+	ns_value(&s, out);
+	return (0);
+}
+
+static int
+func_strings(struct ev *e, const char *f, struct cbl_xval *a, size_t n,
+    struct cbl_xval *out, bool *done)
+{
+	struct sbuf b = { 0 };
+	char *s1 = NULL, *s2 = NULL, *s3 = NULL, *p;
+	const char *c;
+	double start, len;
+	size_t cl;
+	int error;
+
+	*done = true;
+	if ((error = sb_add(&b, "", 0)) != 0)
+		return (error);
+	if (strcmp(f, "concat") == 0 && n >= 2) {
+		for (size_t i = 0; i < n && error == 0; i++)
+			if ((error = str_arg(e, &a[i], &s1)) == 0) {
+				error = sb_add(&b, s1, strlen(s1));
+				free(s1);
+				s1 = NULL;
+			}
+		if (error == 0)
+			return (set_string(out, b.p));
+		free(b.p);
+		return (error);
+	}
+	free(b.p);
+	memset(&b, 0, sizeof(b));
+	if (n >= 1 && (error = str_arg(e, &a[0], &s1)) != 0)
+		return (error);
+	if (n >= 2 && (error = str_arg(e, &a[1], &s2)) != 0)
+		goto out;
+	if (strcmp(f, "contains") == 0 && n == 2)
+		set_bool(out, strstr(s1, s2) != NULL);
+	else if (strcmp(f, "starts-with") == 0 && n == 2)
+		set_bool(out, strncmp(s1, s2, strlen(s2)) == 0);
+	else if (strcmp(f, "string-length") == 0 && n <= 1)
+		set_number(out, (double)u8count(n == 1 ? s1 : ""));
+	else if (strcmp(f, "substring-before") == 0 && n == 2) {
+		p = strstr(s1, s2);
+		error = set_string(out, p != NULL ? strndup(s1,
+		    (size_t)(p - s1)) : strdup(""));
+	} else if (strcmp(f, "substring-after") == 0 && n == 2) {
+		p = strstr(s1, s2);
+		error = set_string(out, strdup(p != NULL ? p + strlen(s2) :
+		    ""));
+	} else if (strcmp(f, "substring") == 0 && (n == 2 || n == 3)) {
+		/* Characters at positions p, start <= p < start + len,
+		 * both rounded (section 4.2). */
+		if ((error = to_number(e, &a[1], &start)) != 0)
+			goto out;
+		len = INFINITY;
+		if (n == 3 && (error = to_number(e, &a[2], &len)) != 0)
+			goto out;
+		start = xround(start);
+		len = xround(len);
+		if ((error = sb_add(&b, "", 0)) != 0)
+			goto out;
+		for (size_t i = 0; (c = u8at(s1, i, &cl)) != NULL && error == 0;
+		    i++) {
+			double pos = (double)(i + 1);
+
+			if (pos >= start && pos < start + len)
+				error = sb_add(&b, c, cl);
+		}
+		if (error == 0) {
+			error = set_string(out, b.p);
+			b.p = NULL;
+		}
+	} else if (strcmp(f, "normalize-space") == 0 && n <= 1) {
+		const char *q = n == 1 ? s1 : "";
+		bool space = false;
+
+		if ((error = sb_add(&b, "", 0)) != 0)
+			goto out;
+		q += strspn(q, " \t\r\n");
+		for (; *q != '\0' && error == 0; q++) {
+			if (strchr(" \t\r\n", *q) != NULL) {
+				space = true;
+				continue;
+			}
+			if (space)
+				error = sb_add(&b, " ", 1);
+			space = false;
+			if (error == 0)
+				error = sb_add(&b, q, 1);
+		}
+		if (error == 0) {
+			error = set_string(out, b.p);
+			b.p = NULL;
+		}
+	} else if (strcmp(f, "translate") == 0 && n == 3) {
+		if ((error = str_arg(e, &a[2], &s3)) != 0 ||
+		    (error = sb_add(&b, "", 0)) != 0)
+			goto out;
+		/* Each character of s1: as at the same place in s3, where it
+		 * is in s2; else itself; none, s3 being shorter. */
+		for (size_t i = 0; (c = u8at(s1, i, &cl)) != NULL && error == 0;
+		    i++) {
+			const char *fc, *tc;
+			size_t fl, tl, k;
+
+			for (k = 0; (fc = u8at(s2, k, &fl)) != NULL; k++)
+				if (fl == cl && memcmp(fc, c, cl) == 0)
+					break;
+			if (fc == NULL)
+				error = sb_add(&b, c, cl);
+			else if ((tc = u8at(s3, k, &tl)) != NULL)
+				error = sb_add(&b, tc, tl);
+		}
+		if (error == 0) {
+			error = set_string(out, b.p);
+			b.p = NULL;
+		}
+	} else
+		*done = false;
+out:
+	free(b.p);
+	free(s1);
+	free(s2);
+	free(s3);
+	return (error);
+}
+
 static int
 eval_func(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
     struct cbl_xval *out)
 {
-	struct cbl_xval a;
+	const char *f = x->s;
+	struct cbl_xval *a = NULL;
 	struct nset s = { 0 };
-	char *str;
+	size_t n = x->nargs;
+	const void *v;
+	char *str, *str2;
 	double d;
-	int error;
+	bool done;
+	int error = 0;
 
-	if (strcmp(x->s, "current") == 0 && x->nargs == 0) {
+	if (strcmp(f, "current") == 0 && n == 0) {
 		if ((error = ns_add(&s, e->cur)) != 0)
 			return (error);
 		ns_value(&s, out);
 		return (0);
 	}
-	if ((strcmp(x->s, "true") == 0 || strcmp(x->s, "false") == 0) &&
-	    x->nargs == 0) {
-		set_bool(out, x->s[0] == 't');
+	if ((strcmp(f, "true") == 0 || strcmp(f, "false") == 0) && n == 0) {
+		set_bool(out, f[0] == 't');
 		return (0);
 	}
-	if (x->nargs > 1)
-		return (fail(e, EINVAL, "%s(): not yet evaluated", x->s));
-	/* One argument, or the context node for string() and number(). */
-	if (x->nargs == 1) {
-		if ((error = eval(e, x->args[0], ctx, &a)) != 0)
-			return (error);
-	} else {
-		if ((error = ns_add(&s, ctx)) != 0)
-			return (error);
-		ns_value(&s, &a);
+	/* The arguments; the context node for one that may go without. */
+	if ((a = calloc(n > 0 ? n : 1, sizeof(*a))) == NULL)
+		return (ENOMEM);
+	for (size_t i = 0; i < n && error == 0; i++)
+		error = eval(e, x->args[i], ctx, &a[i]);
+	if (error == 0 && n == 0 && (strcmp(f, "string") == 0 ||
+	    strcmp(f, "number") == 0 || strcmp(f, "string-length") == 0 ||
+	    strcmp(f, "normalize-space") == 0)) {
+		if ((error = ns_add(&s, ctx)) == 0) {
+			ns_value(&s, &a[0]);
+			n = 1;
+		}
 	}
-	error = 0;
-	if (strcmp(x->s, "not") == 0 && x->nargs == 1)
-		set_bool(out, !to_bool(&a));
-	else if (strcmp(x->s, "boolean") == 0 && x->nargs == 1)
-		set_bool(out, to_bool(&a));
-	else if (strcmp(x->s, "number") == 0) {
-		if ((error = to_number(e, &a, &d)) == 0)
+	if (error != 0)
+		goto out;
+	if (strcmp(f, "not") == 0 && n == 1)
+		set_bool(out, !to_bool(&a[0]));
+	else if (strcmp(f, "boolean") == 0 && n == 1)
+		set_bool(out, to_bool(&a[0]));
+	else if (strcmp(f, "number") == 0 && n == 1) {
+		if ((error = to_number(e, &a[0], &d)) == 0)
 			set_number(out, d);
-	} else if (strcmp(x->s, "string") == 0) {
-		if ((error = to_string(e, &a, &str)) == 0)
+	} else if (strcmp(f, "string") == 0 && n == 1) {
+		if ((error = to_string(e, &a[0], &str)) == 0)
 			error = set_string(out, str);
-	} else if (strcmp(x->s, "count") == 0 && x->nargs == 1 &&
-	    a.kind == CBL_XV_NODES)
-		set_number(out, (double)a.n);
-	else
-		error = fail(e, EINVAL, "%s(): not yet evaluated", x->s);
-	cbl_xval_free(&a);
+	} else if (strcmp(f, "count") == 0 && n == 1 &&
+	    a[0].kind == CBL_XV_NODES)
+		set_number(out, (double)a[0].n);
+	else if (strcmp(f, "deref") == 0 && n == 1)
+		error = func_deref(e, &a[0], out);
+	else if ((strcmp(f, "derived-from") == 0 ||
+	    strcmp(f, "derived-from-or-self") == 0) && n == 2 &&
+	    a[0].kind == CBL_XV_NODES) {
+		uint64_t base;
+		bool any = false;
+
+		if ((error = to_string(e, &a[1], &str)) != 0)
+			goto out;
+		base = ident_sid(e->t, str);
+		free(str);
+		for (size_t i = 0; i < a[0].n && !any && base != 0; i++)
+			if (value_of(a[0].nodes[i], CBL_YT_IDENTITYREF, &v) !=
+			    NULL)
+				any = cbl_yderived_from(e->t->schema,
+				    *(const uint64_t *)v, base, f[12] == '-');
+		set_bool(out, any);
+	} else if (strcmp(f, "enum-value") == 0 && n == 1 &&
+	    a[0].kind == CBL_XV_NODES) {
+		const struct cbl_ytype *t = a[0].n > 0 ?
+		    value_of(a[0].nodes[0], CBL_YT_ENUMERATION, &v) : NULL;
+
+		set_number(out, t != NULL ? (double)read_int(v, t->csize) :
+		    NAN);
+	} else if (strcmp(f, "bit-is-set") == 0 && n == 2 &&
+	    a[0].kind == CBL_XV_NODES) {
+		const struct cbl_ytype *t = a[0].n > 0 ?
+		    value_of(a[0].nodes[0], CBL_YT_BITS, &v) : NULL;
+		bool set = false;
+
+		if ((error = to_string(e, &a[1], &str)) != 0)
+			goto out;
+		for (uint32_t k = 0; t != NULL && k < t->nitems; k++) {
+			const struct cbl_bytes *by = v;
+			int64_t pos = t->items[k].value;
+
+			if (strcmp(t->items[k].name, str) == 0)
+				set = (size_t)(pos / 8) < by->len &&
+				    (((const uint8_t *)by->p)[pos / 8] &
+				    (1u << (pos % 8))) != 0;
+		}
+		free(str);
+		set_bool(out, set);
+	} else if (strcmp(f, "re-match") == 0 && n == 2) {
+		regex_t re;
+		char why[128];
+		size_t pos;
+
+		if ((error = to_string(e, &a[0], &str)) != 0)
+			goto out;
+		if ((error = to_string(e, &a[1], &str2)) != 0) {
+			free(str);
+			goto out;
+		}
+		if (cbl_pattern_compile(str2, &re, why, sizeof(why), &pos) !=
+		    0)
+			error = fail(e, EINVAL, "re-match(): %s", why);
+		else {
+			set_bool(out, cbl_pattern_match(&re, str));
+			cbl_pattern_free(&re);
+		}
+		free(str);
+		free(str2);
+	} else if ((error = func_strings(e, f, a, n, out, &done)) == 0 &&
+	    !done)
+		error = fail(e, EINVAL, "%s() with %zu arguments: not "
+		    "XPath-lite", f, x->nargs);
+out:
+	for (size_t i = 0; i < (n > x->nargs ? n : x->nargs); i++)
+		cbl_xval_free(&a[i]);
+	free(a);
 	return (error);
 }
 
@@ -996,6 +1422,26 @@ eval(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 		break;
 	}
 	e->depth--;
+	return (error);
+}
+
+/* Another expression of the tables, with its own current node. */
+static int
+eval_expr(struct ev *e, const char *expr, const cbl_dnode *ctx,
+    const cbl_dnode *cur, struct cbl_xval *out)
+{
+	const cbl_dnode *was = e->cur;
+	struct cbl_xp *x;
+	char perr[128];
+	size_t pos;
+	int error;
+
+	if ((x = cbl_xp_parse(expr, perr, sizeof(perr), &pos)) == NULL)
+		return (fail(e, EINVAL, "at %zu: %s", pos, perr));
+	e->cur = cur;
+	error = eval(e, x, ctx, out);
+	e->cur = was;
+	cbl_xp_free(x);
 	return (error);
 }
 

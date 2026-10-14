@@ -9,8 +9,9 @@
  * running configuration in the test module edits: paths absolute and
  * relative, the four axes, predicates, current(); comparisons with node
  * sets (XPath 1.0 section 3.4), arithmetic, and, or, union, count();
- * leaves' string values (a decimal64's canonical form); and what is not
- * XPath-lite refused.  The expressions are written as the tables hold
+ * leaves' string values (a decimal64's canonical form, an instance-
+ * identifier's path); every function XPath-lite has, one test each at
+ * least; and what is not XPath-lite refused.  The expressions are written as the tables hold
  * them, every name with its module.
  */
 
@@ -247,6 +248,112 @@ ATF_TC_BODY(values, tc)
 	cbl_dtree_free(t);
 }
 
+/* An identity of shapes by its name, its SID. */
+static uint64_t
+ident(const char *name)
+{
+
+	for (uint32_t i = 0; i < yangh_schema.nident; i++)
+		if (strcmp(yangh_schema.ident[i].name, name) == 0 &&
+		    strcmp(yangh_schema.ident[i].module->name, "shapes") == 0)
+			return (yangh_schema.ident[i].sid);
+	ATF_REQUIRE_MSG(false, "no identity %s", name);
+	return (0);
+}
+
+ATF_TC_WITHOUT_HEAD(functions);
+ATF_TC_BODY(functions, tc)
+{
+	static const uint8_t perms[] = { 0x10 };	/* write, position 4 */
+	struct cbl_bytes pb = { perms, sizeof(perms) }, iidv;
+	const char *name = "Ethernet0/1";
+	cbl_dnode *top, *sh, *primary, *mark;
+	cbl_dtree *t = running(&top);
+	uint64_t red = ident("red");
+	uint8_t iid[32];
+	size_t n = 0;
+	int level = 7;
+
+	/* deref(): a leafref to its target's node; an instance-identifier
+	 * to the node it names. */
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top, sn("edits", "top/primary"),
+	    &name, &primary));
+	ATF_CHECK_EQ(1500, num(t, "number(deref(.)/../edits:mtu)", primary));
+	ATF_CHECK_EQ(1, count(t, "deref(.)", primary, NULL));
+	iid[n++] = 0x82;	/* [SID of mtu, "Ethernet0/0"] */
+	iid[n++] = 0x1b;
+	for (int i = 7; i >= 0; i--)
+		iid[n++] = (uint8_t)(sn("edits", "top/interface/mtu")->sid >>
+		    (8 * i));
+	iid[n++] = 0x6b;
+	memcpy(iid + n, "Ethernet0/0", 11);
+	n += 11;
+	iidv = (struct cbl_bytes){ iid, n };
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top, sn("edits", "top/mark"), &iidv,
+	    &mark));
+	ATF_CHECK_EQ(1400, num(t, "number(deref(/edits:top/edits:mark))",
+	    NULL));
+	check_str(t, "string(/edits:top/edits:mark)", NULL,
+	    "/edits:top/edits:interface[edits:name='Ethernet0/0']/edits:mtu");
+
+	/* derived-from(), -or-self(); enum-value(); bit-is-set(). */
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t),
+	    sn("shapes", "shapes"), NULL, &sh));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(sh, sn("shapes", "shapes/colour"),
+	    &red, NULL));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(sh, sn("shapes", "shapes/level"),
+	    &level, NULL));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(sh, sn("shapes", "shapes/perms"),
+	    &pb, NULL));
+	ATF_CHECK(truth(t, "derived-from(/shapes:shapes/shapes:colour, "
+	    "'shapes:colour')", NULL, NULL));
+	ATF_CHECK(!truth(t, "derived-from(/shapes:shapes/shapes:colour, "
+	    "'shapes:red')", NULL, NULL));
+	ATF_CHECK(truth(t, "derived-from-or-self(/shapes:shapes/"
+	    "shapes:colour, 'shapes:red')", NULL, NULL));
+	ATF_CHECK(truth(t, "/shapes:shapes/shapes:colour = 'shapes:red'",
+	    NULL, NULL));
+	ATF_CHECK_EQ(7, num(t, "enum-value(/shapes:shapes/shapes:level)",
+	    NULL));
+	check_str(t, "string(/shapes:shapes/shapes:level)", NULL,
+	    "very high");
+	ATF_CHECK(truth(t, "bit-is-set(/shapes:shapes/shapes:perms, 'write')",
+	    NULL, NULL));
+	ATF_CHECK(!truth(t, "bit-is-set(/shapes:shapes/shapes:perms, 'read')",
+	    NULL, NULL));
+
+	/* re-match(): an XSD pattern, the whole string. */
+	ATF_CHECK(truth(t, "re-match('abc', '[a-c]+')", NULL, NULL));
+	ATF_CHECK(!truth(t, "re-match('abcd', '[a-c]+')", NULL, NULL));
+	ATF_CHECK(truth(t, "re-match('Ethernet0/0', '\\p{L}+\\d/\\d')",
+	    NULL, NULL));
+
+	/* count(), not(), boolean(). */
+	ATF_CHECK_EQ(2, num(t, "count(/edits:top/edits:interface)", NULL));
+	ATF_CHECK(truth(t, "not(/edits:top/edits:nothing)", NULL, NULL));
+	ATF_CHECK(!truth(t, "boolean('')", NULL, NULL));
+
+	/* The string functions, characters counted, not bytes. */
+	check_str(t, "concat('a', 1, true())", NULL, "a1true");
+	ATF_CHECK(truth(t, "contains('Ethernet0/0', 'net')", NULL, NULL));
+	ATF_CHECK(truth(t, "starts-with('Ethernet0/0', 'Eth')", NULL, NULL));
+	ATF_CHECK_EQ(5, num(t, "string-length('h\xc3\xa9llo')", NULL));
+	check_str(t, "substring('12345', 1.5, 2.6)", NULL, "234");
+	check_str(t, "substring('12345', 0, 3)", NULL, "12");
+	check_str(t, "substring('h\xc3\xa9llo', 2)", NULL,
+	    "\xc3\xa9llo");
+	check_str(t, "substring('12345', 0 div 0, 3)", NULL, "");
+	check_str(t, "substring-before('192.0.2.1/24', '/')", NULL,
+	    "192.0.2.1");
+	check_str(t, "substring-after('192.0.2.1/24', '/')", NULL, "24");
+	check_str(t, "normalize-space('  a \t b  ')", NULL, "a b");
+	check_str(t, "translate('bar', 'abc', 'ABC')", NULL, "BAr");
+	check_str(t, "translate('--aaa--', 'abc-', 'ABC')", NULL, "AAA");
+	/* With no argument, the context node's string. */
+	ATF_CHECK_EQ(11, num(t, "string-length()", primary));
+	cbl_dtree_free(t);
+}
+
 ATF_TC_WITHOUT_HEAD(refused);
 ATF_TC_BODY(refused, tc)
 {
@@ -275,6 +382,7 @@ ATF_TP_ADD_TCS(tp)
 
 	ATF_TP_ADD_TC(tp, paths);
 	ATF_TP_ADD_TC(tp, values);
+	ATF_TP_ADD_TC(tp, functions);
 	ATF_TP_ADD_TC(tp, refused);
 	return (atf_no_error());
 }

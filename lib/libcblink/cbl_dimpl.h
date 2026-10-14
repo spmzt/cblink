@@ -71,6 +71,9 @@ void	cbl_d_move_after(cbl_dnode *n, cbl_dnode *prev);
 bool	cbl_d_same_case(const struct cbl_ynode *a, const struct cbl_ynode *b);
 /* An entry's k-th key's value. */
 const void *cbl_d_key_value(const cbl_dnode *e, uint16_t k);
+/* The node an instance-identifier's YANG-CBOR names in t, or NULL. */
+const cbl_dnode *cbl_d_iid_node(const cbl_dtree *t,
+	    const struct cbl_bytes *v, cbl_yarena *a);
 /* n's value set to a copy of value, the one it had freed; and freed. */
 int	cbl_d_set_value(cbl_dnode *n, const void *value);
 void	cbl_d_free_value(cbl_dnode *n);

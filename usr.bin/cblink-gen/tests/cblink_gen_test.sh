@@ -704,6 +704,130 @@ EOF
 	    -Wl,-rpath,"$prefix/lib" -lcblink
 	atf_check -o match:'^[0-9]+ paths evaluated, [0-9]+ nodes found, 0 wrong$' \
 	    ./paths
+
+	# RFC 8349's router advertisement musts (PLAN-SDN-YANG 2.2.2), on an
+	# interface's configuration with its defaults made, as XPath in YANG
+	# sees them (RFC 7950 section 6.4.1): min-rtr-adv-interval within 75%
+	# of max-rtr-adv-interval, a prefix's preferred lifetime within its
+	# valid one, each as it holds and as it does not.
+	cat > ra.c <<'EOF'
+#include <stdio.h>
+#include <string.h>
+
+#include "cbl_data.h"
+#include "corpus.h"
+
+static int bad;
+
+static const struct cbl_ynode *
+kid(const struct cbl_ynode *n, const char *name)
+{
+	for (uint32_t i = 0; i < n->nchild; i++)
+		if (strcmp(n->child[i]->name, name) == 0)
+			return (n->child[i]);
+	printf("no %s under %s\n", name, n->name);
+	bad = 1;
+	return (n);
+}
+
+static cbl_dnode *
+add(cbl_dnode *p, const struct cbl_ynode *s, const void *v)
+{
+	cbl_dnode *x = cbl_dnode_child(p, s);
+
+	if (x == NULL && cbl_dnode_add(p, s, v, &x) != 0) {
+		printf("%s not added\n", s->name);
+		bad = 1;
+	}
+	return (x);
+}
+
+/* The must of node x's schema node, from x: as want? */
+static void
+must(const cbl_dtree *t, const cbl_dnode *x, int want, const char *what)
+{
+	const struct cbl_ynode *s = cbl_dnode_schema(x);
+	struct cbl_xval v;
+	char why[256];
+
+	if (s->nmust == 0 || cbl_xp_eval(t, corpus_schema.xpath[
+	    s->must[0].expr], x, x, &v, why, sizeof(why)) != 0) {
+		printf("%s: %s\n", what, s->nmust == 0 ? "no must" : why);
+		bad = 1;
+		return;
+	}
+	if (v.kind != CBL_XV_BOOL || v.b != want) {
+		printf("%s: %s, not %s\n", what, corpus_schema.xpath[
+		    s->must[0].expr], want ? "true" : "false");
+		bad = 1;
+	}
+	cbl_xval_free(&v);
+}
+
+int
+main(void)
+{
+	const struct cbl_ynode *ifs = NULL, *ifc, *ip6, *ra, *pfx;
+	cbl_dtree *t = cbl_dtree_new(&corpus_schema);
+	const char *name = "eth0", *spec = "2001:db8::/64";
+	const void *k[1];
+	cbl_dnode *x, *rax, *mn, *e;
+	uint16_t min = 200;
+	uint32_t life;
+
+	for (uint32_t i = 0; i < corpus_schema.nmod; i++)
+		if (strcmp(corpus_schema.mod[i]->name, "ietf-interfaces") == 0)
+			for (uint32_t j = 0; j < corpus_schema.mod[i]->ntop;
+			    j++)
+				if (strcmp(corpus_schema.mod[i]->top[j]->name,
+				    "interfaces") == 0)
+					ifs = corpus_schema.mod[i]->top[j];
+	if (ifs == NULL)
+		return (1);
+	ifc = kid(ifs, "interface");
+	ip6 = kid(ifc, "ipv6");
+	ra = kid(ip6, "ipv6-router-advertisements");
+	pfx = kid(kid(ra, "prefix-list"), "prefix");
+	x = add(cbl_dtree_root(t), ifs, NULL);
+	k[0] = &name;
+	if (cbl_dnode_add_entry(x, ifc, k, &x) != 0)
+		return (1);
+	rax = add(add(x, ip6, NULL), ra, NULL);
+	mn = add(rax, kid(ra, "min-rtr-adv-interval"), &min);
+	k[0] = &spec;
+	if (cbl_dnode_add_entry(add(rax, kid(ra, "prefix-list"), NULL), pfx,
+	    k, &e) != 0)
+		return (1);
+	if (cbl_dtree_defaults(cbl_dtree_root(t)) < 0)
+		return (1);
+
+	/* 200 <= 0.75 * 600, max's default; 500 is not; with max 800 it is. */
+	must(t, mn, 1, "min 200");
+	min = 500;
+	cbl_dnode_set(mn, &min);
+	must(t, mn, 0, "min 500");
+	cbl_dnode_set(cbl_dnode_child(rax, kid(ra, "max-rtr-adv-interval")),
+	    &(uint16_t){ 800 });
+	must(t, mn, 1, "min 500, max 800");
+	/* 604800 <= 2592000, the defaults; 3000000 is not; then it is. */
+	x = cbl_dnode_child(e, kid(pfx, "preferred-lifetime"));
+	must(t, x, 1, "preferred's default");
+	life = 3000000;
+	cbl_dnode_set(x, &life);
+	must(t, x, 0, "preferred 3000000");
+	life = 4000000;
+	cbl_dnode_set(cbl_dnode_child(e, kid(pfx, "valid-lifetime")), &life);
+	must(t, x, 1, "valid 4000000");
+	cbl_dtree_free(t);
+	if (!bad)
+		printf("RFC 8349's musts: as the RFC has them\n");
+	return (bad);
+}
+EOF
+	atf_check ${CC:-cc} ${CFLAGS:-} ${LDFLAGS:-} -std=c23 -Wall -Werror \
+	    -I"$prefix/include" -I. -o ra ra.c corpus_schema.c.o \
+	    -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
+	atf_check -o inline:"RFC 8349's musts: as the RFC has them\n" ./ra
 }
 
 atf_init_test_cases()

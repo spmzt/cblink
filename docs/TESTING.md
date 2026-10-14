@@ -59,7 +59,7 @@ The suite has about 155 test cases.
 | `ydata_test` | The instance tree: built, walked and freed; entries by their keys, thousands of them; leaf-lists' order and values once; a choice's cases never two; defaults on demand and made; every struct through a tree to the same bytes, and a module's data struct. |
 | `yedit_test` | Edits of the tree: RFC 6241 section 7.2's examples, by merge and by none; data-exists, data-missing, remove either way; a choice's case in the other's place; leaf-lists and an ordered list; a failing edit leaving the target as it was; RFC 8072's insert and move of a playlist's songs, first, last, before and after, refused where they must be, undone with the rest; the difference of every pair of trees yfill fills, applied, making one the other (a system-ordered list's entries in any order), and none left after; references, a leafref and an instance-identifier (by a list's key, of no list, a leaf-list's value) to what is there and dangling. |
 | `yang_tree` | Tree diagrams equal to `yanglint -f tree`. |
-| `corpus` | The IETF and IANA modules Arcana builds on (`tests/corpus`, 51 of them, as published): each tree equal to `yanglint -f tree`'s with the same features on; the structs, tables and server table of all of them compiled at `-Werror`, and every struct through YANG-CBOR and back to the same bytes; every leafref's path evaluated on data filled three ways, each node found its target; RFC 8349's router advertisement musts on an interface's configuration with its defaults made, true and false as they should be; RFC 8349's IPv4 augments' whens, each refused in a RIB made IPv6. |
+| `corpus` | The IETF and IANA modules Arcana builds on (`tests/corpus`, 51 of them, as published): each tree equal to `yanglint -f tree`'s with the same features on; the structs, tables and server table of all of them compiled at `-Werror`, and every struct through YANG-CBOR and back to the same bytes; every leafref's path evaluated on data filled three ways, each node found its target; RFC 8349's router advertisement musts on an interface's configuration with its defaults made, true and false as they should be; RFC 8349's IPv4 augments' whens, each refused in a RIB made IPv6; the evaluator against libyang's (`xpdiff`, two seeds), none differing. |
 | `yfilter_test` | Filters: RFC 6241 section 6.4's subtree filter examples on its configuration (`filters`, a test module), each output as the RFC has it; content match nodes on another leaf than a key, two of them ANDed; XPath filters selecting the same, a union, an entry's keys kept; a filter node out of place refused; NACM's paths: a node and all below it, entries by key or all, `$USER`, a uint32 key, a leaf-list's value, schema nodes, and what is not a node-instance-identifier refused; parent references, a mounted tree's leafref to the parent tree's OSPF areas by a predicate, seeing the areas they reference from the mount point, and no other. |
 | `yxpath_test` | XPath-lite over a tree: paths, the four axes, predicates, `current()`; node sets compared with numbers, strings and node sets; arithmetic, `and`, `or`, union, `count()`; string values, decimal64's canonical forms, an instance-identifier's path; each function, one test at least (`deref` of a leafref and of an instance-identifier, identities, enums, bits, `re-match`, the string functions on UTF-8); a position, another axis, a variable refused; `when` and `must` over a tree (`conds`, a test module: a node's own `when`, a case's, an augment's not seeing its own nodes, a `must` with an error-message and an error-app-tag and one without, a default under a `when` not made or removed); a leafref whose path has a predicate. |
 | `ymod_regen` | The structs and tables of cblink's own modules, and `docs/ctrl.md`, committed in `lib/libcblink` and `docs`, match what the generator produces now. |
@@ -68,6 +68,23 @@ The suite has about 155 test cases.
 `tools/yangwalk/tablecheck.sh` runs the same round trip over any
 directory of modules, every struct filled as the tables say, encoded,
 decoded and encoded again to the same bytes.
+
+`xpdiff` (`usr.bin/cblink-gen/tests/xpdiff.c`, the corpus case's)
+holds the XPath-lite evaluator to libyang's on the corpus: data filled
+by yfill (each identityref a real identity of its bases) made a tree of
+each, a node libyang will not take left out of both, and expressions
+evaluated over both from the same node: every `when`, `must` and leafref
+`path` where it is, and some 20 000 made up of the data a seed (paths
+with and without keys, every comparison on and off its boundary,
+arithmetic, every function, a leafref re-pointed at a target before
+`deref`). Node sets are compared as sets, the rest as values; none of
+the made-up expressions depends on the order of siblings, which YANG
+leaves undefined. `xpdiff dir [seed [count]]`; `XPDIFF_VERBOSE` lists
+what is left out. libyang departs from the specifications three ways,
+which xpdiff counts apart: `deref()` of a leafref with no target fails
+(RFC 7950 section 10.3.1: none); `substring()` from a start below 0
+takes too many characters (XPath 1.0 section 4.2); and `number()` reads
+what `strtold(3)` does, `infinity` or `1e3` (section 4.4: NaN).
 
 ### 2.3 Examples (`examples/tests`)
 

@@ -127,6 +127,8 @@ counting characters, not bytes) and YANG's (`current`, `deref`,
 `re-match` with an XSD pattern, as `pattern` takes one). A leaf's string
 value is its canonical form, an identityref's `module:name`, an
 instance-identifier's path with each name by its module.
+The evaluator is held to libyang's on the corpus (TESTING.md: `xpdiff`),
+and agrees with it but where libyang departs from XPath 1.0 or RFC 7950.
 `cbl_dtree_check_conds()` holds a tree to its `when`s and `must`s
 (unknown-element; operation-failed and the `must`'s `error-message` and
 `error-app-tag`, `must-violation` if it has none), a node's own `when`

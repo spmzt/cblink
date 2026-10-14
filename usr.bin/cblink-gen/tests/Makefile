@@ -128,7 +128,7 @@ YANGDIR=	${TESTSDIR}/yang
 # with.
 CORPUS!=	cd ${.CURDIR} && echo corpus/*.yang corpus/README.md
 CORPUSDIR=	${TESTSDIR}/corpus
-FILL=		yfill.c yfill.h
+FILL=		yfill.c yfill.h xpdiff.c
 FILLDIR=	${TESTSDIR}
 
 .for g in CTRL CBLMK YANG CORPUS FILL

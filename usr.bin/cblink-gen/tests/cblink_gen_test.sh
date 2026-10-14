@@ -951,6 +951,19 @@ EOF
 	    -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
 	atf_check -o inline:"destination-prefix refused\nnext-hop-address refused\naddress refused\n" \
 	    ./v4ur
+
+	# The evaluator against libyang's (PLAN-SDN-YANG 2.2.6): xpdiff on
+	# the corpus, every when, must and leafref path, and expressions made
+	# of the data, two seeds; none differs.
+	atf_check ${CC:-cc} ${CFLAGS:-} ${LDFLAGS:-} -std=c23 -Wall -Werror \
+	    -I"$prefix/include" -I"${LOCALBASE:-/usr/local}/include" -I. \
+	    -I"$(atf_get_srcdir)" -o xpdiff "$(atf_get_srcdir)/xpdiff.c" \
+	    "$(atf_get_srcdir)/yfill.c" corpus_schema.c.o -L"$prefix/lib" \
+	    -Wl,-rpath,"$prefix/lib" -lcblink \
+	    -L"${LOCALBASE:-/usr/local}/lib" -lyang -lm
+	for seed in 1 2; do
+		atf_check -o match:', 0 differ$' ./xpdiff "$c" $seed 20000
+	done
 }
 
 atf_init_test_cases()

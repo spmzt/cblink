@@ -27,7 +27,7 @@ PROGS=		fuzz_frame fuzz_proxy fuzz_ycodec fuzz_xpath fuzz_pattern
 SRCS.fuzz_frame=	fuzz_frame.c ${LIBSRCS}
 SRCS.fuzz_proxy=	fuzz_proxy.c ${LIBSRCS}
 SRCS.fuzz_ycodec=	fuzz_ycodec.c yshapes_schema.c ${LIBSRCS}
-SRCS.fuzz_xpath=	fuzz_xpath.c cbl_xpath.c
+SRCS.fuzz_xpath=	fuzz_xpath.c yshapes_schema.c ${LIBSRCS}
 SRCS.fuzz_pattern=	fuzz_pattern.c cbl_pattern.c
 MAN=
 
@@ -42,6 +42,7 @@ LIBS_CBLINK=	${LOCALBASE}/lib/libcbor.so -lssl -lcrypto -lpthread
 LDADD.fuzz_frame=	${LIBS_CBLINK}
 LDADD.fuzz_proxy=	${LIBS_CBLINK}
 LDADD.fuzz_ycodec=	${LIBS_CBLINK}
+LDADD.fuzz_xpath=	${LIBS_CBLINK}
 
 # The tables fuzz_ycodec decodes by, committed: the fuzzers are built
 # without cblink-gen.  make regen remakes them with the one built, and

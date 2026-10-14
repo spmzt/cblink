@@ -46,6 +46,8 @@ struct ev {
 	char			*why;
 	size_t			 whylen;
 	int			 depth;
+	size_t			 work;		/* nodes visited, and calls */
+	bool			 over;		/* more than CBL_XP_WORK_MAX */
 };
 
 static int
@@ -434,10 +436,15 @@ value_string(struct sbuf *b, const struct cbl_yschema *s,
 
 /* Whether the expression sees node c, a child (cbl_d_view). */
 static bool
-seen(const struct ev *e, const cbl_dnode *c)
+seen(struct ev *e, const cbl_dnode *c)
 {
 	const struct cbl_d_view *w = e->view;
 
+	/* Each node visited counts: an expression's work is bounded. */
+	if (++e->work > CBL_XP_WORK_MAX) {
+		e->over = true;
+		return (false);
+	}
 	if (w == NULL)
 		return (true);
 	if (w->dummy != NULL && c->parent == w->dummy)
@@ -504,7 +511,7 @@ cbl_d_vstring(const struct cbl_yschema *s, const struct cbl_ytype *t,
 
 /* A node's string value: a leaf's value; else its leaves', in order. */
 static int
-node_string(struct sbuf *b, const struct ev *e, const cbl_dnode *n,
+node_string(struct sbuf *b, struct ev *e, const cbl_dnode *n,
     int depth)
 {
 	int error;
@@ -525,7 +532,7 @@ node_string(struct sbuf *b, const struct ev *e, const cbl_dnode *n,
 }
 
 static int
-str_of_node(const struct ev *e, const cbl_dnode *n, char **out)
+str_of_node(struct ev *e, const cbl_dnode *n, char **out)
 {
 	struct sbuf b = { 0 };
 	int error;
@@ -862,7 +869,7 @@ filter(struct ev *e, struct cbl_xp *const *preds, size_t npreds,
 }
 
 static int
-descend(const struct ev *e, struct nset *out, const struct cbl_xp *x,
+descend(struct ev *e, struct nset *out, const struct cbl_xp *x,
     const cbl_dnode *n, int depth)
 {
 	int error;
@@ -1362,6 +1369,10 @@ eval(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 	int error;
 
 	memset(out, 0, sizeof(*out));
+	if (e->over || ++e->work > CBL_XP_WORK_MAX) {
+		e->over = true;
+		return (fail(e, EFBIG, "too much to evaluate"));
+	}
 	if (++e->depth > CBL_XP_MAX_HEIGHT) {
 		e->depth--;
 		return (fail(e, ELOOP, "nested too deep"));
@@ -1502,6 +1513,11 @@ eval(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 		break;
 	}
 	e->depth--;
+	/* Over the budget, nodes were left unseen: the value is wrong. */
+	if (error == 0 && e->over) {
+		cbl_xval_free(out);
+		error = fail(e, EFBIG, "too much to evaluate");
+	}
 	return (error);
 }
 

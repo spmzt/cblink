@@ -17,7 +17,9 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <atf-c.h>
 
@@ -554,6 +556,46 @@ ATF_TC_BODY(refused, tc)
 	cbl_dtree_free(t);
 }
 
+/*
+ * An expression's work is bounded: predicates nested eight deep over
+ * every node, some 15^8 visits, refused, and soon; one nested twice is
+ * done.
+ */
+ATF_TC_WITHOUT_HEAD(budget);
+ATF_TC_BODY(budget, tc)
+{
+	struct cbl_xval v;
+	cbl_dnode *top;
+	cbl_dtree *t = running(&top);
+	char e[512], why[128];
+	time_t start;
+
+	strlcpy(e, "count(//*)", sizeof(e));
+	for (int i = 0; i < 2; i++) {
+		char inner[512];
+
+		snprintf(inner, sizeof(inner), "count(//*[%s > 0])", e);
+		strlcpy(e, inner, sizeof(e));
+	}
+	ATF_REQUIRE_EQ_MSG(0, cbl_xp_eval(t, e, NULL, NULL, &v, why,
+	    sizeof(why)), "%s", why);
+	ATF_CHECK_EQ(CBL_XV_NUMBER, v.kind);
+	ATF_CHECK(v.num > 0);
+	cbl_xval_free(&v);
+	for (int i = 2; i < 8; i++) {
+		char inner[512];
+
+		snprintf(inner, sizeof(inner), "count(//*[%s > 0])", e);
+		strlcpy(e, inner, sizeof(e));
+	}
+	start = time(NULL);
+	ATF_CHECK_EQ(EFBIG, cbl_xp_eval(t, e, NULL, NULL, &v, why,
+	    sizeof(why)));
+	ATF_CHECK_STREQ("too much to evaluate", why);
+	ATF_CHECK(time(NULL) - start < 10);
+	cbl_dtree_free(t);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -564,5 +606,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, defaults_when);
 	ATF_TP_ADD_TC(tp, refs_predicate);
 	ATF_TP_ADD_TC(tp, refused);
+	ATF_TP_ADD_TC(tp, budget);
 	return (atf_no_error());
 }

@@ -1177,11 +1177,17 @@ cbl_xp_print(const struct cbl_xp *x, FILE *fp)
 	print_at(x, 0, fp);
 }
 
-/* x where an operand binding at least as tightly as min belongs. */
+/*
+ * x where an operand binding at least as tightly as min belongs.  The
+ * root alone, an operand, in parentheses too: after "/", a "*" or an
+ * operator's name is a name test (XPath 1.0 section 3.7), so "/ * 2"
+ * would read back as "/child::*" and a 2 too many.
+ */
 static void
 print_at(const struct cbl_xp *x, int min, FILE *fp)
 {
-	bool paren = prec(x) < min;
+	bool paren = prec(x) < min || (min > 0 && x->kind == CBL_XP_PATH &&
+	    x->absolute && x->nargs == 0 && x->base == NULL);
 
 	if (paren)
 		fputc('(', fp);

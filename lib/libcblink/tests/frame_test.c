@@ -58,8 +58,9 @@ ATF_TC_BODY(wire_error_frame, tc)
 	ATF_REQUIRE_EQ(1, got[0].v);
 	ATF_REQUIRE(!got[0].index);
 	ATF_REQUIRE_EQ(-1, cbl_msg_err_miss_type(msg));
-	/* The cblink:error structure is invisible to attribute iteration. */
-	ATF_REQUIRE(cbl_attr_first(cbl_msg_body(msg)) == NULL);
+	/* The cblink:error structure, at its SID. */
+	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, UINT64_C(1099511627776) + 22,
+	    &(const void *){ 0 }, &(size_t){ 0 }));
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }
@@ -118,7 +119,7 @@ ATF_TC_BODY(wire_do_and_ack, tc)
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 17, 1,
 	    CBL_F_REQUEST | CBL_F_ACK, &msg));
 	cbl_msg_set_seq(msg, 1);
-	cbl_put_str(msg, 1, "foo");
+	t_put_str(msg, 1, "foo");
 	require_frame(msg,
 	    "CB 4C 02 18 00 00 00 1E 00 11 00 01 00 00 00 03"
 	    "00 00 00 01 00 00 00 00 A1 01 63 66 6F 6F");
@@ -141,7 +142,7 @@ ATF_TC_BODY(wire_notify, tc)
 
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 17, 4, CBL_F_NOTIFY, &msg));
 	cbl_msg_set_stream(msg, 2);
-	cbl_put_str(msg, 1, "k");
+	t_put_str(msg, 1, "k");
 	require_frame(msg,
 	    "CB 4C 02 18 00 00 00 1C 00 11 00 04 00 00 00 40"
 	    "00 00 00 00 00 00 00 02 A1 01 61 6B");
@@ -171,8 +172,7 @@ ATF_TC_BODY(wire_stream_frames, tc)
 		CBL_F_S_CREDIT, CBL_F_S_HCLOSE,
 	};
 	cbl_ctx *ctx = test_ctx();
-	const cbl_attr *a;
-	const char *s;
+	char s[16];
 	cbl_msg *msg;
 
 	for (size_t i = 0; i < nitems(frames); i++) {
@@ -182,12 +182,8 @@ ATF_TC_BODY(wire_stream_frames, tc)
 		ATF_REQUIRE_EQ(17, cbl_msg_family(msg));
 		ATF_REQUIRE_EQ(3, cbl_msg_cmd(msg));
 		if (i == 0) {
-			a = cbl_attr_first(cbl_msg_body(msg));
-			ATF_REQUIRE(a != NULL);
-			ATF_REQUIRE_EQ(1, cbl_attr_type(a));
-			ATF_REQUIRE_EQ(0, cbl_attr_str(msg, a, &s));
+			ATF_REQUIRE(t_get_str(msg, 1, s, sizeof(s)));
 			ATF_REQUIRE_STREQ("user/", s);
-			ATF_REQUIRE(cbl_attr_next(a) == NULL);
 		}
 		cbl_msg_free(msg);
 	}
@@ -210,7 +206,8 @@ ATF_TC_BODY(header_fields, tc)
 	ATF_REQUIRE_EQ(CBL_F_MULTI | CBL_F_DONE, cbl_msg_flags(msg));
 	ATF_REQUIRE_EQ(0xdeadbeef, cbl_msg_seq(msg));
 	ATF_REQUIRE_EQ(CBL_HDRLEN, cbl_msg_len(msg));
-	ATF_REQUIRE_EQ(0, cbl_attr_count(cbl_msg_body(msg)));
+	ATF_REQUIRE_EQ(ENOENT, cbl_msg_sid_raw(msg, 1, &(const void *){ 0 },
+	    &(size_t){ 0 }));
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }
@@ -251,7 +248,8 @@ ATF_TC_BODY(header_extension, tc)
 	    "00 00 00 05 00 00 00 00 EE EE EE EE EE EE EE EE"
 	    "A1 01 01", buf, sizeof(buf));
 	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, buf, 35, NULL, &msg));
-	ATF_REQUIRE(cbl_msg_attr(msg, 1) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, 1, &(const void *){ 0 },
+	    &(size_t){ 0 }));
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }

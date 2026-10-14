@@ -35,7 +35,7 @@ srv_echo_data(cbl_stream *s, cbl_msg *data, void *arg)
 
 	sv->received++;
 	if (cbl_stream_msg_new(s, &m) == 0) {
-		cbl_put_attr(m, SA_SEQ, cbl_msg_attr(data, SA_SEQ));
+		(void)t_copy(m, data, SA_SEQ);
 		if (cbl_stream_send(s, m) == EAGAIN)
 			cbl_msg_free(m);
 	}
@@ -91,8 +91,8 @@ feed_pump(cbl_stream *s, struct feed *f)
 	while (f->next < f->n) {
 		if (cbl_stream_msg_new(s, &m) != 0)
 			return;
-		cbl_put_uint(m, SA_SEQ, f->next);
-		cbl_put_bytes(m, SA_PAD, "0123456789abcdef0123456789abcdef",
+		t_put_uint(m, SA_SEQ, f->next);
+		t_put_bytes(m, SA_PAD, "0123456789abcdef0123456789abcdef",
 		    32);
 		if ((error = cbl_stream_send(s, m)) == EAGAIN) {
 			cbl_msg_free(m);
@@ -136,7 +136,7 @@ feed_open(cbl_req *req __unused, const cbl_msg *msg, cbl_stream *s, void *arg)
 		return (ENOMEM);
 	f->sv = arg;
 	f->n = 100;
-	(void)cbl_attr_uint(cbl_msg_attr(msg, SA_N), &f->n);
+	(void)t_get_uint(msg, SA_N, &f->n);
 	f->sv->opened++;
 	if ((error = cbl_stream_accept(s, NULL, 0, &feed_cbs, f)) != 0) {
 		free(f);
@@ -169,8 +169,8 @@ badaccept_open(cbl_req *req __unused, const cbl_msg *msg __unused,
 
 	if ((error = cbl_stream_msg_new(s, &m)) != 0)
 		return (error);
-	(void)cbl_put_uint(m, SA_SEQ, 1);
-	(void)cbl_put_uint(m, SA_SEQ, 2);	/* a duplicate: EEXIST */
+	(void)t_put_uint(m, SA_SEQ, 1);
+	(void)t_put_uint(m, SA_SEQ, 2);	/* a duplicate: EEXIST */
 	error = cbl_stream_accept(s, m, 0, &echo_cbs, sv);
 	sv->close_code = error;
 	return (error);
@@ -310,7 +310,7 @@ later_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s, void *arg)
 	lt->req = req;
 	lt->s = s;
 	lt->sv = arg;
-	(void)cbl_attr_uint(cbl_msg_attr(msg, SA_N), &lt->accept);
+	(void)t_get_uint(msg, SA_N, &lt->accept);
 	ATF_REQUIRE_EQ(0, cbl_req_defer(req));
 	ATF_REQUIRE_EQ(0, pthread_create(&thr, NULL, later_thread, lt));
 	pthread_detach(thr);
@@ -464,7 +464,7 @@ cli_data(cbl_stream *s __unused, cbl_msg *data, void *arg)
 	struct cli *c = arg;
 	uint64_t seq = UINT64_MAX;
 
-	(void)cbl_attr_uint(cbl_msg_attr(data, SA_SEQ), &seq);
+	(void)t_get_uint(data, SA_SEQ, &seq);
 	if (seq != c->next)
 		c->in_order = false;
 	c->next++;
@@ -519,7 +519,7 @@ open_stream(struct fx *f, uint16_t cmd, uint32_t flags, struct cli *c,
 	c->in_order = true;
 	ATF_REQUIRE_EQ(0, cbl_msg_new(f->cctx, f->id, cmd, 0, &m));
 	if (n != 0)
-		cbl_put_uint(m, SA_N, n);
+		t_put_uint(m, SA_N, n);
 	ATF_REQUIRE_EQ(0, cbl_stream_open(f->c, m, flags, &cli_cbs, c, &s));
 	ATF_REQUIRE(s != NULL);
 	ATF_REQUIRE_EQ(1, cbl_stream_id(s) % 2);	/* initiator: odd */
@@ -541,7 +541,7 @@ ATF_TC_BODY(echo, tc)
 	ATF_REQUIRE_EQ(0, c.open_error);
 	for (uint64_t i = 0; i < 200; i++) {
 		ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-		cbl_put_uint(m, SA_SEQ, i);
+		t_put_uint(m, SA_SEQ, i);
 		ATF_REQUIRE_EQ(0, cbl_stream_send(s, m));
 		if (i % 50 == 0)
 			drive(f.c, &c.data, (int)i, 50);
@@ -639,7 +639,7 @@ ATF_TC_BODY(flow_control, tc)
 	ATF_REQUIRE_EQ(1024, cbl_stream_credit(s));
 	for (;;) {
 		ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-		cbl_put_bytes(m, SA_PAD, "0123456789012345678901234567890123"
+		t_put_bytes(m, SA_PAD, "0123456789012345678901234567890123"
 		    "4567890123456789", 50);
 		if ((error = cbl_stream_send(s, m)) == EAGAIN) {
 			cbl_msg_free(m);
@@ -869,7 +869,7 @@ sender_thread(void *arg)
 	for (int i = 0; i < sd->n; i++) {
 		if (cbl_stream_msg_new(sd->s, &m) != 0)
 			break;
-		cbl_put_uint(m, SA_SEQ, (uint64_t)i);
+		t_put_uint(m, SA_SEQ, (uint64_t)i);
 		while (cbl_stream_send(sd->s, m) == EAGAIN)
 			usleep(1000);
 	}
@@ -974,7 +974,7 @@ ATF_TC_BODY(deferred_open, tc)
 	ATF_REQUIRE_EQ(1, c.opened);
 	ATF_REQUIRE_EQ(0, c.open_error);
 	ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-	cbl_put_uint(m, SA_SEQ, 0);
+	t_put_uint(m, SA_SEQ, 0);
 	ATF_REQUIRE_EQ(0, cbl_stream_send(s, m));
 	drive(f.c, &c.data, 1, 3000);
 	ATF_REQUIRE_EQ(1, c.data);
@@ -1020,7 +1020,7 @@ send_one(cbl_stream *s, bool last)
 	cbl_msg *m;
 
 	ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-	cbl_put_uint(m, SA_SEQ, 0);
+	t_put_uint(m, SA_SEQ, 0);
 	if (last)
 		ATF_REQUIRE_EQ(0, cbl_msg_set_flags(m,
 		    CBL_F_S_DATA | CBL_F_S_HCLOSE));
@@ -1113,8 +1113,8 @@ ATF_TC_BODY(reset_in_on_writable, tc)
 	c.reset_in = RESET_ON_WRITABLE;
 	for (int i = 0; i < 100; i++) {
 		ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-		cbl_put_uint(m, SA_SEQ, (uint64_t)i);
-		cbl_put_bytes(m, SA_PAD, "0123456789abcdef0123456789abcdef",
+		t_put_uint(m, SA_SEQ, (uint64_t)i);
+		t_put_bytes(m, SA_PAD, "0123456789abcdef0123456789abcdef",
 		    32);
 		if ((error = cbl_stream_send(s, m)) == EAGAIN) {
 			cbl_msg_free(m);

@@ -9,6 +9,7 @@
 #include <errno.h>
 
 #include "cbl_test.h"
+#include "cbl_impl.h"	/* the decoder's tree, as the library reads it */
 
 static int
 decode_body(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
@@ -222,14 +223,16 @@ ATF_TC_BODY(too_many_attrs, tc)
 }
 
 /* Section 5.4: unknown attributes are ignored, framework keys hidden. */
+/*
+ * Top-level keys: SIDs from 1 to 2^63 - 1 are items; 0, negative keys
+ * and keys beyond are taken and never found.
+ */
 ATF_TC_WITHOUT_HEAD(unknown_attrs_ignored);
 ATF_TC_BODY(unknown_attrs_ignored, tc)
 {
 	cbl_ctx *ctx = test_ctx();
-	const cbl_attr *a;
 	cbl_msg *msg;
-	int64_t i;
-	int n = 0;
+	uint64_t v;
 
 	/*
 	 * {-1 - 2^64: 0, -100: 0, -50: 0, 0: 0, 1: 1, 7: 7,
@@ -239,16 +242,16 @@ ATF_TC_BODY(unknown_attrs_ignored, tc)
 	    "A9 3B FF FF FF FF FF FF FF FF 00 38 63 00 38 31 00 00 00"
 	    "01 01 07 07 1A 00 01 11 70 00 1B FF FF FF FF FF FF FF FF 00"
 	    "02 3B FF FF FF FF FF FF FF FF", &msg));
-	for (a = cbl_attr_first(cbl_msg_body(msg)); a != NULL;
-	    a = cbl_attr_next(a)) {
-		ATF_REQUIRE(cbl_attr_type(a) >= 1);
-		n++;
-	}
-	ATF_REQUIRE_EQ(3, n);
-	ATF_REQUIRE(cbl_msg_attr(msg, 1) != NULL);
-	ATF_REQUIRE(cbl_msg_attr(msg, 7) != NULL);
-	ATF_REQUIRE_EQ(CBL_K_INT, cbl_attr_kind(cbl_msg_attr(msg, 2)));
-	ATF_REQUIRE_EQ(ERANGE, cbl_attr_int(cbl_msg_attr(msg, 2), &i));
+	ATF_REQUIRE(t_get_uint(msg, 1, &v) && v == 1);
+	ATF_REQUIRE(t_get_uint(msg, 7, &v) && v == 7);
+	ATF_REQUIRE(t_get_uint(msg, 70000, &v) && v == 0);
+	/* 2: a negative integer beyond int64_t, as it was sent. */
+	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, 2, &(const void *){ 0 },
+	    &(size_t){ 0 }));
+	ATF_REQUIRE_EQ(EINVAL, cbl_msg_sid_raw(msg, UINT64_MAX,
+	    &(const void *){ 0 }, &(size_t){ 0 }));
+	ATF_REQUIRE_EQ(EINVAL, cbl_msg_sid_raw(msg, 0, &(const void *){ 0 },
+	    &(size_t){ 0 }));
 	/* Not an ERROR frame: no error code even with a -1 key. */
 	ATF_REQUIRE_EQ(0, cbl_msg_err_code(msg));
 	cbl_msg_free(msg);
@@ -280,14 +283,16 @@ ATF_TC_BODY(error_frame_sanity, tc)
 }
 
 /* Deterministic random mutation of a valid frame; must never crash. */
-/* The body's first value, decoded with YANG-CBOR's tags allowed. */
+/* The body's first value, as the decoder took it, its tag kept. */
 static const cbl_attr *
 yang_value(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
 {
+	const cbl_attr *body;
 
 	ATF_REQUIRE_EQ_MSG(0, decode_body(ctx, bodyhex, msgp), "body %s",
 	    bodyhex);
-	return (cbl_attr_first(cbl_msg_body(*msgp)));
+	body = cbl_msg_body(*msgp);
+	return (body != NULL && body->count > 0 ? &body->child[0] : NULL);
 }
 
 ATF_TC_WITHOUT_HEAD(yang_tags);
@@ -307,7 +312,6 @@ ATF_TC_BODY(yang_tags, tc)
 	cbl_ctx *ctx = test_ctx();
 	const cbl_attr *a;
 	uint32_t flags;
-	uint64_t tag;
 	cbl_msg *msg;
 
 	/* Version 2 takes them as they are, no flag asked (D-1). */
@@ -318,18 +322,16 @@ ATF_TC_BODY(yang_tags, tc)
 	for (size_t i = 0; i < nitems(accepted); i++) {
 		a = yang_value(ctx, accepted[i], &msg);
 		ATF_REQUIRE(a != NULL);
-		ATF_CHECK_EQ_MSG(0, cbl_attr_tag(a, &tag), "%s", accepted[i]);
-		ATF_CHECK_EQ_MSG(tags[i], tag, "%s", accepted[i]);
+		ATF_CHECK_EQ_MSG(tags[i], a->tag, "%s", accepted[i]);
 		cbl_msg_free(msg);
 	}
 	/* An untagged value says so; a nested one keeps its tag. */
 	a = yang_value(ctx, "A2 01 01 02 82 D8 2F 01 02", &msg);
-	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(a, &tag));
-	a = cbl_attr_next(a);
-	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(a, &tag));
-	ATF_REQUIRE_EQ(0, cbl_attr_tag(cbl_attr_index(a, 0), &tag));
-	ATF_CHECK_EQ(47, tag);
-	ATF_CHECK_EQ(ENOENT, cbl_attr_tag(cbl_attr_index(a, 1), &tag));
+	ATF_CHECK_EQ(0, a[0].tag);
+	ATF_CHECK_EQ(0, a[1].tag);
+	ATF_REQUIRE_EQ(2, a[1].count);
+	ATF_CHECK_EQ(47, a[1].child[0].tag);
+	ATF_CHECK_EQ(0, a[1].child[1].tag);
 	cbl_msg_free(msg);
 
 	/* Bits in a union are their names (RFC 9254 section 6.7). */
@@ -383,10 +385,10 @@ ATF_TC_BODY(mutations, tc)
 			    (unsigned char)(seed >> 16);
 		}
 		if (cbl_frame_decode(ctx, buf, len, NULL, &msg) == 0) {
-			/* Walk whatever decoded. */
-			for (const cbl_attr *a = cbl_attr_first(
-			    cbl_msg_body(msg)); a != NULL; a = cbl_attr_next(a))
-				(void)cbl_attr_count(a);
+			/* Look up what decoded. */
+			for (uint64_t sid = 1; sid <= 4; sid++)
+				(void)cbl_msg_sid_raw(msg, sid,
+				    &(const void *){ 0 }, &(size_t){ 0 });
 			cbl_msg_free(msg);
 		}
 	}

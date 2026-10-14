@@ -44,7 +44,6 @@ ATF_TC_BODY(sid_keys, tc)
 	const void *p;
 	size_t len;
 
-	ATF_REQUIRE_EQ(0, cbl_ctx_set_flags(ctx, CBL_CTX_YANG_TAGS));
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 1, 1, CBL_F_REQUEST, &msg));
 	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, 1700, v2, sizeof(v2)));
 	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, SID + 5, v1, sizeof(v1)));
@@ -58,17 +57,13 @@ ATF_TC_BODY(sid_keys, tc)
 	cbl_msg_free(got);
 	cbl_msg_free(msg);
 
-	/* 0 is no SID, 2^63 none either; a SID keys the top only. */
+	/* 0 is no SID, 2^63 none either. */
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 1, 1, CBL_F_REQUEST, &msg));
 	ATF_CHECK_EQ(EINVAL, cbl_msg_put_sid_raw(msg, 0, v2, sizeof(v2)));
 	cbl_msg_free(msg);
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 1, 1, CBL_F_REQUEST, &msg));
 	ATF_CHECK_EQ(EINVAL, cbl_msg_put_sid_raw(msg, UINT64_C(1) << 63, v2,
 	    sizeof(v2)));
-	cbl_msg_free(msg);
-	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 1, 1, CBL_F_REQUEST, &msg));
-	ATF_REQUIRE_EQ(0, cbl_nest_start(msg, 1));
-	ATF_CHECK_EQ(EINVAL, cbl_msg_put_sid_raw(msg, SID, v2, sizeof(v2)));
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }
@@ -151,11 +146,85 @@ ATF_TC_BODY(limits, tc)
 	cbl_ctx_free(ctx);
 }
 
+/* What a body refuses as it is built: errors are sticky, said at encode. */
+ATF_TC_WITHOUT_HEAD(builder_errors);
+ATF_TC_BODY(builder_errors, tc)
+{
+	static const uint8_t one[] = { 0x01 };
+	cbl_ctx *ctx = test_ctx();
+	cbl_msg *msg;
+
+	/* A SID twice. */
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 5, 1, 0, &msg));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, 3, one, 1));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, 1, one, 1));
+	ATF_REQUIRE_EQ(EEXIST, cbl_msg_put_sid_raw(msg, 3, one, 1));
+	ATF_REQUIRE_EQ(EEXIST, cbl_msg_put_sid_raw(msg, 4, one, 1));
+	ATF_REQUIRE_EQ(EEXIST, cbl_msg_encode(msg, NULL, NULL));
+	ATF_REQUIRE(cbl_msg_errstr(msg) != NULL);
+	cbl_msg_free(msg);
+
+	/* Read-only after encode. */
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 5, 1, 0, &msg));
+	ATF_REQUIRE_EQ(0, cbl_msg_encode(msg, NULL, NULL));
+	ATF_REQUIRE_EQ(EBUSY, cbl_msg_put_sid_raw(msg, 1, one, 1));
+	cbl_msg_free(msg);
+
+	/* The limits themselves. */
+	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_limit(ctx, CBL_LIM_MAX_FRAME, 1));
+	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_limit(ctx, CBL_LIM_MAX_DEPTH, 65));
+	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_limit(ctx, CBL_LIM__COUNT, 1));
+	cbl_ctx_free(ctx);
+}
+
+/* An error's every field, there and back: the cblink:error structure. */
+ATF_TC_WITHOUT_HEAD(error_fields);
+ATF_TC_BODY(error_fields, tc)
+{
+	struct cbl_path_elem path[] = { { .v = 3 }, { .v = 2 }, { .v = 7 } },
+	    got[3];
+	cbl_ctx *ctx = test_ctx();
+	char longmsg[CBL_ERRMSG_MAX + 100];
+	cbl_msg *msg, *rx;
+	const void *ck;
+	size_t cklen;
+
+	memset(longmsg, 'e', sizeof(longmsg) - 1);
+	longmsg[sizeof(longmsg) - 1] = '\0';
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 5, 1, CBL_F_ERROR, &msg));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_error(msg, EINVAL, longmsg, path, 3, 9));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_cookie(msg, "ck", 2));
+	ATF_REQUIRE_EQ(0, roundtrip(ctx, msg, &rx));
+	ATF_REQUIRE_EQ(EINVAL, cbl_msg_err_code(rx));
+	/* The message cut at CBL_ERRMSG_MAX. */
+	ATF_REQUIRE_EQ(CBL_ERRMSG_MAX, strlen(cbl_msg_err_str(rx)));
+	ATF_REQUIRE_EQ(3, cbl_msg_err_path(rx, got, 3));
+	ATF_REQUIRE(got[0].v == 3 && got[1].v == 2 && got[2].v == 7);
+	/* What is missing: error-tag missing-element, the path's last. */
+	ATF_REQUIRE_EQ(9, cbl_msg_err_miss_type(rx));
+	ATF_REQUIRE_EQ(0, cbl_msg_err_cookie(rx, &ck, &cklen));
+	ATF_REQUIRE(cklen == 2 && memcmp(ck, "ck", 2) == 0);
+	cbl_msg_free(rx);
+	cbl_msg_free(msg);
+
+	/* An ack may carry a warning; err_code stays 0. */
+	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 5, 1, CBL_F_ACK, &msg));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_error(msg, 0, "warning", NULL, 0, -1));
+	ATF_REQUIRE_EQ(0, roundtrip(ctx, msg, &rx));
+	ATF_REQUIRE_EQ(0, cbl_msg_err_code(rx));
+	ATF_REQUIRE_STREQ("warning", cbl_msg_err_str(rx));
+	cbl_msg_free(rx);
+	cbl_msg_free(msg);
+	cbl_ctx_free(ctx);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
 	ATF_TP_ADD_TC(tp, sid_keys);
 	ATF_TP_ADD_TC(tp, out_of_order);
 	ATF_TP_ADD_TC(tp, limits);
+	ATF_TP_ADD_TC(tp, builder_errors);
+	ATF_TP_ADD_TC(tp, error_fields);
 	return (atf_no_error());
 }

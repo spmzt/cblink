@@ -26,8 +26,7 @@ secho(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 
 	if ((error = cbl_req_reply_new(req, 0, &r)) != 0)
 		return (error);
-	if (cbl_msg_attr(msg, 1) != NULL)
-		cbl_put_attr(r, 1, cbl_msg_attr(msg, 1));
+	(void)t_copy(r, msg, 1);
 	return (cbl_req_send(req, r));
 }
 
@@ -52,7 +51,7 @@ sfeed(cbl_req *req __unused, const cbl_msg *msg __unused, cbl_stream *s,
 		return (error);
 	for (int i = 0; i < FEED_ITEMS; i++) {
 		ATF_REQUIRE_EQ(0, cbl_stream_msg_new(s, &m));
-		cbl_put_uint(m, 1, (uint64_t)i);
+		t_put_uint(m, 1, (uint64_t)i);
 		ATF_REQUIRE_EQ(0, cbl_stream_send(s, m));
 	}
 	return (cbl_stream_half_close(s));
@@ -283,7 +282,7 @@ ATF_TC_BODY(large_messages, tc)
 	ssend(fd, buf, len, 0);
 	m = srecv(f.ctx, fd, &sid);
 	ATF_REQUIRE_EQ(1, cbl_msg_seq(m));
-	ATF_REQUIRE_EQ(0, cbl_attr_bytes(cbl_msg_attr(m, 1), &p, &blen));
+	ATF_REQUIRE(t_get_bytes(m, 1, &p, &blen));
 	ATF_REQUIRE_EQ(200000, blen);
 	cbl_msg_free(m);
 

@@ -58,7 +58,7 @@ rec_cb(cbl_conn *conn __unused, cbl_msg *msg, void *arg)
 	r->group = cbl_msg_stream(msg);
 	if (cbl_msg_err_code(msg) == ENOBUFS)
 		r->missed++;
-	(void)cbl_attr_uint(cbl_msg_attr(msg, NA_SEQ), &seq);
+	(void)t_get_uint(msg, NA_SEQ, &seq);
 	if (seq != r->next)
 		r->in_order = false;
 	r->next = seq + 1;
@@ -206,9 +206,9 @@ broadcast(struct fx *f, uint16_t cmd, uint32_t gidx, uint64_t first,
 
 	for (uint64_t i = first; i < first + n; i++) {
 		ATF_REQUIRE_EQ(0, cbl_notify_msg_new(f->fam, cmd, &m));
-		cbl_put_uint(m, NA_SEQ, i);
+		t_put_uint(m, NA_SEQ, i);
 		if (pad > 0)
-			cbl_put_bytes(m, NA_PAD, padbuf, pad);
+			t_put_bytes(m, NA_PAD, padbuf, pad);
 		ATF_REQUIRE_EQ(0, cbl_notify(f->fam, gidx, m));
 	}
 }
@@ -424,7 +424,7 @@ ATF_TC_BODY(unicast, tc)
 	ATF_CHECK(!cbl_conn_subscribed(f.sc.c[1], f.fam, 99));
 	ATF_CHECK(!cbl_conn_subscribed(NULL, f.fam, G_EVENTS));
 	ATF_REQUIRE_EQ(0, cbl_notify_msg_new(f.fam, N_EVENT, &m));
-	cbl_put_uint(m, NA_SEQ, 0);
+	t_put_uint(m, NA_SEQ, 0);
 	ATF_REQUIRE_EQ(0, cbl_conn_notify(f.sc.c[1], f.fam, G_EVENTS, m));
 	pthread_mutex_unlock(&f.sc.mtx);
 	drive(c2, &r2.n, 1, 3000);
@@ -508,7 +508,7 @@ notifier_thread(void *arg)
 
 	while (!nt->stop) {
 		if (cbl_notify_msg_new(nt->fam, N_EVENT, &m) == 0) {
-			cbl_put_uint(m, NA_SEQ, 0);
+			t_put_uint(m, NA_SEQ, 0);
 			(void)cbl_notify(nt->fam, G_EVENTS, m);
 		}
 	}
@@ -535,8 +535,8 @@ ATF_TC_BODY(notify_while_aborting, tc)
 		fd = raw_connect(f.ts.uri);
 		ATF_REQUIRE_EQ(0, cbl_msg_new(f.cctx, 0, 2, CBL_F_REQUEST |
 		    CBL_F_ACK, &m));
-		cbl_put_uint(m, 1, cbl_family_id(f.fam));
-		cbl_put_uint(m, 6, cbl_family_group_id(f.fam, G_EVENTS));
+		t_put_uint(m, 1, cbl_family_id(f.fam));
+		t_put_uint(m, 6, cbl_family_group_id(f.fam, G_EVENTS));
 		raw_send_msg(fd, m);
 		/* The ACK, or already a notification: subscribed either way. */
 		ATF_REQUIRE((m = raw_read_msg(f.cctx, fd)) != NULL);
@@ -568,8 +568,8 @@ big_fanout(cbl_timer *t __unused, void *arg)
 	for (uint64_t i = 0; i < BIG_N; i++) {
 		if (cbl_notify_msg_new(fam, N_EVENT, &m) != 0)
 			return;
-		cbl_put_uint(m, NA_SEQ, i);
-		cbl_put_bytes(m, NA_PAD, pad, sizeof(pad));
+		t_put_uint(m, NA_SEQ, i);
+		t_put_bytes(m, NA_PAD, pad, sizeof(pad));
 		(void)cbl_notify(fam, G_EVENTS, m);
 	}
 }

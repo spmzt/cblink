@@ -15,28 +15,37 @@ enum { T_ECHO = 1, T_FAIL, T_DEFER, T_LIST, T_SECRET, T_DUMPONLY, T_DEFERFAST,
     T_BIG, T_FOREVER };
 enum { TA_VAL = 1, TA_N, TA_DELAY, TA_IDX };
 
-static const struct cbl_policy echo_pol[] = {
-	{ .type = TA_VAL, .kind = CBL_K_TEXT,
-	  .flags = CBL_PF_REQUIRED | CBL_PF_RANGE, .len = { 1, 16 } },
-};
-CBL_POLICY_SET(echo_set, echo_pol);
-
-static const struct cbl_policy list_pol[] = {
-	{ .type = TA_N, .kind = CBL_K_UINT, .flags = CBL_PF_RANGE,
-	  .u = { 0, 1000000 } },
-};
-CBL_POLICY_SET(list_set, list_pol);
-
+/* The value back, if there is one. */
 static int
-echo_doit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+copy_doit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	cbl_msg *rsp;
 	int error;
 
 	if ((error = cbl_req_reply_new(req, 0, &rsp)) != 0)
 		return (error);
-	cbl_put_attr(rsp, TA_VAL, cbl_msg_attr(msg, TA_VAL));
+	(void)t_copy(rsp, msg, TA_VAL);
 	return (cbl_req_send(req, rsp));
+}
+
+/* echo: the value a string of 1 to 16 bytes, said where it is not. */
+static int
+echo_doit(cbl_req *req, const cbl_msg *msg, void *arg)
+{
+	struct cbl_path_elem p[] = { { .v = TA_VAL } };
+	char s[64];
+
+	if (cbl_msg_sid_raw(msg, TA_VAL, &(const void *){ 0 },
+	    &(size_t){ 0 }) == ENOENT) {
+		cbl_req_set_err(req, "value required", NULL, 0, TA_VAL);
+		return (EINVAL);
+	}
+	if (!t_get_str(msg, TA_VAL, s, sizeof(s)) || strlen(s) < 1 ||
+	    strlen(s) > 16) {
+		cbl_req_set_err(req, "length out of range", p, 1, -1);
+		return (ERANGE);
+	}
+	return (copy_doit(req, msg, arg));
 }
 
 static int
@@ -64,7 +73,7 @@ defer_thread(void *arg)
 
 	usleep((useconds_t)d->delay_ms * 1000);
 	if (cbl_req_reply_new(d->req, 0, &rsp) == 0) {
-		cbl_put_uint(rsp, TA_IDX, d->idx);
+		t_put_uint(rsp, TA_IDX, d->idx);
 		(void)cbl_req_send(d->req, rsp);
 	}
 	(void)cbl_req_complete(d->req, 0);
@@ -81,8 +90,8 @@ defer_doit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	if ((d = calloc(1, sizeof(*d))) == NULL)
 		return (ENOMEM);
 	d->req = req;
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_DELAY), &d->delay_ms);
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_IDX), &d->idx);
+	(void)t_get_uint(msg, TA_DELAY, &d->delay_ms);
+	(void)t_get_uint(msg, TA_IDX, &d->idx);
 	ATF_REQUIRE_EQ(0, cbl_req_defer(req));
 	ATF_REQUIRE_EQ(0, pthread_create(&thr, NULL, defer_thread, d));
 	pthread_detach(thr);
@@ -122,7 +131,7 @@ big_doit(cbl_req *req, const cbl_msg *msg __unused, void *arg __unused)
 
 	if ((error = cbl_req_reply_new(req, 0, &rsp)) != 0)
 		return (error);
-	cbl_put_bytes(rsp, TA_VAL, pad, sizeof(pad));
+	t_put_bytes(rsp, TA_VAL, pad, sizeof(pad));
 	return (cbl_req_send(req, rsp));
 }
 
@@ -160,8 +169,14 @@ list_dumpit(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 
 	uint64_t fail_at = UINT64_MAX;
 
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_N), &n);
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_DELAY), &fail_at);
+	/* How many: a uint up to a million. */
+	if (cbl_msg_sid_raw(msg, TA_N, &(const void *){ 0 },
+	    &(size_t){ 0 }) == 0 && (!t_get_uint(msg, TA_N, &n) ||
+	    n > 1000000)) {
+		cbl_req_set_err(req, "bad count", NULL, 0, -1);
+		return (EINVAL);
+	}
+	(void)t_get_uint(msg, TA_DELAY, &fail_at);
 	if (st->pos[0] >= n)
 		return (0);
 	if (st->pos[0] == fail_at) {
@@ -170,8 +185,8 @@ list_dumpit(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 	}
 	if ((error = cbl_req_dump_item(req, &item)) != 0)
 		return (error);
-	cbl_put_uint(item, TA_IDX, st->pos[0]);
-	cbl_put_bytes(item, TA_VAL, "0123456789abcdef0123456789abcdef", 32);
+	t_put_uint(item, TA_IDX, st->pos[0]);
+	t_put_bytes(item, TA_VAL, "0123456789abcdef0123456789abcdef", 32);
 	if ((error = cbl_req_send(req, item)) != 0)
 		return (error);
 	st->pos[0]++;
@@ -180,15 +195,15 @@ list_dumpit(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 
 static const struct cbl_op test_ops[] = {
 	{ .cmd = T_ECHO, .name = "echo", .flags = CBL_OPF_DO,
-	  .policy = &echo_set, .doit = echo_doit },
+	  .doit = echo_doit },
 	{ .cmd = T_FAIL, .name = "fail", .flags = CBL_OPF_DO,
 	  .doit = fail_doit },
 	{ .cmd = T_DEFER, .name = "defer", .flags = CBL_OPF_DO,
 	  .doit = defer_doit },
 	{ .cmd = T_LIST, .name = "list", .flags = CBL_OPF_DO | CBL_OPF_DUMP,
-	  .policy = &list_set, .doit = echo_doit, .dumpit = list_dumpit },
+	  .doit = copy_doit, .dumpit = list_dumpit },
 	{ .cmd = T_SECRET, .name = "secret",
-	  .flags = CBL_OPF_DO | CBL_OPF_AUTH, .doit = echo_doit },
+	  .flags = CBL_OPF_DO | CBL_OPF_AUTH, .doit = copy_doit },
 	{ .cmd = T_DUMPONLY, .name = "dumponly", .flags = CBL_OPF_DUMP,
 	  .dumpit = list_dumpit },
 	{ .cmd = T_DEFERFAST, .name = "deferfast", .flags = CBL_OPF_DO,
@@ -354,25 +369,25 @@ ATF_TC_BODY(dispatch, tc)
 	struct fixture f;
 	cbl_msg *req, *rsp;
 	const void *ck;
-	const char *s;
+	char s[64];
 	size_t len;
 
 	setup(&f);
 	/* Do with a reply. */
 	cbl_msg_new(f.cctx, f.id, T_ECHO, 0, &req);
-	cbl_put_str(req, TA_VAL, "ping");
+	t_put_str(req, TA_VAL, "ping");
 	ATF_REQUIRE_EQ(0, cbl_request(f.c, req, &rsp, 2000));
-	ATF_REQUIRE_EQ(0, cbl_attr_str(rsp, cbl_msg_attr(rsp, TA_VAL), &s));
+	ATF_REQUIRE(t_get_str(rsp, TA_VAL, s, sizeof(s)));
 	ATF_REQUIRE_STREQ("ping", s);
 	cbl_msg_free(rsp);
 
-	/* Policy failures carry the attribute path. */
+	/* A handler's refusals carry what is missing, or the path. */
 	cbl_msg_new(f.cctx, f.id, T_ECHO, 0, &req);
 	ATF_REQUIRE_EQ(EINVAL, cbl_request(f.c, req, &rsp, 2000));
 	ATF_REQUIRE_EQ(TA_VAL, cbl_msg_err_miss_type(rsp));
 	cbl_msg_free(rsp);
 	cbl_msg_new(f.cctx, f.id, T_ECHO, 0, &req);
-	cbl_put_str(req, TA_VAL, "this is far too long");
+	t_put_str(req, TA_VAL, "this is far too long");
 	ATF_REQUIRE_EQ(ERANGE, cbl_request(f.c, req, &rsp, 2000));
 	ATF_REQUIRE_EQ(1, cbl_msg_err_path(rsp, path, 4));
 	ATF_REQUIRE_EQ(TA_VAL, path[0].v);
@@ -395,7 +410,7 @@ ATF_TC_BODY(dispatch, tc)
 	ATF_REQUIRE_EQ(EOPNOTSUPP, cbl_request(f.c, req, &rsp, 2000));
 	cbl_msg_free(rsp);
 	cbl_msg_new(f.cctx, f.id, T_ECHO, CBL_F_DUMP, &req);
-	cbl_put_str(req, TA_VAL, "x");
+	t_put_str(req, TA_VAL, "x");
 	ATF_REQUIRE_EQ(EOPNOTSUPP, cbl_request(f.c, req, &rsp, 2000));
 	cbl_msg_free(rsp);
 	/* Plaintext TCP peers are not authenticated. */
@@ -426,7 +441,7 @@ dump_cb(cbl_conn *conn __unused, cbl_msg *m, bool final, int error,
 		return;
 	}
 	ATF_REQUIRE_EQ(CBL_F_MULTI, cbl_msg_flags(m));
-	(void)cbl_attr_uint(cbl_msg_attr(m, TA_IDX), &idx);
+	(void)t_get_uint(m, TA_IDX, &idx);
 	if (idx != r->next)
 		r->order_ok = false;
 	r->next++;
@@ -469,7 +484,7 @@ ATF_TC_BODY(dump_backpressure, tc)
 
 	setup(&f);
 	cbl_msg_new(f.cctx, f.id, T_LIST, CBL_F_DUMP, &req);
-	cbl_put_uint(req, TA_N, 5000);
+	t_put_uint(req, TA_N, 5000);
 	ATF_REQUIRE_EQ(0, cbl_request_async(f.c, req, dump_cb, &r));
 	drive_until(f.c, &r.finals, 20000);
 	ATF_REQUIRE_EQ(1, r.finals);
@@ -481,16 +496,16 @@ ATF_TC_BODY(dump_backpressure, tc)
 	memset(&r, 0, sizeof(r));
 	r.order_ok = true;
 	cbl_msg_new(f.cctx, f.id, T_LIST, CBL_F_DUMP, &req);
-	cbl_put_uint(req, TA_N, 0);
+	t_put_uint(req, TA_N, 0);
 	ATF_REQUIRE_EQ(0, cbl_request_async(f.c, req, dump_cb, &r));
 	drive_until(f.c, &r.finals, 5000);
 	ATF_REQUIRE_EQ(1, r.finals);
 	ATF_REQUIRE_EQ(0, r.items);
 
-	/* Policy failure on a dump ends it with ERROR|MULTI|DONE. */
+	/* A failure on a dump ends it with ERROR|MULTI|DONE. */
 	memset(&r, 0, sizeof(r));
 	cbl_msg_new(f.cctx, f.id, T_LIST, CBL_F_DUMP, &req);
-	cbl_put_str(req, TA_N, "x");
+	t_put_str(req, TA_N, "x");
 	ATF_REQUIRE_EQ(0, cbl_request_async(f.c, req, dump_cb, &r));
 	drive_until(f.c, &r.finals, 5000);
 	ATF_REQUIRE_EQ(1, r.finals);
@@ -521,7 +536,7 @@ defer_cb(cbl_conn *conn __unused, cbl_msg *m, bool final,
 	uint64_t idx;
 
 	if (!final && m != NULL) {
-		(void)cbl_attr_uint(cbl_msg_attr(m, TA_IDX), &idx);
+		(void)t_get_uint(m, TA_IDX, &idx);
 		r->order[r->n++] = (int)idx;
 	}
 	if (final)
@@ -541,8 +556,8 @@ ATF_TC_BODY(deferred_out_of_order, tc)
 	setup(&f);
 	for (int i = 0; i < 4; i++) {
 		cbl_msg_new(f.cctx, f.id, T_DEFER, 0, &req);
-		cbl_put_uint(req, TA_DELAY, (uint64_t)delay[i]);
-		cbl_put_uint(req, TA_IDX, (uint64_t)i);
+		t_put_uint(req, TA_DELAY, (uint64_t)delay[i]);
+		t_put_uint(req, TA_IDX, (uint64_t)i);
 		ATF_REQUIRE_EQ(0, cbl_request_async(f.c, req, defer_cb, &r));
 	}
 	for (int i = 0; i < 300 && r.done < 4; i++)
@@ -723,11 +738,10 @@ ATF_TC_BODY(slow_dump_consumer, tc)
 	ATF_REQUIRE_EQ(0, cbl_conn_attach(f.c, lt.loop));
 	ATF_REQUIRE_EQ(0, pthread_create(&lt.thr, NULL, loop_main, &lt));
 	ATF_REQUIRE_EQ(0, cbl_msg_new(f.cctx, f.id, T_LIST, CBL_F_DUMP, &req));
-	cbl_put_uint(req, TA_N, 6000);
+	t_put_uint(req, TA_N, 6000);
 	ATF_REQUIRE_EQ(0, cbl_dump_start(f.c, req, &d));
 	while ((error = cbl_dump_next(d, &item)) == 0 && item != NULL) {
-		ATF_REQUIRE_EQ(0, cbl_attr_uint(cbl_msg_attr(item, TA_IDX),
-		    &idx));
+		ATF_REQUIRE(t_get_uint(item, TA_IDX, &idx));
 		ATF_REQUIRE_EQ((uint64_t)n, idx);
 		if (++n % 100 == 0)
 			usleep(20000);	/* a slow consumer */
@@ -763,12 +777,12 @@ ATF_TC_BODY(inflight_limit, tc)
 	ATF_REQUIRE_EQ(0, cbl_conn_connect(f.c));
 	for (int i = 0; i < 2; i++) {
 		cbl_msg_new(f.cctx, f.id, T_DEFER, 0, &req);
-		cbl_put_uint(req, TA_DELAY, 300);
+		t_put_uint(req, TA_DELAY, 300);
 		ATF_REQUIRE_EQ(0, cbl_request_async(f.c, req, defer_cb, &r));
 	}
 	drive_until(f.c, &all, 100);
 	cbl_msg_new(f.cctx, f.id, T_ECHO, 0, &req);
-	cbl_put_str(req, TA_VAL, "x");
+	t_put_str(req, TA_VAL, "x");
 	ATF_REQUIRE_EQ(EAGAIN, cbl_request(f.c, req, &rsp, 2000));
 	cbl_msg_free(rsp);
 	for (int i = 0; i < 300 && r.done < 2; i++)
@@ -787,14 +801,13 @@ run_dump(struct fixture *f, uint64_t n, uint64_t fail_at, int *items)
 	int error;
 
 	cbl_msg_new(f->cctx, f->id, T_LIST, 0, &req);
-	cbl_put_uint(req, TA_N, n);
+	t_put_uint(req, TA_N, n);
 	if (fail_at != UINT64_MAX)
-		cbl_put_uint(req, TA_DELAY, fail_at);
+		t_put_uint(req, TA_DELAY, fail_at);
 	ATF_REQUIRE_EQ(0, cbl_dump_start(f->c, req, &d));
 	*items = 0;
 	while ((error = cbl_dump_next(d, &item)) == 0 && item != NULL) {
-		ATF_REQUIRE_EQ(0, cbl_attr_uint(cbl_msg_attr(item, TA_IDX),
-		    &idx));
+		ATF_REQUIRE(t_get_uint(item, TA_IDX, &idx));
 		ATF_REQUIRE_EQ((uint64_t)*items, idx);
 		(*items)++;
 	}
@@ -825,7 +838,7 @@ ATF_TC_BODY(dump_iterator, tc)
 	ATF_REQUIRE_EQ(40, items);
 	/* Abandoned half-way: freeing must be safe. */
 	cbl_msg_new(f.cctx, f.id, T_LIST, 0, &req);
-	cbl_put_uint(req, TA_N, 500);
+	t_put_uint(req, TA_N, 500);
 	ATF_REQUIRE_EQ(0, cbl_dump_start(f.c, req, &d));
 	ATF_REQUIRE_EQ(0, cbl_dump_next(d, &item));
 	ATF_REQUIRE(item != NULL);
@@ -841,7 +854,7 @@ ATF_TC_BODY(dump_iterator, tc)
 	ATF_REQUIRE_EQ(EIO, run_dump(&f, 100, 7, &items));
 	ATF_REQUIRE_EQ(7, items);
 	cbl_msg_new(f.cctx, f.id, T_LIST, 0, &req);
-	cbl_put_uint(req, TA_N, 500);
+	t_put_uint(req, TA_N, 500);
 	ATF_REQUIRE_EQ(0, cbl_dump_start(f.c, req, &d));
 	cbl_dump_free(d);
 	ATF_REQUIRE_EQ(0, cbl_ping(f.c, 2000));

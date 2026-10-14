@@ -35,6 +35,7 @@
 
 #include "cbl_impl.h"
 #include "cbl_schema.h"
+#include "cbl_yimpl.h"
 
 #define	YDEPTH_MAX	CBL_DEPTH_HARD_MAX
 
@@ -208,6 +209,42 @@ present(const struct cbl_ynode *n, const void *p)
 	default:
 		return (true);
 	}
+}
+
+bool
+cbl_ypresent(const struct cbl_ynode *n, const void *p)
+{
+
+	return (present(n, p));
+}
+
+/* n's case, and its choices', in struct p: EINVAL where another's is. */
+static int
+case_set(const struct cbl_ynode *n, void *p, const struct cbl_ychoice **bad)
+{
+	const struct cbl_ychoice *c = n->choice;
+	uint32_t want = n->ccase;
+	int had;
+
+	for (; c != NULL; want = c->parent_case, c = c->parent) {
+		if (c->off == CBL_YOFF_NONE)
+			continue;
+		had = read_enum(AT(p, c->off), sizeof(int));
+		if (had != 0 && (uint32_t)had != want + 1) {
+			*bad = c;
+			return (EINVAL);
+		}
+		write_enum(WAT(p, c->off), sizeof(int), (int)want + 1);
+	}
+	return (0);
+}
+
+int
+cbl_yset_case(const struct cbl_ynode *n, void *p)
+{
+	const struct cbl_ychoice *bad;
+
+	return (case_set(n, p, &bad));
 }
 
 /*
@@ -1184,19 +1221,11 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 static int
 set_case(struct yrd *r, const struct cbl_ynode *n, void *p)
 {
-	const struct cbl_ychoice *c = n->choice;
-	uint32_t want = n->ccase;
-	int had;
+	const struct cbl_ychoice *bad;
 
-	for (; c != NULL; want = c->parent_case, c = c->parent) {
-		if (c->off == CBL_YOFF_NONE)
-			continue;
-		had = read_enum(AT(p, c->off), sizeof(int));
-		if (had != 0 && (uint32_t)had != want + 1)
-			return (fail(r, EINVAL, "%s: two cases of choice %s",
-			    n->name, c->name));
-		write_enum(WAT(p, c->off), sizeof(int), (int)want + 1);
-	}
+	if (case_set(n, p, &bad) != 0)
+		return (fail(r, EINVAL, "%s: two cases of choice %s",
+		    n->name, bad->name));
 	return (0);
 }
 

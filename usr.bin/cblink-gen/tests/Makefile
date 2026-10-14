@@ -40,8 +40,14 @@ ATF_TESTS_C+=	yfamily_test
 SRCS.yfamily_test=	yangh.h yfamily_test.c yangh_schema.c
 CFLAGS.yfamily_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
 LDADD.yfamily_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
-# Built once for both.
+# Built once for all three.
 CFLAGS.yangh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+CFLAGS.yfill.c+=	-I${LIBCBLINK_SRC}
+# ydata_test: the instance tree on those tables.
+ATF_TESTS_C+=	ydata_test
+SRCS.ydata_test=	yangh.h ydata_test.c yangh_schema.c yfill.c
+CFLAGS.ydata_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+LDADD.ydata_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 # yvalid_test: the static validator on the module rules.
 ATF_TESTS_C+=	yvalid_test
 SRCS.yvalid_test=	rules.h yvalid_test.c rules_schema.c

@@ -387,6 +387,63 @@ struct cbl_ynotif { uint64_t sid; const char *event_time; const void *content; s
 int	cbl_msg_ynotif(const cbl_msg *, struct cbl_ynotif *, cbl_yarena *);
 ```
 
+`<cbl_data.h>`, the instance tree: YANG data as nodes of the tables, for
+what keeps data and works on it as YANG does (a datastore, an edit, a
+diff, XPath), where the structs are what one handler fills or reads.
+
+```c
+cbl_dtree *cbl_dtree_new(const struct cbl_yschema *);	/* its root: no schema node */
+void	cbl_dtree_free(cbl_dtree *);
+cbl_dnode *cbl_dtree_root(const cbl_dtree *);
+size_t	cbl_dtree_count(const cbl_dtree *);
+/* walking: the children in schema order, entries as added */
+const struct cbl_ynode *cbl_dnode_schema(const cbl_dnode *);
+cbl_dnode *cbl_dnode_parent(const cbl_dnode *), *cbl_dnode_first(const cbl_dnode *),
+    *cbl_dnode_last(const cbl_dnode *), *cbl_dnode_next(const cbl_dnode *),
+    *cbl_dnode_prev(const cbl_dnode *);
+const void *cbl_dnode_value(const cbl_dnode *);	/* as its struct member is */
+/* making: EINVAL where the schema has it not, EEXIST a second */
+int	cbl_dnode_add(cbl_dnode *parent, const struct cbl_ynode *, const void *value,
+	    cbl_dnode **out);
+int	cbl_dnode_add_entry(cbl_dnode *parent, const struct cbl_ynode *list,
+	    const void *const *keys, cbl_dnode **out);
+int	cbl_dnode_set(cbl_dnode *, const void *value);
+int	cbl_dnode_remove(cbl_dnode *);
+/* finding: a list's entries by their keys, from an index */
+cbl_dnode *cbl_dnode_child(const cbl_dnode *, const struct cbl_ynode *);
+cbl_dnode *cbl_dnode_entry(const cbl_dnode *parent, const struct cbl_ynode *list,
+    const void *const *keys);
+cbl_dnode *cbl_dnode_llentry(const cbl_dnode *parent, const struct cbl_ynode *,
+    const void *value);
+/* defaults: on demand, or made (CBL_DN_DEFAULT) */
+const void *cbl_dnode_leaf(const cbl_dnode *, const struct cbl_ynode *leaf, bool *isdflt);
+ssize_t	cbl_dtree_defaults(cbl_dnode *);
+/* the structs and YANG-CBOR */
+int	cbl_dnode_from_struct(cbl_dnode *parent, const struct cbl_ynode *, const void *p,
+	    cbl_dnode **out);
+int	cbl_dnode_to_struct(const cbl_dnode *, void *p, cbl_yarena *);
+int	cbl_dtree_from_module(cbl_dtree *, const struct cbl_ymodule *, const void *p);
+int	cbl_dtree_to_module(const cbl_dtree *, const struct cbl_ymodule *, void *p,
+	    cbl_yarena *);
+int	cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *, const void *, size_t,
+	    int flags, char *why, size_t whylen, cbl_dnode **out);
+int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
+```
+
+- **A tree's shape** is kept: a node only where its schema node is, one
+  container or leaf of a kind, one entry of a list's keys, a
+  configuration leaf-list's values once, never two cases of a choice. A
+  key is its entry's: neither set nor taken away alone. The rest of what
+  the schema says is the validator's and the evaluator's.
+- **Values** are held as their struct members are, the tree owning a
+  copy of what they point to; `cbl_dnode_to_struct()` points into the
+  tree. Through the structs, the codec reads and writes a tree: a value
+  decoded, made a tree, and encoded again is the same bytes.
+- **Defaults**: `cbl_dnode_leaf()` gives a leaf's default where it is
+  in use and has no node, its case taken into account;
+  `cbl_dtree_defaults()` makes a node of each, and of the non-presence
+  containers that hold them.
+
 - **Decoding** checks what the CBOR is: its shape, its kinds, its tags,
   UTF-8, and with `CBL_YD_STRICT` a key the node has no child for.
   What a decode allocates is the arena's, bounded by its limit, since a

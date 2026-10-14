@@ -29,6 +29,7 @@
 
 #include "cbl_pattern.h"
 #include "cbl_schema.h"
+#include "cbl_yimpl.h"
 
 #define	AT(p, off)	((const void *)((const char *)(p) + (off)))
 
@@ -890,6 +891,16 @@ parse_value(const struct cbl_ynode *n, const struct cbl_ytype *t,
 		/* empty has none; an instance-identifier's: not yet. */
 		return (EOPNOTSUPP);
 	}
+}
+
+int
+cbl_ydefault_parse(const struct cbl_ynode *n, uint16_t k, void *out,
+    cbl_yarena *a)
+{
+
+	if (n == NULL || n->type == NULL || k >= n->ndflt)
+		return (EINVAL);
+	return (parse_value(n, n->type, n->dflt[k], out, a));
 }
 
 static int	d_struct(const struct cbl_ynode *, void *, cbl_yarena *, int);

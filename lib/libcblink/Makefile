@@ -2,7 +2,7 @@
 
 LIB=		cblink
 SHLIB_MAJOR=	1
-INCS=		cblink.h cbl_schema.h
+INCS=		cblink.h cbl_schema.h cbl_data.h
 MAN=		cblink.3
 
 SRCS=		cbl_arena.c \
@@ -10,6 +10,7 @@ SRCS=		cbl_arena.c \
 		cbl_conn.c \
 		cbl_ctrl.c \
 		cbl_ctx.c \
+		cbl_data.c \
 		cbl_decode.c \
 		cbl_dump.c \
 		cbl_family.c \

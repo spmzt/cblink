@@ -134,9 +134,10 @@ fill_value(struct yfill *f, const struct cbl_ytype *t, void *v)
 		b->len = 3;
 		break;
 	case CBL_YT_ENUMERATION:
+		/* By the pass and the counter: a leaf-list's differ. */
 		if (t->nitems > 0)
-			put_enum(v, t->csize, (int)t->items[(unsigned)f->pass %
-			    t->nitems].value);
+			put_enum(v, t->csize, (int)t->items[((unsigned)f->pass +
+			    k) % t->nitems].value);
 		break;
 	case CBL_YT_UNION:
 		if (t->nmembers == 0)
@@ -210,6 +211,9 @@ fill_child(struct yfill *f, const struct cbl_ynode *c, void *p, int depth)
 		if (!f->all)
 			return;
 		n = entries(depth);
+		/* Each value once, as a configuration leaf-list has it. */
+		if (c->type->kind == CBL_YT_ENUMERATION && c->type->nitems < n)
+			n = c->type->nitems;
 		q = falloc(f, n * c->type->csize);
 		for (size_t i = 0; i < n; i++)
 			fill_value(f, c->type, AT(q, i * c->type->csize));

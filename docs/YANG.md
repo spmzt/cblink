@@ -95,6 +95,13 @@ defaults: a leaf's, a leaf-list's values, a choice's default case and
 the defaults in it, in every struct that is there (an absent container
 stays absent).
 
+The instance tree (`<cbl_data.h>`, API.md section 7) keeps data as
+nodes of the tables, for datastores, edits and XPath: it keeps a tree's
+shape (keys one entry, a configuration leaf-list's values once, a
+choice's cases never two), gives a default where it is in use, and makes
+nodes of them, non-presence containers too, as RFC 6243's report-all
+shows them.
+
 ## 5. Expressions and patterns
 
 `when`, `must` and a leafref's `path` are recorded in the schema tables

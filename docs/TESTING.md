@@ -24,17 +24,15 @@ them.
 
 ## 2. What is tested
 
-The suite has about 130 test cases.
+The suite has about 155 test cases.
 
 ### 2.1 libcblink (`lib/libcblink/tests`)
 
 | Program | Covers |
 |---------|--------|
-| `frame_test` | The wire format: every hex example in WIRE-FORMAT.md, header fields and extensions, flag combinations, error frames, frame sequences. |
-| `attr_test` | Building and reading attributes: scalars, nesting, large containers and strings, copying, builder errors and limits, extended acks. |
-| `ybody_test` | Version 2 bodies: SID keys past 65535 to 2^63 - 1, negative and large nested keys, each value's bytes found again exactly after an out-of-order body is sorted, a key twice refused, SIDs out of range and a SID key below the top refused, the depth, value and frame limits on such bodies. |
-| `malformed_test` | Hostile input: bad headers and lengths, truncation, invalid CBOR, profile violations (tags, indefinite lengths, duplicate keys, bad UTF-8), YANG-CBOR's tags under `CBL_CTX_YANG_TAGS` and every other tag still refused, excessive nesting and attribute counts, and systematic mutations of valid frames. |
-| `policy_test` | Policies, validation errors with paths, declarative parsers. |
+| `frame_test` | The wire format: every hex example in WIRE-FORMAT.md, header fields and extensions, flag combinations, error frames, frame sequences, version 1 refused. |
+| `ybody_test` | Version 2 bodies: SID keys past 65535 to 2^63 - 1, negative and large nested keys, each value's bytes found again exactly after an out-of-order body is sorted, a key twice refused, SIDs out of range refused, the depth, value and frame limits; the builder's errors; every field of the `cblink:error` structure there and back. |
+| `malformed_test` | Hostile input: bad headers and lengths, truncation, invalid CBOR, profile violations (indefinite lengths, duplicate keys, bad UTF-8), YANG-CBOR's tags where they may be and every other tag refused, top-level keys that are not SIDs, excessive nesting and value counts, and systematic mutations of valid frames. |
 | `family_test` | The registry, the control family, dispatch, dumps with backpressure, deferred replies completed out of order, deferred requests completed before their handler returned and cancelled when their client left, read backpressure (a client that does not read its replies, a slow dump consumer), the in-flight limit. |
 | `tcp_test` | Connections: non-blocking clients (idle past the handshake timeout, failing over to the next address), `tcp://*` on IPv4 and IPv6, accept(2) out of descriptors, timers and signals, `cbl_ctx_free()` while in use, a peer that floods requests without reading the answers, plaintext opt-in, refusals, unknown families, out-of-order and fragmented replies, big replies, timeouts (request, first frame, idle), oversize and garbage input, recovery, a client on a loop. |
 | `sid_test` | YANG-CBOR bodies (RFC 9254) by hand, ahead of wire version 2: an `ietf-interfaces` entry written with libcbor, an absolute SID at the top and SID deltas below, negative ones included, read back through a SID table and written again to the same bytes; unknown SIDs and misplaced ones refused. |
@@ -53,19 +51,24 @@ The suite has about 130 test cases.
 
 | Test | Covers |
 |------|--------|
-| `golden` | `types.yaml` (every feature) and `kv.yaml` against committed output, byte for byte. |
-| `determinism` | Repeated runs give identical output. |
-| `errors` | Each invalid spec in `errors/` fails with exactly the diagnostics in its `.err` file. |
-| `ctrl_regen` | The control-family code committed in `lib/libcblink` matches what the generator produces now. |
-| `cli`, `big_input` | Options, exit codes, size limits. |
-| `roundtrip_test` | Code generated from `types.yaml` at build time, compiled at `WARNS=6`: structures round-trip through builders and parsers, policies hold, clients talk to servers, streams and notifications work. |
-| `minimal_test` | Families with only a `do`, only streams or only notifications compile at `WARNS=6`, so no unused helpers are generated. |
+| `yang_frontend` | Modules compiled through libyang, features and deviations, extensions, the profile's refusals (XPath outside XPath-lite, patterns outside the translator) named. |
+| `sid_cbor` | `.sid` files numbered with `-a`, in JSON and YANG-CBOR and back, `ietf-sid-file`'s own SIDs, the server table's copy of a file. |
+| `yang_h`, `yang_h_test` | The structs and tables of every shape and type compile at `WARNS=6`; lookups by delta and SID, identities, the codec's kinds (decimal64, bits, identityref, instance-identifier, unions with tags 43 to 46), an rpc's deltas from its SID, the arena's limit, the `cblink` structures in a message, and a round trip of every struct. |
+| `yfamily_test` | Family 1 serving those tables over a connection: GET and EDIT, an edit undone when another fails, refusals with the node at fault, RPC, a dump, a notification heard. |
+| `yang_tree` | Tree diagrams equal to `yanglint -f tree`. |
+| `ymod_regen` | The structs and tables of cblink's own modules, and `docs/ctrl.md`, committed in `lib/libcblink` and `docs`, match what the generator produces now. |
+| `determinism`, `cli`, `big_input`, `cblink_mk` | Repeated runs give identical output; options and exit codes; the size limit; cblink.mk finds a module given relative, with `../`, or absolute. |
+
+`tools/yangwalk/tablecheck.sh` runs the same round trip over a corpus of
+modules, every struct filled as the tables say, encoded, decoded and
+encoded again to the same bytes.
 
 ### 2.3 Examples (`examples/tests`)
 
 `examples_test.sh` runs `cbl-echo`, `cbl-kv`, `cbl-stream` and
 `cbl-notify`, each against its own server. This checks that the examples,
-built from their specs with `cblink.mk`, work as their comments say.
+built from their YANG modules with `cblink.mk`, work as their comments
+say.
 
 ## 3. Sanitizers
 
@@ -88,14 +91,15 @@ data races.
 
 ## 4. Fuzzing
 
-`fuzz/` has libFuzzer harnesses for the three parsers that see untrusted
+`fuzz/` has libFuzzer harnesses for the parsers that see untrusted
 input. They are built with ASan and UBSan, and seeded from `fuzz/corpus/`:
 
 | Harness | Input |
 |---------|-------|
-| `fuzz_frame` | A frame: decoding, every attribute accessor, validation and parsing as a control-family message. |
+| `fuzz_frame` | A frame: decoding, the decoder's tree, each top-level item found again at its bytes, and the YANG codec reading it as every control-family input and output, the hello and get structures, a notification, and its error. |
 | `fuzz_proxy` | A PROXY protocol header, read from a socket: the reader must stop exactly at the end of the header. |
-| `fuzz_spec` | A family spec: the YAML parser and spec checks. |
+| `fuzz_xpath` | An XPath expression: what parses is printed, and the print parses again to the same print. |
+| `fuzz_pattern` | An XSD pattern: the translation to an ERE, compiled by regcomp(3). |
 
 New inputs go to the first corpus directory given, so give a scratch one
 first to keep the committed seeds as they are:

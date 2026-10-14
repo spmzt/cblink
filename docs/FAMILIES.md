@@ -1,11 +1,12 @@
 # Families
 
 A **family** is a named set of operations an endpoint offers, with its
-attributes, multicast groups and streams. It plays the part of a generic
-netlink family. This document covers designing families, how they are
-registered and found, and the built-in control family. SPEC-FORMAT.md
-describes how to write one down, and GENERATOR.md describes the code
-generated from it.
+multicast groups and streams. It plays the part of a generic netlink
+family. Every body is YANG data (YANG.md): its items keyed by SID, its
+values YANG-CBOR. This document covers the families an endpoint has, how
+a program chooses between serving its YANG modules and a family of its
+own, how families are registered and found, and the built-in control
+family.
 
 ## 1. Anatomy
 
@@ -13,32 +14,44 @@ generated from it.
 |------|------------|
 | name | `[a-z][a-z0-9_.-]{0,62}`, unique on an endpoint. `ctrl` and names starting with `cblink.` are reserved. |
 | version | A number reported to clients (`ctrl get-family`). It is the family's own; cblink does not interpret it. |
-| operations | Commands `1 … 65535`. Each has a request policy and supports any of: `do` (request and reply), `dump` (request and a series of items), opening a stream, or a notification. `auth` restricts it to authenticated peers. |
-| attribute sets | Attribute keys `1 … 65535` with types and checks. Sets nest. |
+| operations | Commands `1 … 65535`. Each supports any of: `do` (request and reply), `dump` (request and a series of items), opening a stream, or a notification. `auth` restricts it to authenticated peers. |
 | multicast groups | Named groups that notifications are sent to. A group can require an authenticated subscriber. |
 | streams | Long-lived channels opened through an operation (STREAMS.md). |
 
-## 2. Designing a family
+Three families are the library's: `ctrl` (id 0, section 4), the YANG
+family `cblink.yang` (id 1, present once a program serves a module), and
+none other; a program's own families get ids from 2.
 
-**Numbers are forever.** Once a family is in use, never renumber or reuse
-an attribute key or a command number. Add new ones at the end, and leave
-retired numbers unused.
+## 2. Designing what a program offers
+
+**Model the data in YANG.** A program's configuration, state, rpcs and
+notifications are YANG modules; `cblink-gen` writes their structs, tables
+and the server's handler table, and the YANG family serves them by SID:
+GET, EDIT, RPC and NOTIFY, in CORECONF's shape (WIRE-FORMAT.md section
+7.6). Clients read with the same tables, and generic ones fetch the
+modules' `.sid` files with GET-SID.
+
+**A family of its own** is for what is not data: a stream (a feed, a
+conversation), or a command whose shape is the program's. Its bodies are
+YANG data all the same, put and read with the helpers `cblink-gen`
+writes (`X_put()`, `X_parse()`); `examples/stream` is one.
+
+**Numbers are forever.** A SID is never reused or removed: an item that
+goes is marked obsolete in its `.sid` file, and a module revision adds
+items at the end of its range. A family's command numbers likewise.
 
 **Old and new peers coexist.**
-- A receiver ignores attributes it does not know (WIRE-FORMAT.md
-  section 5.4). New optional attributes are therefore always compatible.
-- Making an attribute required, changing its type, or narrowing its checks
-  is not compatible.
-- Bump the family's `version` when clients need to tell the difference.
-  Clients see it in `ctrl get-family`, and generated clients record it in
-  `struct P_client`.
-- An incompatible redesign is better done as a new family with a new
-  name.
+- A receiver reading operational data skips what it does not know; an
+  EDIT with a SID the server does not implement is refused
+  (`unknown-element`), as every YANG protocol does.
+- New optional nodes are compatible; making a node mandatory, changing
+  its type, or narrowing its range is not.
+- An incompatible redesign is a new module revision, or a new module.
 
 **Choose the operation by the shape of the data:**
 - **`do`** for one answer. The reply carries the result; a failure is an
-  errno value plus an extended ack that says which attribute was wrong
-  and why.
+  errno value plus the `cblink:error` structure, which names the node at
+  fault and the error-tag.
 - **`dump`** for listing many objects. Items are produced one at a time as
   the client keeps up, so a large table never has to fit in memory or in
   the send queue.
@@ -49,29 +62,29 @@ retired numbers unused.
   control. Use a push stream for a feed, and a bidirectional stream for a
   conversation.
 
-**Validate in the policy, not the handler.** Types, ranges, lengths,
-enumerations and required attributes belong in the spec's `checks`. The
-library enforces them before the handler runs and reports violations
-precisely. Handlers are left with the checks that need state.
+**Let the module check.** Types, ranges, lengths, patterns and
+enumerations belong in the module. The codec decodes strictly
+(`CBL_YD_STRICT`) and the YANG family refuses what is not a node's;
+handlers are left with the checks that need state.
 
-**Mark privileged operations `auth: true`.** They then run only for peers
-authenticated by mTLS or a trusted local socket.
-Handlers that need finer control read the peer's identity with
-`cbl_req_peer()`.
+**Mark privileged operations `CBL_OPF_AUTH`.** They then run only for
+peers authenticated by mTLS or a trusted local socket. Handlers that need
+finer control read the peer's identity with `cbl_req_peer()`.
 
 ## 3. Registration and discovery
 
-- **Registration.** `cbl_family_register()` (or the generated
-  `P_register()`) adds a family to a context and assigns it an id
-  `1 … 65535`.
-  - Ids are per endpoint and dynamic. A client must not hard-code them.
+- **Registration.** `cbl_family_register()` adds a family to a context and
+  assigns it an id `2 … 65535`; `cbl_yserver_add()` serves a program's
+  modules, bringing the YANG family (id 1) about the first time.
+  - Ids are per endpoint and dynamic. A client must not hard-code a
+    program's family's id.
   - Every subscriber to the control family's `notify` group is told with a
     `family-added` notification.
 - **Unregistration.** `cbl_family_unregister()` removes the family at once
   for new requests, sends `family-removed`, and waits until requests already
   running in it have finished. Its subscriptions end.
 - **Discovery.** Clients resolve a name with `ctrl get-family`, through
-  `cbl_resolve()` or the generated `P_client_init()`. They get:
+  `cbl_resolve()`. They get:
   - the id and version;
   - the operations, with their flags;
   - the multicast groups, with their global group ids.

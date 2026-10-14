@@ -1,261 +1,215 @@
 # cblink-gen: the code generator
 
-`cblink-gen` reads a family spec (SPEC-FORMAT.md) and writes C code and
-documentation for it, in the way Linux's YNL tools do for netlink. This
-document describes how the generator works and the API it generates.
-cblink-gen(1) describes the command line.
+`cblink-gen` compiles YANG modules (RFC 7950) and writes what a cblink
+program speaks them with, in the way Linux's YNL tools do for netlink:
+the structs, the schema tables libcblink's YANG-CBOR codec (RFC 9254)
+works by, helpers for messages, rpcs and notifications, a server's
+handler table, the modules' reference, and their `.sid` files (RFC 9595).
+This document describes how the generator works and what it writes;
+cblink-gen(1) describes the command line, YANG.md what of YANG it takes.
 
 ```
-cblink-gen [-BnV] [-b base] [-m parts] [-o dir] spec.yaml
+cblink-gen [-adnV] [-F module:feature,...] ... [-b base]
+           [-m h,schema,server,md,sid,sidjson,tree] [-o dir] [-p dir] ...
+           [-s file.sid] ... module.yang ...
 ```
 
 ## 1. How it works
 
 ```
-spec.yaml ──▶ YAML-subset parser ──▶ spec model + checks ──▶ C emitter ──▶ base.h base.c
-              (yaml.c)               (spec.c)               (gen_c.c)     base_client.c
-                                                            Markdown      base_server.c
-                                                            (gen_md.c)    base.md
+modules ──▶ libyang ──▶ schema model ──▶ .sid files ──▶ emitters ──▶ base.h
+(.yang)     (yang.c)    + the profile   attached and    gen_yang.c   base_schema.c
+                        (schema.c)      checked         gen_yschema.c base_server.c
+                                        (sid.c,         gen_yserver.c base.md
+                                        sidcbor.c)      gen_ymd.c     base.tree
+                                                        gen_ytree.c   *.sid, *.sid.cbor
 ```
 
-- **Input is untrusted.** cblink-gen opens the spec and the output
-  directory, enters capsicum(4) capability mode, and only then reads and
-  parses the spec.
-  - Files larger than 1 MiB are refused.
-  - The YAML subset (SPEC-FORMAT.md) has no flow collections,
-    anchors, aliases, tags, or complex or merge keys.
-  - Lines are at most 4096 bytes, scalars at most 64 KiB, nesting at
-    most 32 levels deep, and a spec has at most 100000 nodes.
-  - The parser is fuzzed (`fuzz/fuzz_spec`).
+- **libyang compiles.** The modules named, and every module they may
+  import (from their own directories and each `-p`), are read and
+  compiled by libyang 3, features as `-F` says and deviations applied.
+  The generator then works from its own model of the compiled schema
+  (`schema.c`): nodes, types resolved through typedefs and leafrefs,
+  choices and cases, `when` and `must`, defaults, identities, features.
+- **The profile is checked.** What the runtime cannot do is refused at
+  generation time, so it never meets it: an XPath expression outside
+  XPath-lite, a pattern the translator does not know (`cbl_pattern.c`,
+  XSD regular expressions to POSIX ERE), and the other limits YANG.md
+  lists. Each refusal names the node and the construct.
+- **Input is untrusted.** Every module is read before the generator
+  enters capsicum(4) capability mode; the output directory is opened
+  before, and only written in, after. A `.sid` file larger than 16 MiB is
+  refused.
+- **SIDs.** Every node, structure and identity is keyed by its SID, from
+  the modules' `.sid` files (`-s`), in JSON or in their YANG-CBOR form.
+  They are verified (no SID twice, none outside the file's ranges, every
+  item of the module with one, empty `input` and `output` included).
+  `-a` numbers the items that have none, as RFC 9595 Appendix B says, and
+  rewrites the file: by namespace (module, identities, features, data),
+  each in identifier order, from the file's assignment ranges.
 - **All problems at once.** Errors are reported as
   `file:line:column: error: message` and collected up to a limit, so one
   run shows every mistake. Nothing is written if there is any error.
-- **Checks before output.** The checks include:
-  - names and C identifiers;
-  - unknown and duplicate keys;
-  - references between attribute sets, operations, groups and streams;
-  - limits on numbers of things;
-  - every pair of generated C identifiers that would collide. For example,
-    an operation and an attribute set that would both be named
-    `echo_echo` are rejected with the locations of both.
-- **Deterministic output.** The output depends only on the spec and the
-  generator version: no timestamps, no paths, no host details. Running
-  twice gives byte-identical files. The tests check this.
+- **Deterministic output.** The output depends only on the modules, the
+  `.sid` files and the generator version: no timestamps, no paths, no
+  host details. The tests check this.
 - **Atomic writes.** Each file is written to a temporary name in the output
   directory (`mkostempsat`) and renamed into place (`renameat`). An
   interrupted run leaves the previous files intact.
 
 ## 2. Names
 
-The prefix `P` is the spec's `c-prefix`, or the family name with `-` and
-`.` turned into `_`. Below, `P` is the lower-case prefix and `PU` the
-upper-case one. Spec names such as `max-key-len` become C names such as
-`max_key_len`.
+A struct is named after its module, then the path to its node, with `-`
+and `.` made `_`: `/kv:store/entry` is `struct kv_store_entry`, an rpc's
+input `struct kv_clear_input`. A member is the node's name, likewise; one
+that is a C keyword, or a macro a header may define in lower case
+(`errno`, `assert`, `offsetof`, `unix`, ...), gets a `_` after it
+(`errno_`). Two nodes that would have one name are an error.
 
-## 3. The generated API
+## 3. What it writes
 
-The examples use the `kv` family from SPEC-FORMAT.md. Its golden output is
-in `usr.bin/cblink-gen/tests/golden/kv/`.
+The examples use the module `kv` (`examples/kv/kv@2026-10-13.yang`).
 
-### 3.1 Constants and enumerations (`kv.h`)
+### 3.1 Structs (`-m h`: `kv.h`)
 
-| Spec | C |
+A struct for each container, list entry, rpc and action input and
+output, notification and structure (RFC 8791) of the modules named and
+of those whose trees they add to, and one for each module's top-level
+data (`struct kv`).
+
+| YANG | C |
 |------|---|
-| family | `KV_FAMILY_NAME "kv"`, `KV_FAMILY_VERSION 1`; `KV_FAMILY_ID` for a `fixed-id` family |
-| `const` definition | `#define KV_MAX_KEY_LEN 255` |
-| `enum` definition | `#define KV_<ENUM>_<ENTRY> n`, and the value table `kv_<enum>_values` used by policies |
-| `flags` definition | `#define KV_ENTRY_FLAGS_SECRET (UINT64_C(1) << 1)`, and `kv_entry_flags_values` |
-| attribute set | `enum { KV_A_KEY = 1, …, KV_A_MAX }` (the set named like the family), or `KV_<SET>_A_<ATTR>` |
-| operation | `enum { KV_CMD_GET = 1, … }` |
-| multicast group | `enum { KV_MCGRP_CHANGES = 0, … }` (indexes), `KV_MCGRP_COUNT` |
+| container | a pointer to its struct, `NULL` when absent |
+| list, leaf-list | `struct { size_t n; const T *v; }` |
+| leaf other than a key | its value, and `bool has_<name>` |
+| choice | `enum <struct>_<choice>`, the case given (0: none); the cases' members beside it |
+| `int8` … `uint64` | `int8_t` … `uint64_t` |
+| `decimal64` | `int64_t`, the value times 10^fraction-digits |
+| `string` | `const char *` (UTF-8, checked) |
+| `boolean`, `empty` | `bool` |
+| `enumeration` | `enum <struct>_<leaf>` with the values of the module |
+| `bits` | `struct cbl_bytes`, the bits by position, byte 0 first, and `#define`s of the positions |
+| `binary` | `struct cbl_bytes` |
+| `identityref` | `uint64_t`, the identity's SID |
+| `instance-identifier` | `struct cbl_bytes`, as YANG-CBOR has it (a SID, or `[SID, keys...]`) |
+| `leafref` | its target's type |
+| `union` | `struct <struct>_<leaf>`: which member is set, and the member |
+| anydata, anyxml | `struct cbl_bytes`, YANG-CBOR as it came |
 
-### 3.2 Structures, policies, parsers, builders (`kv.c`)
+### 3.2 Schema tables (`-m schema`: `kv_schema.c`)
 
-For every attribute set, and for every request, reply, dump and
-notification shape:
+The structures of `<cbl_schema.h>` the library decodes, encodes and
+validates YANG-CBOR by:
 
-```c
-struct kv_get_rsp {
-	const char		*key;		/* NULL when absent */
-	struct cbl_bytes	 value;		/* { p, len } */
-	bool			 has_flags;	/* optional scalars */
-	uint32_t		 flags;
-	struct {
-		size_t		 n;
-		const char *const *v;
-	}			 tags;		/* multi-attr */
-	cbl_msg			*_msg;		/* replies only: owns the memory */
-};
+- every node with its SID, its kind and flags, its type, its children
+  sorted by SID, its keys, its choice and case, its `when` and `must`
+  expressions, its defaults and its limits; and where it is in the
+  structs, with `offsetof()` and `sizeof()`, so that the two cannot
+  differ. An rpc's or an action's input and output carry the rpc's or
+  the action's SID as the base their children's deltas are from (RFC 9254
+  section 3.2);
+- types shared between the nodes that have the same one, a pattern also
+  as the POSIX ERE it translates to;
+- each module's features, enabled or not;
+- the identities a value may name, the modules' own and every one derived
+  from a base an identityref has, wherever it is defined, each with all
+  those derived from it, for `derived-from()`;
+- every node again in one array by SID.
 
-extern const struct cbl_policy_set kv_get_rsp_policy;	/* validation */
-extern const struct cbl_parser kv_get_rsp_parser;	/* message -> struct */
-int	kv_get_rsp_parse(cbl_msg *, const cbl_attr *map, struct kv_get_rsp *);
-int	kv_get_rsp_put_fields(cbl_msg *, const struct kv_get_rsp *);
-```
+A node's children are found by a key's delta at once where their SIDs
+follow one another, by a table of their places where they lie close, by
+a binary search otherwise. What each module's tables come to is printed
+and written at the top of the file.
 
-- **Parsed values point into the message.** Strings and byte strings are
-  not copied. They stay valid as long as the message that was parsed.
-  Nested sets become nested structures. Arrays of nested sets are
-  allocated in the message's arena.
-- **Policies are derived from the spec's `checks`.** Types, ranges,
-  lengths, `required`, `max-count`, enum and flags membership, and nesting
-  all come from it. The library validates a request against its
-  operation's policy before the handler sees it.
-- **Builders, one per attribute:** `kv_put_key(cbl_msg *, const char *)`
-  when the set is named like the family, otherwise
-  `kv_<set>_put_<attr>()`. Multi-attributes take an array and a count.
+### 3.3 Helpers (`kv.h`, defined in `kv_schema.c`)
 
-### 3.3 Client side (`kv_client.c`)
+| For | Functions |
+|-----|-----------|
+| each struct `X` | `X_encode(p, buf)`, `X_decode(data, len, p, a, flags, why, whylen)`: the value alone, in YANG-CBOR and back |
+| | `X_put(msg, p)`, `X_parse(msg, p, a, flags, why, whylen)`: in a message, `{SID: value}`; an rpc's input and output under the rpc's SID |
+| each rpc `R` | `R_call(conn, in, out, a, timeout_ms)`: the rpc called through family 1, its output read back |
+| each notification `N` | `N_notify(ctx, p)`: sent to family 1's group `notify`; `N_notification(p, buf)`: `{SID: value}` as bytes; `N_parse()` reads one received, `ENOENT` for another |
 
-```c
-struct kv_client {
-	cbl_conn	*conn;
-	uint16_t	 family;		/* resolved id */
-	uint32_t	 version;
-	uint32_t	 groups[KV_MCGRP_COUNT];	/* resolved group ids */
-	cbl_msg		*err;			/* ERROR of the last failed call */
-};
+`a` is a `cbl_yarena`: what a decode allocates is its, freed in one.
 
-int	kv_client_init(struct kv_client *, cbl_conn *);
-int	kv_client_init_info(struct kv_client *, cbl_conn *,
-	    const cbl_family_info *);	/* from cbl_resolve_async() */
-void	kv_client_fini(struct kv_client *);
-```
+### 3.4 Server table (`-m server`: `kv_server.c`)
 
-- **Initialisation.** `kv_client_init()` looks the family up by name
-  (`ctrl get-family`) and records its id and group ids. A `fixed-id` family
-  uses its constant. It is a synchronous request, so call it before
-  attaching the connection to a loop, or from a thread other than the
-  loop's. On the loop thread, resolve with `cbl_resolve_async()` and
-  hand the result to `kv_client_init_info()`.
-- **Requests.** `kv_get(cl, &req, &rsp)` builds the request from the
-  structure, waits for the reply and parses it.
-  - `rsp` owns its message; free it with `kv_get_rsp_free()`.
-  - An operation without a reply returns only the error code.
-  - On failure, `cl->err` holds the server's `ERROR` message for its
-    extended ack: `cbl_msg_err_str()`, `cbl_msg_err_path()`, and so on.
-  - `kv_get_async(cl, &req, cb, arg)` sends the same request without
-    waiting, for use from loop callbacks. `cb(cl, error, rsp, arg)` runs on
-    the loop thread with the parsed reply (it owns `rsp`), or an error,
-    and then `cl->err` as above. The client must outlive the callback.
-- **Dumps.** `kv_get_dump(cl, &req, &d)` starts a dump and
-  `kv_get_dump_next(d, &item)` returns the items. An item is valid until
-  the next call, and `item` is `NULL` after the last one. `cbl_dump_free()`
-  ends the dump.
-- **Notifications.**
-  `kv_changes_subscribe(cl, &handlers, arg, &sub)` joins the group.
-  `struct kv_changes_handlers` has one typed callback for each
-  notification of the group. A notification structure is valid for the
-  duration of its callback.
-- **Streams.**
-  - `kv_watch_open(cl, &req, &cbs, arg, &s)` opens a stream.
-  - The callbacks are typed: `on_data(const struct kv_kv *)`, and
-    `on_open(…, const struct <op>_rsp *accept, …)` when the open operation
-    has a reply.
-  - Stream data is checked against its payload set's policy before
-    `on_data` runs, on the client and on the server. Data that breaks it
-    (a missing `required` attribute, a value out of range) or does not
-    parse resets the stream with `EBADMSG`; it is never dropped quietly.
-  - `kv_<stream>_send()` exists for streams the client may send on.
-  - Push streams (`direction: server-to-client`) are opened with
-    `CBL_SF_PUSH`.
-  - `initial-credit` from the spec is the receive window each end
-    announces: in the open, and in the server's accept.
+`const struct cbl_yserver kv_server`, which `cbl_yserver_add()` serves:
+for each node a handler entry, by SID, and the handlers the program
+defines as the header declares them:
 
-### 3.4 Server side (`kv_server.c`)
+| For | Handler |
+|-----|---------|
+| a top-level data node | `int kv_store_get(cbl_req *, struct kv *, cbl_yarena *)`: fill the node's member |
+| a configuration one, too | `int kv_store_edit(cbl_req *, const struct kv *before, const struct kv *after)` |
+| an rpc | `int kv_clear_rpc(cbl_req *, const struct kv_clear_input *, struct kv_clear_output *, cbl_yarena *)` |
+| an action | `int kv_store_entry_touch_action(cbl_req *, const struct cbl_bytes *target, const ... *in, ... *out, cbl_yarena *)` |
 
-```c
-extern const struct cbl_family_def kv_family_def;
-int	kv_register(cbl_ctx *, void *arg, cbl_family **);
+The table also carries the `.sid` files given with `-s`, as GET-SID sends
+them: the `ietf-sid-file` structure's value in YANG-CBOR.
 
-/* Handlers the server program defines, under exactly these names: */
-int	kv_get_doit(cbl_req *, const struct kv_get_req *, void *arg);
-int	kv_get_dumpit(cbl_req *, const struct kv_get_dump_req *,
-	    struct cbl_dump_state *, void *arg);
-int	kv_set_doit(cbl_req *, const struct kv_set_req *, void *arg);
-int	kv_watch_stream_open(cbl_req *, const struct kv_watch_req *,
-	    cbl_stream *, void *arg);
+### 3.5 Documentation and `.sid` files
 
-/* Helpers: */
-int	kv_get_reply(cbl_req *, const struct kv_get_rsp *);
-int	kv_get_dump_reply(cbl_req *, const struct kv_get_dump_rsp *);
-int	kv_changed_notify(cbl_family *, const struct kv_changed_ntf *);
-int	kv_watch_accept(cbl_stream *, const struct kv_watch_server_cbs *,
-	    void *arg);
-int	kv_watch_server_send(cbl_stream *, const struct kv_kv *);
-```
+- `-m md` (`kv.md`): a page for each module named: its tree diagram, and
+  a table of the nodes it defines with their kind, type, config,
+  mandatory, defaults, units and SIDs; its features and identities.
+- `-m tree` (`kv.tree`): the RFC 8340 tree diagrams, exactly as
+  `yanglint -f tree` prints them.
+- `-m sid` (`kv@2026-10-13.sid.cbor`) and `-m sidjson`
+  (`kv@2026-10-13.sid`): each `-s` file, in YANG-CBOR or in JSON.
 
-- **Trampolines.** `kv_server.c` holds the operation table with each
-  operation's policy, flags (`auth: true` becomes `CBL_OPF_AUTH`) and
-  small trampolines. A trampoline parses the validated request into its
-  structure and calls the handler.
-  - When an operation has both `do` and `dump`, the request is validated
-    against the policy of whichever was asked for.
-- **Handler results.** A handler returns 0 when it has replied or wants an
-  empty acknowledgement. Otherwise it returns an errno value, and may
-  describe it with `cbl_req_set_err()`.
-- **Dump handlers** return `EAGAIN` while there is more, after sending one
-  item, and 0 at the end. They keep their position in `st->pos[]`.
-- **Helpers are only generated for what the spec has.** A family with only
-  notifications has no handlers at all. Generated files never contain
-  unused static functions, which a test enforces at `WARNS=6`.
-
-A client-only program does not compile `kv_server.c`, so it needs no
-handlers.
-
-### 3.5 Documentation (`kv.md`)
-
-A reference page lists:
-- the family;
-- every attribute with its type and checks;
-- every operation with its request and reply attributes, its flags and its
-  stream;
-- notifications, groups and streams.
-
-## 4. Building programs from specs
+## 4. Building programs from modules
 
 `share/cblink/cblink.mk` (installed in `${LOCALBASE}/share/cblink/`)
-generates and compiles a program's specs with bsd.prog.mk:
+generates and compiles a program's modules with bsd.prog.mk:
 
 ```make
 PROG=		kvd
 SRCS=		kvd.c
-CBLINK_SPECS=	kv.yaml
+CBLINK_YANG=	kv@2026-10-13.yang
+CBLINK_SIDS=	kv@2026-10-13.sid
 .include "${LOCALBASE}/share/cblink/cblink.mk"
 .include <bsd.prog.mk>
 ```
 
 Its variables:
-- `CBLINK_PARTS`: which files to generate;
-- `CBLINK_DOCS=yes`: also write `kv.md`;
+- `CBLINK_PARTS`: `h,server` by default; `h` alone for a program that
+  serves no table;
+- `CBLINK_YANG_BASE`: the outputs' name, the first module's by default;
+- `CBLINK_DOCS=yes`: also write the modules' Markdown;
 - `CBLINK_GEN`, `CBLINK_CFLAGS` and `CBLINK_LIBS`: point it at a build tree,
   as `examples/examples.mk` does.
 
 The files are written into the object directory and added to `SRCS`.
 
-## 5. The control family
+## 5. cblink's own modules
 
-Family 0 is the YANG module `cblink-ctrl`, and the framework's
-structures are the module `cblink` (`share/yang`). Their structs and
-schema tables are committed in `lib/libcblink` (`cbl_yctrl.h`,
-`cbl_yctrl_schema.c`, `cbl_ymod.h`, `cbl_ymod_schema.c`), with the
-control family's reference `docs/ctrl.md`, because the library cannot
-depend on its own generator at build time.
+The framework's structures are the module `cblink`, and family 0 the
+module `cblink-ctrl` (`share/yang`). Their structs and schema tables are
+committed in `lib/libcblink` (`cbl_ymod.h`, `cbl_ymod_schema.c`,
+`cbl_yctrl.h`, `cbl_yctrl_schema.c`), with the control family's reference
+`docs/ctrl.md`, because the library cannot depend on its own generator at
+build time.
 - `make -C lib/libcblink regen` refreshes the committed files.
 - The `ymod_regen` test fails if they differ from what the generator now
   produces.
 
 ## 6. Tests (`usr.bin/cblink-gen/tests`)
 
-- **golden:** `types.yaml`, which uses every feature, and `kv.yaml` are
-  compared byte for byte with committed output.
-- **determinism:** repeated runs give identical output.
-- **errors:** each spec in `errors/` must fail with the exact diagnostics
-  in its `.err` file.
-- **ctrl_regen:** the committed control-family files are up to date.
-- **roundtrip_test:** code generated from `types.yaml` at build time is
-  compiled at `WARNS=6`. It then round-trips every structure through
-  builders and parsers, and runs clients against servers.
-- **minimal_test:** families with only a `do`, only streams or only
-  notifications compile at `WARNS=6`.
-- **cli and big_input:** command-line handling, and the size limits.
+- **yang_frontend:** modules compiled through libyang, features and
+  deviations, the profile's refusals named.
+- **sid_cbor:** `.sid` files numbered (`-a`), in JSON and YANG-CBOR and
+  back, ietf-sid-file's own SIDs, and the server table's copy.
+- **yang_h, yang_h_test:** the structs and tables of every shape and type
+  compile at `WARNS=6`; lookups, the codec's kinds (decimal64, bits,
+  identityref, instance-identifier, unions with tags 43 to 46), an rpc's
+  deltas, the arena's limit, a round trip of every struct.
+- **yang_tree:** tree diagrams equal to `yanglint -f tree`.
+- **yfamily_test:** family 1 serving those tables over a connection: get,
+  edit and its rollback, refusals, rpc, dump, notifications.
+- **ymod_regen:** the committed files of cblink's modules are up to date.
+- **determinism, cli, big_input, cblink_mk:** repeated runs give identical
+  output, the command line, the size limit, and cblink.mk finding a
+  module given in each form of path.
+- `tools/yangwalk/tablecheck.sh` runs the same round trip over a corpus
+  of modules (Arcana's `share/yang`: 51 modules, 8406 round trips).

@@ -1,17 +1,14 @@
 # cblink wire format, version 2
 
-Status: version 2, under way (PLAN-SDN-YANG Y-1): the frame and its
-header are version 2's; the body is still described here as version 1
-had it, and becomes one YANG-CBOR map (RFC 9254) whose top-level keys
-are absolute SIDs as the steps of 1.7 land.  Version 1 is not spoken:
-a version 1 frame is refused like any other unknown version.  This
-document is normative. The key words MUST, MUST NOT, SHOULD and MAY are used as in
-RFC 2119.
+Status: version 2. Version 1 is not spoken: a version 1 frame is refused
+like any other unknown version. This document is normative. The key
+words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 
 cblink is a netlink-style protocol for userland applications. A connection
 carries **frames**. Each frame has a fixed 24-byte binary header in network
-byte order, followed by an optional CBOR body. The body holds the
-**attributes** (the netlink NLA equivalent) as an integer-keyed CBOR map.
+byte order, followed by an optional CBOR body. The body is **YANG data**:
+one CBOR map whose top-level keys are SIDs (RFC 9595) and whose values are
+YANG-CBOR (RFC 9254); YANG.md says what of YANG is taken.
 
 The design follows netlink(4) and genetlink(4) closely:
 
@@ -23,9 +20,9 @@ The design follows netlink(4) and genetlink(4) closely:
 | `NLM_F_REQUEST/ACK/MULTI/DUMP` | `REQUEST`, `ACK`, `MULTI`, `DUMP` flags |
 | `NLMSG_DONE`                | `DONE` flag                                |
 | `NLMSG_ERROR` + ext ack TLVs| `ERROR` flag + the `cblink:error` structure (section 6) |
-| TLV attributes (`nlattr`)   | integer-keyed CBOR map entries             |
-| nested attributes           | nested CBOR maps                           |
-| repeated attributes         | CBOR arrays                                |
+| TLV attributes (`nlattr`)   | YANG nodes, keyed by SID (section 5)       |
+| nested attributes           | containers and list entries: maps keyed by SID deltas |
+| repeated attributes         | lists and leaf-lists: CBOR arrays          |
 | multicast groups            | `NOTIFY` frames + control family subscribe |
 | `GENL_ID_CTRL` / `nlctrl`   | family 0, `ctrl`                           |
 
@@ -86,7 +83,7 @@ All multi-byte integers are big-endian (network byte order).
 | 20  | 4    | `stream`  | Stream id for stream frames (section 8). Multicast group id for `NOTIFY` frames (section 9). `0` otherwise. |
 
 A frame whose `length == hdrlen` has an **empty body**. An empty body is
-equivalent to an empty attribute map.
+equivalent to an empty map.
 
 ### 2.1 Header validation
 
@@ -121,7 +118,7 @@ Receivers MUST perform these checks, in this order, on the first
 | 2   | `0x00000004` | `DUMP`     | Request modifier: dump (list) instead of do. Like `NLM_F_DUMP`. |
 | 3   | `0x00000008` | `MULTI`    | Part of a multipart response. Like `NLM_F_MULTI`. |
 | 4   | `0x00000010` | `DONE`     | Final part of a multipart response. Always set together with `MULTI`. |
-| 5   | `0x00000020` | `ERROR`    | Error response. The body carries the error attributes (section 6). Terminal. |
+| 5   | `0x00000020` | `ERROR`    | Error response. The body carries the `cblink:error` structure (section 6). Terminal. |
 | 6   | `0x00000040` | `NOTIFY`   | Unsolicited multicast notification. The `stream` field holds the group id. |
 | 7–15|              |            | Reserved. Senders MUST send 0; receivers MUST reject frames with these bits set. |
 | 16  | `0x00010000` | `S_OPEN`   | Stream open (with `REQUEST`) or stream accept (without `REQUEST`). |
@@ -202,7 +199,7 @@ has a well-defined end.
 A **dump** request completes with zero or more dump parts (`MULTI`), then
 exactly one terminal: dump end (`MULTI|DONE`) or `ERROR|MULTI|DONE` if the
 dump failed part-way. An `ERROR` with neither `MULTI` nor `DONE` is allowed
-before the first part (for example, a policy failure). `ACK` on a dump
+before the first part (for example, a request refused). `ACK` on a dump
 request is ignored, because `DONE` is already terminal.
 
 An acknowledgement MAY carry the `error` structure with an `error-message`
@@ -210,7 +207,7 @@ An acknowledgement MAY carry the `error` structure with an `error-message`
 
 ---
 
-## 5. Body: CBOR attributes
+## 5. Body: YANG data in CBOR
 
 ### 5.1 Encoding
 
@@ -223,66 +220,43 @@ Restrictions (a strict profile of RFC 8949):
 | Item                             | Rule |
 |----------------------------------|------|
 | Indefinite-length items (any)    | MUST NOT be sent; receivers MUST reject. Every collection's size is then known before its contents are read, so limits can be checked before allocation. |
-| Tags (major type 6)              | Only the tags of YANG-CBOR (RFC 9254), which version 2 accepts always (`CBL_CTX_YANG_TAGS` is no longer needed): 4 on a two-element array, 43 on a text string (bits in a union, by name), 44 on a text string, 45 on an unsigned integer or text string, 46 on an unsigned integer, text string or array, 47 on an unsigned integer; one tag per value, never on a key or the body. Every other tag is still rejected. |
+| Tags (major type 6)              | Only the tags of YANG-CBOR (RFC 9254): 4 on a two-element array, 43 on a text string (bits in a union, by name), 44 on a text string, 45 on an unsigned integer or text string, 46 on an unsigned integer, text string or array, 47 on an unsigned integer; one tag per value, never on a key or the body. Every other tag is rejected. |
 | Simple values                    | Only `false` (`0xF4`), `true` (`0xF5`) and `null` (`0xF6`). `undefined` and other simple values are rejected. |
-| Floats                           | Half, single and double precision are accepted. |
+| Floats                           | Half, single and double precision are accepted by the decoder; YANG has none to send. |
 | Map keys                         | MUST be integers (major type 0 or 1). Any other key type is rejected. |
 | Duplicate keys in one map        | MUST be rejected. |
-| Text strings                     | MUST be valid UTF-8. They MUST NOT contain NUL when the attribute's kind is `text`. |
+| Text strings                     | MUST be valid UTF-8. |
 | Integer width                    | Senders SHOULD use the shortest ("preferred") encoding. Receivers MUST accept any width. |
 
 Violations are reported as `ERROR` `EBADMSG` (malformed CBOR) or
 `EPROTO` (a restriction above), with `error-message` and, where possible,
 `error-path`.
 
-### 5.2 Attribute keys
+### 5.2 Keys
 
-| Key range              | Meaning |
+| Key                    | Meaning |
 |------------------------|---------|
-| `1` … `2⁶³ − 1` at the top | **SIDs** (RFC 9595): each a node's value, or a structure of the `cblink` module (section 6). Until the YAML families go (PLAN-SDN-YANG 1.7.5), `1` … `65535` are also their attributes. |
-| any integer below the top | **SID deltas** (RFC 9254 section 3.2), negative ones too. |
-| `0` at the top         | Reserved. Ignored on receive. |
+| `1` … `2⁶³ − 1` at the top | **SIDs** (RFC 9595): each a node's value, or a structure of the `cblink` module (section 6). |
+| any integer below the top | **SID deltas** (RFC 9254 section 3.2), negative ones too: a child's SID minus its parent's (an rpc's or an action's, for their input's and output's children). |
+| `0`, negative, or beyond `2⁶³ − 1` at the top | Not a SID. Taken, and never found. |
 
 The framework's metadata, such as error details and stream credit, is the
-`cblink` module's structures, at their SIDs beside the other items:
-version 1's negative keys are gone.
+`cblink` module's structures, at their SIDs beside the other items.
 
-### 5.3 Values, nesting and repetition
+### 5.3 Values
 
-- A value is a scalar (uint, negint, bytes, text, bool, null, float), a
-  **nested attribute set** (a map with the same key rules, recursively), or
-  an **array**.
-- An array is a **repeated attribute** (netlink "multi-attr"). Its elements
-  all have the attribute's declared kind. An array of maps is a list of
-  nested attribute sets.
-- Arrays of arrays are allowed by the encoding, but no policy kind produces
-  them. Receivers reject them unless the policy kind is `any`.
+Each node's value is encoded as RFC 9254 says, YANG.md section 3 has the
+table: containers, list entries, notifications and structures as maps;
+lists and leaf-lists as arrays; each type of leaf as its own kind, with
+tags where a union's members could be told apart no other way.
 
-### 5.4 Unknown attributes are ignored
+### 5.4 Unknown nodes
 
-A receiver MUST ignore a key that is in range but not defined in the
-applicable attribute set, or not listed in the command's policy. The value
-of an unknown attribute is still subject to the encoding rules and limits
-in sections 5.1 and 11, because it is decoded. Its value is otherwise
-neither validated nor exposed to handlers. This allows old receivers to
-interoperate with new senders.
-
-### 5.5 Attribute kinds (policy vocabulary)
-
-| Kind     | CBOR accepted                         | C mapping      |
-|----------|---------------------------------------|----------------|
-| `uint`   | major 0                               | `uint64_t` (narrower via range) |
-| `int`    | major 0 (≤ `INT64_MAX`) or 1 (≥ `INT64_MIN`) | `int64_t` |
-| `bool`   | `true`, `false`                       | `bool`         |
-| `flag`   | `true` (presence is the value)        | `bool` present |
-| `text`   | major 3, UTF-8, no NUL                | `const char *` (NUL-terminated copy) |
-| `bytes`  | major 2                               | `struct cbl_bytes` |
-| `float`  | major 7 float16/32/64                 | `double`       |
-| `nest`   | map                                   | nested struct  |
-| `any`    | anything well-formed                  | `const cbl_attr *` |
-
-A policy may declare any kind as **multi**, meaning the value is an array
-of that kind. See API.md for the full policy definition.
+A receiver reading operational data MUST ignore a SID it does not know,
+so that an old receiver interoperates with a new sender. Its value is
+still subject to the encoding rules and limits in sections 5.1 and 11,
+because it is decoded. An EDIT that names a SID the receiver does not
+implement is refused (`unknown-element`), as every YANG protocol does.
 
 ---
 
@@ -323,8 +297,9 @@ holds the `error` structure:
 - `error-message` (optional): a human-readable message, like
   `NLMSGERR_ATTR_MSG`.
 - `error-path` (optional): what is at fault, an instance-identifier: a
-  SID, or an array of the target's SID and keys. Version 1's `PATH` of
-  attribute keys is sent in that array shape.
+  SID, or an array of the target's SID and keys. A path within a
+  program's own body, `cbl_req_set_err()`'s, is sent in that array
+  shape.
 - A required item missing: `error-tag` `missing-element`, its key the
   last element of `error-path`, like `NLMSGERR_ATTR_MISS_TYPE`.
 - `cookie` (optional): opaque, command-specific bytes, on an ack too.
@@ -334,7 +309,7 @@ holds the `error` structure:
 | Code              | Value | Meaning in cblink |
 |-------------------|------:|-------------------|
 | `ENOENT`          | 2     | Unknown family name, unknown group. |
-| `E2BIG`           | 7     | Too many attributes (`max_attrs`). |
+| `E2BIG`           | 7     | Too many values in a body (`max_attrs`). |
 | `EACCES`          | 13    | Command requires an authenticated peer. |
 | `EEXIST`          | 17    | Family name already registered; stream id reused. |
 | `EINVAL`          | 22    | Policy violation (wrong kind, out of range); invalid flags. |
@@ -542,8 +517,8 @@ open one.
 ```
            opener                                   acceptor
              |  REQUEST|S_OPEN  seq=s id=n {credit: W_o, ...}|
-             |---------------------------------------------->|  policy check,
-             |                                               |  handler accepts
+             |---------------------------------------------->|  handler checks,
+             |                                               |  accepts
              |  S_OPEN          seq=s id=n {credit: W_a}     |
              |<----------------------------------------------|  (or ERROR|S_OPEN seq=s: rejected)
              |                                               |
@@ -560,9 +535,9 @@ open one.
 
 | Event      | Meaning |
 |------------|---------|
-| `S_OPEN` request | Body: the opening command's request attributes, validated against its policy, plus the `credit` structure, the opener's initial receive window in bytes. If it is absent, the opener's configured default window applies. The opener may send `S_DATA` only after it receives the accept, because the acceptor's window is unknown until then. |
-| accept     | Body: the `credit` structure, the acceptor's initial window, and optionally family attributes (an open reply). It may carry `S_DATA` or `S_HCLOSE` too. |
-| reject     | `ERROR|S_OPEN` with the stream id and the error attributes. The stream never existed. |
+| `S_OPEN` request | Body: the opening command's request, which its handler checks, plus the `credit` structure, the opener's initial receive window in bytes. If it is absent, the opener's configured default window applies. The opener may send `S_DATA` only after it receives the accept, because the acceptor's window is unknown until then. |
+| accept     | Body: the `credit` structure, the acceptor's initial window, and optionally the family's own items (an open reply). It may carry `S_DATA` or `S_HCLOSE` too. |
+| reject     | `ERROR|S_OPEN` with the stream id and the `cblink:error` structure. The stream never existed. |
 | `S_HCLOSE` | The sender sends no more `S_DATA`. It still receives data and still sends `S_CREDIT`. When both directions are half-closed, the stream is closed and its id is released. |
 | `S_CLOSE`  | Graceful close of both directions, with the optional `close` structure, a `code` and a `message` (like the WebSocket close frame). After sending it, an endpoint sends nothing more on the stream except a reply `S_CLOSE`. The receiver delivers any data already received, replies with `S_CLOSE`, and the stream is gone. If no reply arrives within `stream_close_timeout` (default 10 s), the stream is reset locally. |
 | `S_RESET`  | Abort. Optional `error` structure: its `errno` and `error-message`. Pending data is discarded. No reply is sent. The stream is gone immediately. A frame for a stream id that was never opened (above the highest id opened with its parity) is answered with `S_RESET` (`EPROTO`), at most once per id. Frames for a closed stream (its id at or below that) are dropped silently. A stream frame whose body does not decode resets its stream. |
@@ -721,8 +696,9 @@ direction.
   versions (section 2.1).
 - Compatible extensions use reserved flag bits only with a new version, new
   structures and leaves of the `cblink` module (new SIDs, never reused),
-  header bytes past offset 24 (`hdrlen`), and
-  new control-family attributes or commands. Unknown attributes are ignored.
-- A family evolves through its own `version` (reported by `get-family`). New
-  attributes and commands are compatible. Removing or retyping an attribute
-  requires a new family version or a new family name.
+  header bytes past offset 24 (`hdrlen`), and new control-family rpcs or
+  nodes. Unknown nodes are ignored on reads (section 5.4).
+- A module evolves through its revisions: new nodes, at new SIDs, are
+  compatible; removing or retyping one is not, and needs a new module.
+  A family of a program's own evolves through its `version` (reported by
+  `get-family`); new commands are compatible.

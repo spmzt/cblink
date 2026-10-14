@@ -6,8 +6,8 @@ module kv {
   organization
     "cblink";
   description
-    "A small key/value store: the kv example (examples/kv, a family
-     spec in YAML) in YANG, served by cblink-gen's handler table.";
+    "A small key/value store, cblink's example of a module served by
+     the YANG family through cblink-gen's handler table.";
 
   revision 2026-10-13;
 

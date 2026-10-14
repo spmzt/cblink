@@ -63,8 +63,8 @@ data they receive.
 - **Identity.** `cbl_peer_*()` report what the verified certificate says:
   subject and issuer (RFC 2253), SANs, and SHA-256 and SHA-1
   fingerprints. The flag `CBL_PEER_AUTHENTICATED` is set only after
-  successful verification. Operations flagged `CBL_OPF_AUTH` (`auth: true`
-  in a spec) refuse other peers with `EACCES` before the handler runs.
+  successful verification. Operations flagged `CBL_OPF_AUTH` refuse other
+  peers with `EACCES` before the handler runs.
 
 ## 3. Local sockets
 
@@ -99,9 +99,11 @@ data they receive.
   - nesting (`max_depth`, default 16) and item count (`max_attrs`).
 
   The second pass allocates exactly what the first measured.
-- **Validation before handlers.** Requests are validated against their
-  operation's policy before a handler sees them, and the error says
-  exactly what was wrong (an extended ack).
+- **Validation before handlers.** The YANG family decodes what it is sent
+  against the modules' tables, strictly, before a handler sees it, and
+  the error says exactly what was wrong and where (the `cblink:error`
+  structure). What a decode may allocate is bounded, since a list entry
+  may be one byte of input and a struct of many.
 - **Resource limits.** Each limit is per context, listener or connection
   (WIRE-FORMAT.md section 11), and peers that exceed one get an error,
   not memory:
@@ -125,10 +127,10 @@ data they receive.
   library is thread-safe as documented in API.md section 1.
 - **Fuzzing.** The parsers that see untrusted input are fuzzed with
   libFuzzer under ASan and UBSan (`fuzz/`): frames, PROXY protocol
-  headers and specs.
+  headers, XPath expressions and YANG patterns.
 - **Sanitizers.** The test suite also runs under ASan+UBSan and TSan.
-- **Generator sandbox.** cblink-gen parses specs in capsicum(4) capability
-  mode, with only the output directory open.
+- **Generator sandbox.** cblink-gen reads every module first, then works
+  in capsicum(4) capability mode, with only the output directory open.
 
 ## 6. Reporting problems
 

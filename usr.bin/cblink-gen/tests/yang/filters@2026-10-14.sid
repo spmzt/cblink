@@ -1,0 +1,90 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "filters",
+    "module-revision": "2026-10-14",
+    "description": "cblink's test module of filters: 2^40 + 300 200, never on a wire.",
+    "assignment-range": [
+      {
+        "entry-point": "1099511927976",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "filters",
+        "sid": "1099511927976"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top",
+        "sid": "1099511927977"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/interfaces",
+        "sid": "1099511927978"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/interfaces/interface",
+        "sid": "1099511927979"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/interfaces/interface/ifInOctets",
+        "sid": "1099511927980"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/interfaces/interface/ifName",
+        "sid": "1099511927981"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/interfaces/interface/ifOutOctets",
+        "sid": "1099511927982"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users",
+        "sid": "1099511927983"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user",
+        "sid": "1099511927984"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/company-info",
+        "sid": "1099511927985"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/company-info/dept",
+        "sid": "1099511927986"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/company-info/id",
+        "sid": "1099511927987"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/full-name",
+        "sid": "1099511927988"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/name",
+        "sid": "1099511927989"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/filters:top/users/user/type",
+        "sid": "1099511927990"
+      }
+    ]
+  }
+}

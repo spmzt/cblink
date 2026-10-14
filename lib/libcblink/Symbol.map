@@ -210,7 +210,14 @@ CBLINK_1.0 {
 	cbl_dnode_op;
 	cbl_dnode_set_where;
 	cbl_dtree_diff;
+	cbl_dfilter_add;
+	cbl_dfilter_free;
+	cbl_dfilter_new;
+	cbl_dfilter_root;
 	cbl_dtree_check_conds;
+	cbl_dtree_filter_subtree;
+	cbl_dtree_filter_xpath;
+	cbl_dtree_select;
 	cbl_dtree_check_refs;
 	cbl_xp_eval;
 	cbl_xval_free;

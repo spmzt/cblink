@@ -217,6 +217,39 @@ int		 cbl_dtree_check_conds(const cbl_dtree *t,
 		    struct cbl_dederr *err);
 
 /*
+ * Filters (RFC 6241 sections 6, 8.9).  What a filter selects of tree t
+ * is a tree of its own: each node selected with all below it, and the
+ * nodes above it, an entry with its keys.  cbl_dtree_select() makes it
+ * of nodes of t (the root: all of it); cbl_dtree_filter_xpath() of the
+ * node set expr finds from the root (an expression as the tables hold
+ * one, each name by its module); cbl_dtree_filter_subtree() of what
+ * subtree filter f selects.  NULL and errno (and why) on failure.
+ *
+ * A subtree filter is a tree of the schema's nodes, from its root, each
+ * a child of its parent's (cbl_dfilter_add()): with a value, a leaf's or
+ * a leaf-list's (copied), a content match node; with children, a
+ * containment node; else a selection node.  An empty one selects
+ * nothing; a node whose content match nodes all match is selected whole
+ * when it has no other, else with them, its selection nodes' and what
+ * its containment nodes select (section 6.2).
+ */
+typedef struct cbl_dfilter cbl_dfilter;
+typedef struct cbl_dfnode cbl_dfnode;
+
+cbl_dfilter	*cbl_dfilter_new(const struct cbl_yschema *s);
+void		 cbl_dfilter_free(cbl_dfilter *f);
+cbl_dfnode	*cbl_dfilter_root(cbl_dfilter *f);
+int		 cbl_dfilter_add(cbl_dfnode *parent,
+		    const struct cbl_ynode *sn, const void *value,
+		    cbl_dfnode **out);
+cbl_dtree	*cbl_dtree_select(const cbl_dtree *t,
+		    const cbl_dnode *const *nodes, size_t n);
+cbl_dtree	*cbl_dtree_filter_xpath(const cbl_dtree *t, const char *expr,
+		    char *why, size_t whylen);
+cbl_dtree	*cbl_dtree_filter_subtree(const cbl_dtree *t,
+		    const cbl_dfilter *f);
+
+/*
  * XPath-lite (YANG.md section 5) over a tree: expr, as the tables hold
  * one (its names by module), evaluated with context node ctx (NULL: the
  * root) and current node cur (NULL: ctx), current()'s.  The value is a

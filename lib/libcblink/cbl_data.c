@@ -101,6 +101,32 @@ vfree(const struct cbl_ytype *t, void *v)
 		vfree(t->members[*(const unsigned *)v], WAT(v, t->voff));
 }
 
+void *
+cbl_d_vdup(const struct cbl_ytype *t, const void *value)
+{
+	void *v;
+	int error;
+
+	if ((v = calloc(1, t->csize > 0 ? t->csize : 1)) == NULL)
+		return (NULL);
+	if ((error = vcopy(t, v, value)) != 0) {
+		free(v);
+		errno = error;
+		return (NULL);
+	}
+	return (v);
+}
+
+void
+cbl_d_vdel(const struct cbl_ytype *t, void *v)
+{
+
+	if (v == NULL)
+		return;
+	vfree(t, v);
+	free(v);
+}
+
 bool
 cbl_dvalue_equal(const struct cbl_ytype *t, const void *a, const void *b)
 {

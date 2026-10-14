@@ -90,6 +90,20 @@ int		 cbl_d_xp_eval(const cbl_dtree *t, const char *expr,
 		    const struct cbl_d_view *view, struct cbl_xval *out,
 		    char *why, size_t whylen);
 
+/*
+ * Node n made under op, of another tree maybe: an entry by its keys (one
+ * there already if it has keys), a value; and with all below it.
+ */
+int		 cbl_d_mirror(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made);
+int		 cbl_d_copy(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made,
+		    int depth);
+/* A copy of a value of type t, malloc'd; and freed. */
+void		*cbl_d_vdup(const struct cbl_ytype *t, const void *value);
+void		 cbl_d_vdel(const struct cbl_ytype *t, void *v);
+/* A value's canonical string (RFC 7950 section 9), malloc'd, in *out. */
+int		 cbl_d_vstring(const struct cbl_yschema *s,
+		    const struct cbl_ytype *t, const void *v, char **out);
+
 /* Defaults under n whose whens are false removed (cbl_dcond.c). */
 ssize_t		 cbl_d_prune_defaults(cbl_dnode *n);
 

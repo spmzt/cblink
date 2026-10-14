@@ -454,6 +454,22 @@ value(const struct ev *e, const cbl_dnode *n)
 	return (e->view != NULL && n == e->view->dummy ? NULL : n->value);
 }
 
+int
+cbl_d_vstring(const struct cbl_yschema *s, const struct cbl_ytype *t,
+    const void *v, char **out)
+{
+	struct sbuf b = { 0 };
+	int error;
+
+	if ((error = sb_add(&b, "", 0)) != 0 ||
+	    (error = value_string(&b, s, t, v)) != 0) {
+		free(b.p);
+		return (error);
+	}
+	*out = b.p;
+	return (0);
+}
+
 /* A node's string value: a leaf's value; else its leaves', in order. */
 static int
 node_string(struct sbuf *b, const struct ev *e, const cbl_dnode *n,

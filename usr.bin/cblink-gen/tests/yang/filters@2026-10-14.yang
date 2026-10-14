@@ -1,0 +1,58 @@
+module filters {
+  yang-version 1.1;
+  namespace "http://example.com/schema/1.2/config";
+  prefix t;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of filters: the configuration RFC 6241 section 6.4's
+     examples filter, its users and interfaces, in YANG (an interface's
+     ifName, an attribute there, a key here).";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  container top {
+    container users {
+      list user {
+        key "name";
+        leaf name {
+          type string;
+        }
+        leaf type {
+          type string;
+        }
+        leaf full-name {
+          type string;
+        }
+        container company-info {
+          leaf dept {
+            type uint32;
+          }
+          leaf id {
+            type uint32;
+          }
+        }
+      }
+    }
+    container interfaces {
+      list interface {
+        key "ifName";
+        leaf ifName {
+          type string;
+        }
+        leaf ifInOctets {
+          type uint32;
+        }
+        leaf ifOutOctets {
+          type uint32;
+        }
+      }
+    }
+  }
+}

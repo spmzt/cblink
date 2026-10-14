@@ -443,6 +443,14 @@ cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
 int	cbl_dtree_check_refs(const cbl_dtree *, struct cbl_dederr *);
 /* every when and must: hold? */
 int	cbl_dtree_check_conds(const cbl_dtree *, struct cbl_dederr *);
+/* filters: what one selects, a tree of its own */
+cbl_dtree *cbl_dtree_select(const cbl_dtree *, const cbl_dnode *const *, size_t);
+cbl_dtree *cbl_dtree_filter_xpath(const cbl_dtree *, const char *expr,
+	    char *why, size_t whylen);
+cbl_dfilter *cbl_dfilter_new(const struct cbl_yschema *);
+int	cbl_dfilter_add(cbl_dfnode *parent, const struct cbl_ynode *,
+	    const void *value, cbl_dfnode **);	/* parent: cbl_dfilter_root() */
+cbl_dtree *cbl_dtree_filter_subtree(const cbl_dtree *, const cbl_dfilter *);
 /* XPath-lite: an expression as the tables hold one, over a tree */
 struct cbl_xval { enum cbl_xv_kind kind; bool b; double num; char *s;
     const cbl_dnode **nodes; size_t n; };	/* NODES, BOOL, NUMBER, STRING */
@@ -487,6 +495,15 @@ void	cbl_xval_free(struct cbl_xval *);
   is then not in use; or whose `must` does not: operation-failed, the
   must's error-message and error-app-tag (must-violation by default).
   The tree's defaults should be made first: the expressions see them.
+- **Filters** select nodes of a tree, and what they select is a tree of
+  its own: each node with all below it, the nodes above it with an
+  entry's keys. An XPath filter selects the node set its expression
+  finds from the root (RFC 6241 section 8.9). A subtree filter (section
+  6) is a tree of the schema's nodes: one with a value is a content
+  match node, one with children a containment node, one with neither a
+  selection node. Its content match nodes all matching, a node is
+  selected whole if it has no other filter nodes under it, else with
+  what they match and select; an empty filter selects nothing.
 - **A difference** of two trees is the edit that makes the first the
   second with the default none, what a YANG Patch carries: creates of
   what only the second has, merges of the leaves that differ, removes

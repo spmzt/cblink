@@ -52,8 +52,8 @@ is_key(const cbl_dnode *n)
 }
 
 /* Node n made in the edit, under op: its kind, its keys, its value. */
-static int
-mirror(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made)
+int
+cbl_d_mirror(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made)
 {
 	const void *keys[UINT8_MAX];
 	cbl_dnode *x;
@@ -82,18 +82,19 @@ mirror(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made)
 }
 
 /* n and all below it copied under op. */
-static int
-copy(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made, int depth)
+int
+cbl_d_copy(cbl_dnode *op, const cbl_dnode *n, cbl_dnode **made, int depth)
 {
 	cbl_dnode *x;
 	int error;
 
 	if (depth > CBL_D_DEPTH_MAX)
 		return (ELOOP);
-	if ((error = mirror(op, n, &x)) != 0)
+	if ((error = cbl_d_mirror(op, n, &x)) != 0)
 		return (error);
 	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
-		if (!is_key(c) && (error = copy(x, c, NULL, depth + 1)) != 0)
+		if (!is_key(c) && (error = cbl_d_copy(x, c, NULL,
+		    depth + 1)) != 0)
 			return (error);
 	if (made != NULL)
 		*made = x;
@@ -222,13 +223,13 @@ order(cbl_dnode *op, const cbl_dnode *a, const cbl_dnode *b,
 	for (y = cbl_dnode_child(b, sn); y != NULL && y->sn == sn;
 	    prev = y, y = y->next) {
 		if ((m = match(a, y)) == NULL) {
-			if ((error = copy(op, y, &x, depth + 1)) == 0)
+			if ((error = cbl_d_copy(op, y, &x, depth + 1)) == 0)
 				error = cbl_dnode_set_op(x, CBL_DOP_INSERT);
 		} else if ((error = diff_node(op, m, y, &x, depth + 1)) == 0) {
 			/* Changed below: a merge; else only a move. */
 			if (x != NULL)
 				error = cbl_dnode_set_op(x, CBL_DOP_MERGE);
-			else if ((error = mirror(op, y, &x)) == 0)
+			else if ((error = cbl_d_mirror(op, y, &x)) == 0)
 				error = cbl_dnode_set_op(x, CBL_DOP_MOVE);
 		}
 		if (error != 0)
@@ -283,7 +284,7 @@ diff_children(cbl_dnode *x, const cbl_dnode *a, const cbl_dnode *b,
 				if ((m = match(a, y)) != NULL)
 					error = diff_node(x, m, y, &z,
 					    depth + 1);
-				else if ((error = copy(x, y, &z,
+				else if ((error = cbl_d_copy(x, y, &z,
 				    depth + 1)) == 0)
 					error = cbl_dnode_set_op(z,
 					    CBL_DOP_CREATE);
@@ -297,7 +298,7 @@ diff_children(cbl_dnode *x, const cbl_dnode *a, const cbl_dnode *b,
 		for (y = cbl_dnode_child(a, sn); y != NULL && y->sn == sn;
 		    y = y->next)
 			if (match(b, y) == NULL &&
-			    ((error = mirror(x, y, &z)) != 0 ||
+			    ((error = cbl_d_mirror(x, y, &z)) != 0 ||
 			    (error = cbl_dnode_set_op(z, CBL_DOP_REMOVE)) !=
 			    0))
 				return (error);
@@ -323,7 +324,7 @@ diff_node(cbl_dnode *op, const cbl_dnode *a, const cbl_dnode *b,
 	case CBL_YN_LEAF:
 		if (cbl_dvalue_equal(b->sn->type, a->value, b->value))
 			return (0);
-		if ((error = mirror(op, b, &x)) != 0)
+		if ((error = cbl_d_mirror(op, b, &x)) != 0)
 			return (error);
 		*out = x;
 		return (cbl_dnode_set_op(x, CBL_DOP_MERGE));
@@ -334,20 +335,20 @@ diff_node(cbl_dnode *op, const cbl_dnode *a, const cbl_dnode *b,
 	case CBL_YN_ANYXML:
 		if (same_bytes(a->value, b->value))
 			return (0);
-		if ((error = mirror(op, b, &x)) != 0)
+		if ((error = cbl_d_mirror(op, b, &x)) != 0)
 			return (error);
 		*out = x;
 		return (cbl_dnode_set_op(x, CBL_DOP_REPLACE));
 	default:
 		break;
 	}
-	if ((error = mirror(op, b, &x)) != 0)
+	if ((error = cbl_d_mirror(op, b, &x)) != 0)
 		return (error);
 	error = diff_children(x, a, b, depth);
 	if (error == ENOTSUP) {
 		/* A keyless list below: this node replaced, whole. */
 		(void)cbl_dnode_remove(x);
-		if ((error = copy(op, b, &x, depth)) != 0)
+		if ((error = cbl_d_copy(op, b, &x, depth)) != 0)
 			return (error);
 		*out = x;
 		return (cbl_dnode_set_op(x, CBL_DOP_REPLACE));

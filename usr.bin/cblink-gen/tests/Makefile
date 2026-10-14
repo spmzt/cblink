@@ -27,6 +27,7 @@ ATF_TESTS_C+=	yang_h_test
 YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 		${.CURDIR}/yang/edits@2026-10-14.yang \
 		${.CURDIR}/yang/conds@2026-10-14.yang \
+		${.CURDIR}/yang/filters@2026-10-14.yang \
 		${.CURDIR}/yang/ietf-system@2014-08-06.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang
 # Their SIDs: RFC 9595's ietf-system completed (-a), as it leaves empty
@@ -34,6 +35,7 @@ YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 YANGH_SID=	-s ${.CURDIR}/yang/shapes@2026-10-13.sid \
 		-s ${.CURDIR}/yang/edits@2026-10-14.sid \
 		-s ${.CURDIR}/yang/conds@2026-10-14.sid \
+		-s ${.CURDIR}/yang/filters@2026-10-14.sid \
 		-s ${.OBJDIR}/ietf-system.sid \
 		-s ${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
 SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c yfill.c
@@ -53,6 +55,10 @@ SRCS.ydata_test=	yangh.h ydata_test.c yangh_schema.c yfill.c
 CFLAGS.ydata_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.ydata_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 SRCS.yedit_test=	yangh.h yedit_test.c yangh_schema.c yfill.c
+ATF_TESTS_C+=	yfilter_test
+SRCS.yfilter_test=	yangh.h yfilter_test.c yangh_schema.c
+CFLAGS.yfilter_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+LDADD.yfilter_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread -lm
 ATF_TESTS_C+=	yxpath_test
 SRCS.yxpath_test=	yangh.h yxpath_test.c yangh_schema.c
 CFLAGS.yxpath_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
@@ -109,6 +115,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/rules@2026-10-13.yang yang/rules@2026-10-13.sid \
 		yang/edits@2026-10-14.yang yang/edits@2026-10-14.sid \
 		yang/conds@2026-10-14.yang yang/conds@2026-10-14.sid \
+		yang/filters@2026-10-14.yang yang/filters@2026-10-14.sid \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
 		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \

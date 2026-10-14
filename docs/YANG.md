@@ -127,6 +127,12 @@ counting characters, not bytes) and YANG's (`current`, `deref`,
 `re-match` with an XSD pattern, as `pattern` takes one). A leaf's string
 value is its canonical form, an identityref's `module:name`, an
 instance-identifier's path with each name by its module.
+`cbl_dtree_check_conds()` holds a tree to its `when`s and `must`s
+(unknown-element; operation-failed and the `must`'s `error-message` and
+`error-app-tag`, `must-violation` if it has none), a node's own `when`
+seeing it as a node with no value and no children, an augment's, a
+uses', a choice's or a case's not seeing the nodes it brings (RFC 7950
+section 7.21.5); `cbl_yvalidate()`, which sees one struct, does not.
 They must lie within **XPath-lite**; the
 generator refuses one that does not, naming the node and what is outside:
 

@@ -1,0 +1,101 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "conds",
+    "module-revision": "2026-10-14",
+    "description": "cblink's test module of when and must over the instance tree: 2^40 + 300 100, never on a wire.",
+    "dependency-revision": [
+      {
+        "module-name": "edits",
+        "module-revision": "2026-10-14"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "1099511927876",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "conds",
+        "sid": "1099511927876"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link",
+        "sid": "1099511927877"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/address",
+        "sid": "1099511927878"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/duplex",
+        "sid": "1099511927879"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/hidden",
+        "sid": "1099511927880"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/key",
+        "sid": "1099511927881"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/kind",
+        "sid": "1099511927882"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/mtu",
+        "sid": "1099511927883"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/note",
+        "sid": "1099511927884"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/peers",
+        "sid": "1099511927885"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/peers/peer",
+        "sid": "1099511927886"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/speed",
+        "sid": "1099511927887"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:link/unnumbered",
+        "sid": "1099511927888"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:ospf-link",
+        "sid": "1099511927889"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:ospf-link/area",
+        "sid": "1099511927890"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/conds:ospf-link/interface",
+        "sid": "1099511927891"
+      }
+    ]
+  }
+}

@@ -1,0 +1,107 @@
+module conds {
+  yang-version 1.1;
+  namespace "urn:cblink:test:conds";
+  prefix co;
+
+  import edits {
+    prefix ed;
+  }
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of when and must over the instance tree: a link of a
+     kind and what each kind has, by a node's own when, an augment's and
+     a case's; a must with an error-message and an error-app-tag, one
+     without; a default under a when; and a leafref whose path has a
+     predicate.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  container link {
+    leaf kind {
+      type enumeration {
+        enum ethernet;
+        enum tunnel;
+      }
+    }
+    leaf mtu {
+      type uint16;
+      default "1500";
+      must ". >= 1280 or ../kind != 'tunnel'" {
+        error-message "A tunnel's MTU is 1280 at least.";
+        error-app-tag "mtu-too-small";
+      }
+    }
+    leaf key {
+      when "../kind = 'tunnel'";
+      type uint32;
+    }
+    leaf note {
+      when "string(.) = ''";
+      type string;
+      description
+        "Its own when sees it as a node with no value.";
+    }
+    choice addressing {
+      case static {
+        when "kind = 'ethernet'";
+        leaf address {
+          type string;
+        }
+      }
+      case unnumbered {
+        leaf unnumbered {
+          type empty;
+        }
+      }
+    }
+    container peers {
+      must "count(peer) <= 2";
+      leaf-list peer {
+        type string;
+      }
+    }
+  }
+
+  augment "/co:link" {
+    when "kind = 'ethernet'";
+    leaf speed {
+      type uint32;
+    }
+    leaf duplex {
+      type enumeration {
+        enum half;
+        enum full;
+      }
+      default "full";
+    }
+  }
+
+  augment "/co:link" {
+    when "not(contains(string(.), 'secret'))";
+    leaf hidden {
+      type string;
+      description
+        "Its augment's when does not see it: the link's string value
+         without it.";
+    }
+  }
+
+  container ospf-link {
+    leaf area {
+      type string;
+    }
+    leaf interface {
+      type leafref {
+        path "/ed:top/ed:protocols/ed:ospf/ed:area[ed:name = "
+           + "current()/../area]/ed:interfaces/ed:interface/ed:name";
+      }
+    }
+  }
+}

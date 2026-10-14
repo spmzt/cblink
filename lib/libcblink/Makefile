@@ -13,6 +13,7 @@ SRCS=		cbl_arena.c \
 		cbl_data.c \
 		cbl_ddiff.c \
 		cbl_dedit.c \
+		cbl_dcond.c \
 		cbl_dref.c \
 		cbl_decode.c \
 		cbl_dump.c \

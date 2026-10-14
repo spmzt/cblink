@@ -42,6 +42,7 @@
 struct ev {
 	const cbl_dtree		*t;
 	const cbl_dnode		*cur;
+	const struct cbl_d_view	*view;
 	char			*why;
 	size_t			 whylen;
 	int			 depth;
@@ -431,31 +432,57 @@ value_string(struct sbuf *b, const struct cbl_yschema *s,
 	return (EINVAL);
 }
 
+/* Whether the expression sees node c, a child (cbl_d_view). */
+static bool
+seen(const struct ev *e, const cbl_dnode *c)
+{
+	const struct cbl_d_view *w = e->view;
+
+	if (w == NULL)
+		return (true);
+	if (w->dummy != NULL && c->parent == w->dummy)
+		return (false);
+	return (w->hide == NULL || c->parent != w->hpar ||
+	    !w->hide(w->harg, c->sn));
+}
+
+/* Node n's value as the expression sees it: none, the dummy's. */
+static const void *
+value(const struct ev *e, const cbl_dnode *n)
+{
+
+	return (e->view != NULL && n == e->view->dummy ? NULL : n->value);
+}
+
 /* A node's string value: a leaf's value; else its leaves', in order. */
 static int
-node_string(struct sbuf *b, const cbl_dtree *t, const cbl_dnode *n,
+node_string(struct sbuf *b, const struct ev *e, const cbl_dnode *n,
     int depth)
 {
 	int error;
 
 	if (depth > CBL_D_DEPTH_MAX)
 		return (ELOOP);
-	if (n->sn != NULL && n->sn->type != NULL && n->value != NULL)
-		return (value_string(b, t->schema, n->sn->type, n->value));
+	if (n->sn != NULL && n->sn->type != NULL) {
+		if (value(e, n) == NULL)
+			return (0);
+		return (value_string(b, e->t->schema, n->sn->type, n->value));
+	}
 	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
-		if ((error = node_string(b, t, c, depth + 1)) != 0)
+		if (seen(e, c) && (error = node_string(b, e, c, depth + 1)) !=
+		    0)
 			return (error);
 	return (0);
 }
 
 static int
-str_of_node(const cbl_dtree *t, const cbl_dnode *n, char **out)
+str_of_node(const struct ev *e, const cbl_dnode *n, char **out)
 {
 	struct sbuf b = { 0 };
 	int error;
 
 	if ((error = sb_add(&b, "", 0)) != 0 ||
-	    (error = node_string(&b, t, n, 0)) != 0) {
+	    (error = node_string(&b, e, n, 0)) != 0) {
 		free(b.p);
 		return (error);
 	}
@@ -493,7 +520,7 @@ to_string(struct ev *e, const struct cbl_xval *v, char **out)
 	case CBL_XV_NODES:
 		if (v->n == 0)
 			break;
-		return (str_of_node(e->t, v->nodes[0], out));
+		return (str_of_node(e, v->nodes[0], out));
 	case CBL_XV_BOOL:
 		*out = strdup(v->b ? "true" : "false");
 		return (*out != NULL ? 0 : ENOMEM);
@@ -655,7 +682,7 @@ node_atom(struct ev *e, const cbl_dnode *n, struct cbl_xval *v)
 	char *s;
 	int error;
 
-	if ((error = str_of_node(e->t, n, &s)) != 0)
+	if ((error = str_of_node(e, n, &s)) != 0)
 		return (error);
 	return (set_string(v, s));
 }
@@ -786,8 +813,8 @@ filter(struct ev *e, struct cbl_xp *const *preds, size_t npreds,
 }
 
 static int
-descend(struct nset *out, const struct cbl_xp *x, const cbl_dnode *n,
-    int depth)
+descend(const struct ev *e, struct nset *out, const struct cbl_xp *x,
+    const cbl_dnode *n, int depth)
 {
 	int error;
 
@@ -796,7 +823,8 @@ descend(struct nset *out, const struct cbl_xp *x, const cbl_dnode *n,
 	if (test_ok(x, n) && (error = ns_add(out, n)) != 0)
 		return (error);
 	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
-		if ((error = descend(out, x, c, depth + 1)) != 0)
+		if (seen(e, c) && (error = descend(e, out, x, c, depth + 1)) !=
+		    0)
 			return (error);
 	return (0);
 }
@@ -815,7 +843,7 @@ step(struct ev *e, const struct cbl_xp *x, const struct nset *in,
 		case CBL_XA_CHILD:
 			for (const cbl_dnode *c = n->first; c != NULL &&
 			    error == 0; c = c->next)
-				if (test_ok(x, c))
+				if (seen(e, c) && test_ok(x, c))
 					error = ns_add(out, c);
 			break;
 		case CBL_XA_PARENT:
@@ -827,7 +855,7 @@ step(struct ev *e, const struct cbl_xp *x, const struct nset *in,
 				error = ns_add(out, n);
 			break;
 		case CBL_XA_DESCENDANT_OR_SELF:
-			error = descend(out, x, n, 0);
+			error = descend(e, out, x, n, 0);
 			break;
 		default:
 			return (fail(e, EINVAL, "the %s axis: not XPath-lite",
@@ -960,11 +988,11 @@ ident_sid(const cbl_dtree *t, const char *qname)
 
 /* The member of a union, or the type, of kind k a node's value is. */
 static const struct cbl_ytype *
-value_of(const cbl_dnode *n, int kind, const void **v)
+value_of(const struct ev *e, const cbl_dnode *n, int kind, const void **v)
 {
 	const struct cbl_ytype *t;
 
-	if (n->sn == NULL || (t = n->sn->type) == NULL || n->value == NULL)
+	if (n->sn == NULL || (t = n->sn->type) == NULL || value(e, n) == NULL)
 		return (NULL);
 	*v = n->value;
 	if (t->kind == CBL_YT_UNION) {
@@ -990,7 +1018,7 @@ func_deref(struct ev *e, const struct cbl_xval *a, struct cbl_xval *out)
 	if (a->kind != CBL_XV_NODES)
 		return (fail(e, EINVAL, "deref() of what is not a node set"));
 	if (a->n > 0 && (n = a->nodes[0])->sn != NULL &&
-	    n->sn->type != NULL) {
+	    n->sn->type != NULL && value(e, n) != NULL) {
 		const struct cbl_ytype *t = n->sn->type;
 
 		if ((t->flags & CBL_YTF_LEAFREF) != 0 && t->path >= 0) {
@@ -1209,7 +1237,7 @@ eval_func(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 		base = ident_sid(e->t, str);
 		free(str);
 		for (size_t i = 0; i < a[0].n && !any && base != 0; i++)
-			if (value_of(a[0].nodes[i], CBL_YT_IDENTITYREF, &v) !=
+			if (value_of(e, a[0].nodes[i], CBL_YT_IDENTITYREF, &v) !=
 			    NULL)
 				any = cbl_yderived_from(e->t->schema,
 				    *(const uint64_t *)v, base, f[12] == '-');
@@ -1217,14 +1245,14 @@ eval_func(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 	} else if (strcmp(f, "enum-value") == 0 && n == 1 &&
 	    a[0].kind == CBL_XV_NODES) {
 		const struct cbl_ytype *t = a[0].n > 0 ?
-		    value_of(a[0].nodes[0], CBL_YT_ENUMERATION, &v) : NULL;
+		    value_of(e, a[0].nodes[0], CBL_YT_ENUMERATION, &v) : NULL;
 
 		set_number(out, t != NULL ? (double)read_int(v, t->csize) :
 		    NAN);
 	} else if (strcmp(f, "bit-is-set") == 0 && n == 2 &&
 	    a[0].kind == CBL_XV_NODES) {
 		const struct cbl_ytype *t = a[0].n > 0 ?
-		    value_of(a[0].nodes[0], CBL_YT_BITS, &v) : NULL;
+		    value_of(e, a[0].nodes[0], CBL_YT_BITS, &v) : NULL;
 		bool set = false;
 
 		if ((error = to_string(e, &a[1], &str)) != 0)
@@ -1449,8 +1477,17 @@ int
 cbl_xp_eval(const cbl_dtree *t, const char *expr, const cbl_dnode *ctx,
     const cbl_dnode *cur, struct cbl_xval *out, char *why, size_t whylen)
 {
-	struct ev e = { .t = t, .cur = cur != NULL ? cur : ctx, .why = why,
-	    .whylen = whylen };
+
+	return (cbl_d_xp_eval(t, expr, ctx, cur, NULL, out, why, whylen));
+}
+
+int
+cbl_d_xp_eval(const cbl_dtree *t, const char *expr, const cbl_dnode *ctx,
+    const cbl_dnode *cur, const struct cbl_d_view *view, struct cbl_xval *out,
+    char *why, size_t whylen)
+{
+	struct ev e = { .t = t, .cur = cur != NULL ? cur : ctx, .view = view,
+	    .why = why, .whylen = whylen };
 	struct cbl_xp *x;
 	char perr[128];
 	size_t pos;

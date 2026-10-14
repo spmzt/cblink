@@ -441,6 +441,8 @@ int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
 cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
 /* leafrefs and instance-identifiers that require an instance: there? */
 int	cbl_dtree_check_refs(const cbl_dtree *, struct cbl_dederr *);
+/* every when and must: hold? */
+int	cbl_dtree_check_conds(const cbl_dtree *, struct cbl_dederr *);
 /* XPath-lite: an expression as the tables hold one, over a tree */
 struct cbl_xval { enum cbl_xv_kind kind; bool b; double num; char *s;
     const cbl_dnode **nodes; size_t n; };	/* NODES, BOOL, NUMBER, STRING */
@@ -461,7 +463,8 @@ void	cbl_xval_free(struct cbl_xval *);
 - **Defaults**: `cbl_dnode_leaf()` gives a leaf's default where it is
   in use and has no node, its case taken into account;
   `cbl_dtree_defaults()` makes a node of each, and of the non-presence
-  containers that hold them.
+  containers that hold them; not of one under a `when` that does not
+  hold, and it removes one made before.
 - **Edits** are another tree of the schema, each node with an
   operation or its parent's: merge, replace, create (data-exists where
   the node is), delete (data-missing where it is not), remove; the
@@ -475,8 +478,15 @@ void	cbl_xval_free(struct cbl_xval *);
   that requires an instance and has none of its value among its target
   node's (the tables name the target), or instance-identifier naming no
   node of the tree (read from its YANG-CBOR, found by its lists' keys):
-  data-missing, instance-required. A leafref path's predicates, which
-  may narrow its targets, are the evaluator's.
+  data-missing, instance-required. A leafref whose path has predicates
+  is looked for among the nodes the path finds (`cbl_xp_eval()`).
+- **Conditions**: `cbl_dtree_check_conds()` finds the first node whose
+  `when`s do not all hold (its choices' and cases', an augment's or a
+  uses', its own; each from its context node, the tree altered as RFC
+  7950 section 7.21.5 says): unknown-element, but for a default, which
+  is then not in use; or whose `must` does not: operation-failed, the
+  must's error-message and error-app-tag (must-violation by default).
+  The tree's defaults should be made first: the expressions see them.
 - **A difference** of two trees is the edit that makes the first the
   second with the default none, what a YANG Patch carries: creates of
   what only the second has, merges of the leaves that differ, removes

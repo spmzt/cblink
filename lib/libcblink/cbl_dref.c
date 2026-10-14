@@ -9,7 +9,8 @@
  * a leafref's value must be one of its target node's instances', an
  * instance-identifier must name a node of the tree, where the schema
  * requires an instance (RFC 7950 sections 9.9.2, 9.13.2).  A leafref's
- * target is the tables' (lref, which the generator had libyang resolve);
+ * target is the tables' (lref, which the generator had libyang resolve),
+ * the nodes its path finds if it has predicates (cbl_xp_eval());
  * an instance-identifier is read from its YANG-CBOR (cbl_yiid_read())
  * and found down from the root by its lists' keys.
  */
@@ -65,6 +66,29 @@ has_value(const cbl_dnode *n, const struct cbl_ynode *target, const void *v,
 	return (false);
 }
 
+/*
+ * Whether leafref c's path, its predicates looked at, finds a node of its
+ * value: 0 and *found, or the evaluator's errno and why.
+ */
+static int
+path_has(const cbl_dtree *t, const cbl_dnode *c, bool *found, char *why,
+    size_t whylen)
+{
+	const struct cbl_ytype *ty = c->sn->type;
+	struct cbl_xval v;
+	int error;
+
+	*found = false;
+	if ((error = cbl_xp_eval(t, t->schema->xpath[ty->path], c, c, &v,
+	    why, whylen)) != 0)
+		return (error);
+	for (size_t i = 0; v.kind == CBL_XV_NODES && i < v.n && !*found; i++)
+		*found = v.nodes[i]->value != NULL &&
+		    cbl_dvalue_equal(ty, v.nodes[i]->value, c->value);
+	cbl_xval_free(&v);
+	return (0);
+}
+
 /* The node of tree t an instance-identifier names, or NULL: none. */
 static const cbl_dnode *
 named(const cbl_dtree *t, const struct cbl_ynode *n, const void **vals)
@@ -110,6 +134,8 @@ check(struct refs *r, const cbl_dnode *n, int depth)
 	const struct cbl_ynode *target;
 	const void **vals;
 	size_t nvals;
+	char why[128];
+	bool found;
 	int error;
 
 	if (depth > CBL_D_DEPTH_MAX)
@@ -118,7 +144,28 @@ check(struct refs *r, const cbl_dnode *n, int depth)
 		const struct cbl_ytype *t = c->sn->type;
 
 		if (t != NULL && (t->flags & CBL_YTF_REQUIRE) != 0) {
+			/* With predicates, the path's nodes; else any of
+			 * its target. */
 			if ((t->flags & CBL_YTF_LEAFREF) != 0 &&
+			    (target = c->sn->lref) != NULL && t->path >= 0 &&
+			    strchr(r->t->schema->xpath[t->path], '[') !=
+			    NULL) {
+				if ((error = path_has(r->t, c, &found, why,
+				    sizeof(why))) != 0) {
+					if (r->err != NULL) {
+						r->err->node = c;
+						r->err->tag = "operation-failed";
+						snprintf(r->err->msg,
+						    sizeof(r->err->msg), "%s: %s",
+						    c->sn->name, why);
+					}
+					return (error);
+				}
+				if (!found)
+					return (missing(r, c, "%s: no %s of its "
+					    "value its path finds",
+					    c->sn->name, target->name));
+			} else if ((t->flags & CBL_YTF_LEAFREF) != 0 &&
 			    (target = c->sn->lref) != NULL &&
 			    !has_value(&r->t->root, target, c->value, 0))
 				return (missing(r, c, "%s: no %s of its value",

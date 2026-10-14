@@ -828,6 +828,129 @@ EOF
 	    -I"$prefix/include" -I. -o ra ra.c corpus_schema.c.o \
 	    -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
 	atf_check -o inline:"RFC 8349's musts: as the RFC has them\n" ./ra
+
+	# RFC 8349's IPv4 augments' whens (PLAN-SDN-YANG 2.2.4): a RIB of
+	# IPv4 unicast with a route (its destination prefix), a simple next
+	# hop's address and a next-hop list's; all hold.  The RIB made IPv6
+	# unicast, each of the three refused in turn, unknown-element: the
+	# augment of the route, of a case, of a list's entries.
+	cat > v4ur.c <<'EOF'
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "cbl_data.h"
+#include "corpus.h"
+
+static int bad;
+
+static const struct cbl_ynode *
+kid(const struct cbl_ynode *n, const char *name)
+{
+	for (uint32_t i = 0; i < n->nchild; i++)
+		if (strcmp(n->child[i]->name, name) == 0)
+			return (n->child[i]);
+	printf("no %s under %s\n", name, n->name);
+	bad = 1;
+	return (n);
+}
+
+static cbl_dnode *
+add(cbl_dnode *p, const struct cbl_ynode *s, const void *v)
+{
+	cbl_dnode *x = cbl_dnode_child(p, s);
+
+	if (x == NULL && (s->kind == CBL_YN_LIST ? cbl_dnode_add_entry(p, s,
+	    v, &x) : cbl_dnode_add(p, s, v, &x)) != 0) {
+		printf("%s not added\n", s->name);
+		bad = 1;
+	}
+	return (x);
+}
+
+static uint64_t
+ident(const char *mod, const char *name)
+{
+	for (uint32_t i = 0; i < corpus_schema.nident; i++)
+		if (strcmp(corpus_schema.ident[i].name, name) == 0 &&
+		    strcmp(corpus_schema.ident[i].module->name, mod) == 0)
+			return (corpus_schema.ident[i].sid);
+	printf("no identity %s:%s\n", mod, name);
+	bad = 1;
+	return (0);
+}
+
+int
+main(void)
+{
+	const struct cbl_ynode *routing = NULL, *rib, *route, *nh, *nhl;
+	cbl_dtree *t = cbl_dtree_new(&corpus_schema);
+	const char *name = "ipv4-main", *dst = "192.0.2.0/24";
+	const char *gw = "198.51.100.1", *gw2 = "198.51.100.2";
+	const void *k[1] = { &name };
+	uint64_t af = ident("ietf-ipv4-unicast-routing", "ipv4-unicast");
+	struct cbl_dederr err;
+	cbl_dnode *x, *r, *routes;
+	int refused = 0, error;
+
+	for (uint32_t i = 0; i < corpus_schema.nmod; i++)
+		if (strcmp(corpus_schema.mod[i]->name, "ietf-routing") == 0)
+			for (uint32_t j = 0; j < corpus_schema.mod[i]->ntop;
+			    j++)
+				if (strcmp(corpus_schema.mod[i]->top[j]->name,
+				    "routing") == 0)
+					routing = corpus_schema.mod[i]->top[j];
+	if (routing == NULL)
+		return (1);
+	rib = kid(kid(routing, "ribs"), "rib");
+	route = kid(kid(rib, "routes"), "route");
+	nh = kid(route, "next-hop");
+	nhl = kid(kid(nh, "next-hop-list"), "next-hop");
+	x = add(add(add(cbl_dtree_root(t), routing, NULL), kid(routing,
+	    "ribs"), NULL), rib, k);
+	add(x, kid(rib, "address-family"), &af);
+	routes = add(x, kid(rib, "routes"), NULL);
+	/* A route by a simple next hop, one by a list. */
+	if (cbl_dnode_add_entry(routes, route, NULL, &r) != 0)
+		return (1);
+	add(r, kid(route, "destination-prefix"), &dst);
+	add(add(r, nh, NULL), kid(nh, "next-hop-address"), &gw);
+	if (cbl_dnode_add_entry(routes, route, NULL, &r) != 0)
+		return (1);
+	if (cbl_dnode_add_entry(add(add(r, nh, NULL), kid(nh,
+	    "next-hop-list"), NULL), nhl, NULL, &x) != 0)
+		return (1);
+	add(x, kid(nhl, "address"), &gw2);
+	if ((error = cbl_dtree_check_conds(t, &err)) != 0) {
+		printf("IPv4: %s\n", err.msg);
+		bad = 1;
+	}
+	af = ident("ietf-ipv6-unicast-routing", "ipv6-unicast");
+	cbl_dnode_set(cbl_dnode_child(cbl_dnode_parent(routes),
+	    kid(rib, "address-family")), &af);
+	while ((error = cbl_dtree_check_conds(t, &err)) == EINVAL &&
+	    refused < 10) {
+		const struct cbl_ynode *s = cbl_dnode_schema(err.node);
+
+		if (strcmp(err.tag, "unknown-element") != 0 ||
+		    strcmp(s->module->name, "ietf-ipv4-unicast-routing") != 0) {
+			printf("%s: %s\n", s->name, err.msg);
+			bad = 1;
+			break;
+		}
+		printf("%s refused\n", s->name);
+		refused++;
+		cbl_dnode_remove((cbl_dnode *)(uintptr_t)err.node);
+	}
+	cbl_dtree_free(t);
+	return (bad || error != 0);
+}
+EOF
+	atf_check ${CC:-cc} ${CFLAGS:-} ${LDFLAGS:-} -std=c23 -Wall -Werror \
+	    -I"$prefix/include" -I. -o v4ur v4ur.c corpus_schema.c.o \
+	    -L"$prefix/lib" -Wl,-rpath,"$prefix/lib" -lcblink
+	atf_check -o inline:"destination-prefix refused\nnext-hop-address refused\naddress refused\n" \
+	    ./v4ur
 }
 
 atf_init_test_cases()

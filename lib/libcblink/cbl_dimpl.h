@@ -71,6 +71,28 @@ void	cbl_d_move_after(cbl_dnode *n, cbl_dnode *prev);
 bool	cbl_d_same_case(const struct cbl_ynode *a, const struct cbl_ynode *b);
 /* An entry's k-th key's value. */
 const void *cbl_d_key_value(const cbl_dnode *e, uint16_t k);
+/*
+ * What a when's expression sees (RFC 7950 section 7.21.5): dummy, if not
+ * NULL, a node with no value and no children; none of the children of
+ * hpar that hide(harg, their schema node) says.
+ */
+struct cbl_d_view {
+	const cbl_dnode	*dummy;
+	const cbl_dnode	*hpar;
+	bool		(*hide)(const void *, const struct cbl_ynode *);
+	const void	*harg;
+};
+
+/* cbl_xp_eval() with a view, or NULL: the tree as it is. */
+struct cbl_xval;
+int		 cbl_d_xp_eval(const cbl_dtree *t, const char *expr,
+		    const cbl_dnode *ctx, const cbl_dnode *cur,
+		    const struct cbl_d_view *view, struct cbl_xval *out,
+		    char *why, size_t whylen);
+
+/* Defaults under n whose whens are false removed (cbl_dcond.c). */
+ssize_t		 cbl_d_prune_defaults(cbl_dnode *n);
+
 /* The node an instance-identifier's YANG-CBOR names in t, or NULL. */
 const cbl_dnode *cbl_d_iid_node(const cbl_dtree *t,
 	    const struct cbl_bytes *v, cbl_yarena *a);

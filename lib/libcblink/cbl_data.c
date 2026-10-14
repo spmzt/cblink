@@ -1129,11 +1129,15 @@ ssize_t
 cbl_dtree_defaults(cbl_dnode *n)
 {
 
+	ssize_t made, gone;
+
 	if (n == NULL) {
 		errno = EINVAL;
 		return (-1);
 	}
-	return (d_node(n, 0));
+	if ((made = d_node(n, 0)) < 0 || (gone = cbl_d_prune_defaults(n)) < 0)
+		return (-1);
+	return (made - gone);
 }
 
 /*

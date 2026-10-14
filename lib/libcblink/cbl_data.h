@@ -110,8 +110,10 @@ bool		 cbl_dvalue_equal(const struct cbl_ytype *t, const void *a,
  * or in the choice's default case where n has none of its cases.  NULL:
  * neither.  cbl_dtree_defaults() makes every default in use in n and
  * below a node of its own, flagged CBL_DN_DEFAULT, a non-presence
- * container that holds one too; it returns how many it made, or -1 and
- * errno.  when is not looked at: it is the evaluator's.
+ * container that holds one too; one under a when that does not hold is
+ * not in use (RFC 7950 section 7.21.5): not made, or removed if it was.
+ * It returns how many defaults in use it made, less those it removed
+ * (the containers for them not counted), or -1 and errno.
  */
 const void	*cbl_dnode_leaf(const cbl_dnode *n,
 		    const struct cbl_ynode *leaf, bool *isdflt);
@@ -194,10 +196,24 @@ int		 cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit,
  * every instance-identifier with require-instance that names no node of
  * t.  0, or ENOENT and err, if given, says the first: data-missing,
  * instance-required.  A leafref's target is the node its path names, any
- * instance of it: a path's predicates, which may narrow that, are the
- * evaluator's; one in a union is not looked at.
+ * instance of it, or with predicates in its path, a node the path finds
+ * (cbl_xp_eval(), its errno and operation-failed if it fails); one in a
+ * union is not looked at.
  */
 int		 cbl_dtree_check_refs(const cbl_dtree *t,
+		    struct cbl_dederr *err);
+
+/*
+ * when and must (RFC 7950 sections 7.21.5, 7.5.3) over tree t, its
+ * defaults made: every node's whens hold (its choices' and cases', an
+ * augment's and a uses' brought to it, its own) and its musts.  0, or
+ * EINVAL and err, if given, says the first node that fails:
+ * unknown-element, a when not holding (a default's: it is not in use, no
+ * error); operation-failed, a must not holding, with the must's
+ * error-message and error-app-tag (must-violation if it has none); or
+ * the evaluator's errno, operation-failed and why.
+ */
+int		 cbl_dtree_check_conds(const cbl_dtree *t,
 		    struct cbl_dederr *err);
 
 /*

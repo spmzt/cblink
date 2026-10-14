@@ -354,6 +354,183 @@ ATF_TC_BODY(functions, tc)
 	cbl_dtree_free(t);
 }
 
+/* Leaf sn of parent given value v: set, or added. */
+static cbl_dnode *
+leaf(cbl_dnode *parent, const char *mod, const char *path, const void *v)
+{
+	const struct cbl_ynode *s = sn(mod, path);
+	cbl_dnode *x = (cbl_dnode *)(uintptr_t)cbl_dnode_child(parent, s);
+
+	if (x != NULL)
+		ATF_REQUIRE_EQ(0, cbl_dnode_set(x, v));
+	else
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(parent, s, v, &x));
+	return (x);
+}
+
+static void
+conds_ok(cbl_dtree *t)
+{
+	struct cbl_dederr err;
+
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_check_conds(t, &err), "%s", err.msg);
+}
+
+/* The check refuses at node at, with tag, app-tag and a message. */
+static void
+conds_fail(cbl_dtree *t, const cbl_dnode *at, const char *tag,
+    const char *apptag, const char *msg)
+{
+	struct cbl_dederr err;
+
+	ATF_REQUIRE_EQ(EINVAL, cbl_dtree_check_conds(t, &err));
+	ATF_CHECK(err.node == at);
+	ATF_REQUIRE(err.tag != NULL);
+	ATF_CHECK_STREQ(tag, err.tag);
+	if (apptag != NULL) {
+		ATF_REQUIRE(err.apptag != NULL);
+		ATF_CHECK_STREQ(apptag, err.apptag);
+	} else
+		ATF_CHECK(err.apptag == NULL);
+	ATF_CHECK_MSG(strstr(err.msg, msg) != NULL, "%s", err.msg);
+}
+
+ATF_TC_WITHOUT_HEAD(conds);
+ATF_TC_BODY(conds, tc)
+{
+	const char *peer[] = { "a", "b", "c" };
+	const char *note = "n", *addr = "192.0.2.1", *secret = "secret";
+	cbl_dtree *t = cbl_dtree_new(&yangh_schema);
+	cbl_dnode *link, *mtu, *key, *x, *peers;
+	int ethernet = 0, tunnel = 1;
+	uint32_t k = 7, speed = 1000;
+
+	ATF_REQUIRE(t != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t), sn("conds", "link"),
+	    NULL, &link));
+	leaf(link, "conds", "link/kind", &tunnel);
+	key = leaf(link, "conds", "link/key", &k);
+	/* Its own when sees it with no value: "n" or not, it holds. */
+	leaf(link, "conds", "link/note", &note);
+	ATF_REQUIRE(cbl_dtree_defaults(cbl_dtree_root(t)) > 0);
+	conds_ok(t);
+
+	/* A must with an error-message and an error-app-tag: a tunnel's
+	 * MTU, the default 1500, made 1000. */
+	mtu = leaf(link, "conds", "link/mtu", &(uint16_t){ 1000 });
+	conds_fail(t, mtu, "operation-failed", "mtu-too-small",
+	    "A tunnel's MTU is 1280 at least.");
+	leaf(link, "conds", "link/mtu", &(uint16_t){ 1400 });
+	conds_ok(t);
+
+	/* A node's own when: the key of a tunnel, not of an Ethernet. */
+	leaf(link, "conds", "link/kind", &ethernet);
+	conds_fail(t, key, "unknown-element", NULL, "when");
+	ATF_REQUIRE_EQ(0, cbl_dnode_remove(key));
+	conds_ok(t);
+
+	/* A case's: an address for an Ethernet only. */
+	x = leaf(link, "conds", "link/address", &addr);
+	conds_ok(t);
+	leaf(link, "conds", "link/kind", &tunnel);
+	conds_fail(t, x, "unknown-element", NULL, "when");
+	ATF_REQUIRE_EQ(0, cbl_dnode_remove(x));
+
+	/* An augment's: a speed for an Ethernet only. */
+	x = leaf(link, "conds", "link/speed", &speed);
+	conds_fail(t, x, "unknown-element", NULL, "when");
+	leaf(link, "conds", "link/kind", &ethernet);
+	conds_ok(t);
+	ATF_REQUIRE_EQ(0, cbl_dnode_remove(x));
+
+	/* An augment's when sees the link without the augment's nodes: a
+	 * secret in its own, not in another's. */
+	x = leaf(link, "conds", "link/hidden", &secret);
+	conds_ok(t);
+	leaf(link, "conds", "link/note", &secret);
+	conds_fail(t, x, "unknown-element", NULL, "when");
+	leaf(link, "conds", "link/note", &note);
+
+	/* A must without: must-violation, the expression said. */
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(link, sn("conds", "link/peers"), NULL,
+	    &peers));
+	for (int i = 0; i < 3; i++)
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(peers,
+		    sn("conds", "link/peers/peer"), &peer[i], NULL));
+	conds_fail(t, peers, "operation-failed", "must-violation", "must");
+	ATF_REQUIRE_EQ(0, cbl_dnode_remove(cbl_dnode_last(peers)));
+	conds_ok(t);
+	cbl_dtree_free(t);
+}
+
+/* A default under a when that does not hold: not in use. */
+ATF_TC_WITHOUT_HEAD(defaults_when);
+ATF_TC_BODY(defaults_when, tc)
+{
+	const struct cbl_ynode *duplex = sn("conds", "link/duplex");
+	cbl_dtree *t = cbl_dtree_new(&yangh_schema);
+	int ethernet = 0, tunnel = 1;
+	cbl_dnode *link;
+	const cbl_dnode *x;
+
+	ATF_REQUIRE(t != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t), sn("conds", "link"),
+	    NULL, &link));
+	leaf(link, "conds", "link/kind", &tunnel);
+	/* mtu's alone: duplex is an Ethernet's. */
+	ATF_CHECK_EQ(1, cbl_dtree_defaults(link));
+	ATF_CHECK(cbl_dnode_child(link, duplex) == NULL);
+	leaf(link, "conds", "link/kind", &ethernet);
+	ATF_CHECK_EQ(1, cbl_dtree_defaults(link));
+	ATF_REQUIRE((x = cbl_dnode_child(link, duplex)) != NULL);
+	ATF_CHECK(cbl_dnode_flags(x) & CBL_DN_DEFAULT);
+	/* An Ethernet made a tunnel: its default no error, then gone. */
+	leaf(link, "conds", "link/kind", &tunnel);
+	conds_ok(t);
+	ATF_CHECK_EQ(-1, cbl_dtree_defaults(link));
+	ATF_CHECK(cbl_dnode_child(link, duplex) == NULL);
+	cbl_dtree_free(t);
+}
+
+/* A leafref whose path has a predicate: an interface of its area. */
+ATF_TC_WITHOUT_HEAD(refs_predicate);
+ATF_TC_BODY(refs_predicate, tc)
+{
+	const char *areas[] = { "0", "1" }, *ifs[] = { "eth0", "eth1" };
+	const char *area = "0";
+	struct cbl_dederr err;
+	cbl_dnode *top, *ospf, *a, *ol, *ref;
+	cbl_dtree *t = running(&top);
+
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top, sn("edits", "top/protocols"),
+	    NULL, &ospf));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(ospf,
+	    sn("edits", "top/protocols/ospf"), NULL, &ospf));
+	for (int i = 0; i < 2; i++) {
+		a = entry(ospf, sn("edits", "top/protocols/ospf/area"),
+		    areas[i]);
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(a,
+		    sn("edits", "top/protocols/ospf/area/interfaces"), NULL,
+		    &a));
+		entry(a, sn("edits",
+		    "top/protocols/ospf/area/interfaces/interface"), ifs[i]);
+	}
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t),
+	    sn("conds", "ospf-link"), NULL, &ol));
+	leaf(ol, "conds", "ospf-link/area", &area);
+	ref = leaf(ol, "conds", "ospf-link/interface", &ifs[0]);
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_check_refs(t, &err), "%s", err.msg);
+	/* eth1 is an interface, of area 1: not this one's. */
+	leaf(ol, "conds", "ospf-link/interface", &ifs[1]);
+	ATF_REQUIRE_EQ(ENOENT, cbl_dtree_check_refs(t, &err));
+	ATF_CHECK(err.node == ref);
+	ATF_CHECK_STREQ("data-missing", err.tag);
+	area = "1";
+	leaf(ol, "conds", "ospf-link/area", &area);
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_check_refs(t, &err), "%s", err.msg);
+	cbl_dtree_free(t);
+}
+
 ATF_TC_WITHOUT_HEAD(refused);
 ATF_TC_BODY(refused, tc)
 {
@@ -383,6 +560,9 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, paths);
 	ATF_TP_ADD_TC(tp, values);
 	ATF_TP_ADD_TC(tp, functions);
+	ATF_TP_ADD_TC(tp, conds);
+	ATF_TP_ADD_TC(tp, defaults_when);
+	ATF_TP_ADD_TC(tp, refs_predicate);
 	ATF_TP_ADD_TC(tp, refused);
 	return (atf_no_error());
 }

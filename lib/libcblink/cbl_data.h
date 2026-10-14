@@ -135,6 +135,42 @@ int		 cbl_dtree_to_module(const cbl_dtree *t,
 		    const struct cbl_ymodule *m, void *p, cbl_yarena *a);
 
 /*
+ * Edits (RFC 6241 section 7.2): a tree of the same schema whose nodes
+ * each carry an operation, or their parent's (0), applied to a target.
+ * merge makes what is not there and sets the leaves given; replace puts
+ * the node given in the place of the one there; create is merge where
+ * none is there, data-exists where one is; delete takes away the one
+ * there, data-missing where none is; remove takes it away if it is
+ * there.  The operation of the edit's top, its default, is merge,
+ * replace or none, which changes nothing not asked for and is
+ * data-missing where a node the edit goes through is not there.  A node
+ * of a choice's case takes the others' place (RFC 7950 section 7.9.2).
+ * The edit is all or nothing: on an error the target is as it was, and
+ * err, if given, says where (the edit's node), why (RFC 8040's
+ * error-tag) and what.  An entry's keys and a leaf-list entry's value
+ * say which; an ordered-by user list's new entries go after its last.
+ * What the schema says beyond the tree's shape is not checked: the
+ * validator's, on the result.
+ */
+#define	CBL_DOP_MERGE		1
+#define	CBL_DOP_REPLACE		2
+#define	CBL_DOP_CREATE		3
+#define	CBL_DOP_DELETE		4
+#define	CBL_DOP_REMOVE		5
+#define	CBL_DOP_NONE		6	/* a default only */
+
+struct cbl_dederr {
+	const cbl_dnode	*node;
+	const char	*tag;
+	char		 msg[160];
+};
+
+int		 cbl_dnode_set_op(cbl_dnode *n, int op);
+int		 cbl_dnode_op(const cbl_dnode *n);
+int		 cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit,
+		    int dflt, struct cbl_dederr *err);
+
+/*
  * YANG-CBOR: sn's value (as cbl_ydecode() reads it) made a child of
  * parent; a node's value written, as cbl_yencode() writes it.
  */

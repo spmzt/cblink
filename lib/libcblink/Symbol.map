@@ -206,4 +206,7 @@ CBLINK_1.0 {
 	cbl_dtree_to_module;
 	cbl_dnode_decode;
 	cbl_dnode_encode;
+	cbl_dnode_set_op;
+	cbl_dnode_op;
+	cbl_dtree_edit;
 };

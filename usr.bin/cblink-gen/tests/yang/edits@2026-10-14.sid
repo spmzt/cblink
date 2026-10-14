@@ -1,0 +1,125 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "edits",
+    "module-revision": "2026-10-14",
+    "description": "cblink's test module of the instance tree's edits: 2^40 + 300 000, never on a wire.",
+    "assignment-range": [
+      {
+        "entry-point": "1099511927776",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "edits",
+        "sid": "1099511927776"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top",
+        "sid": "1099511927777"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/dhcp",
+        "sid": "1099511927778"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/dhcp-timeout",
+        "sid": "1099511927779"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface",
+        "sid": "1099511927780"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface/address",
+        "sid": "1099511927781"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface/address/name",
+        "sid": "1099511927782"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface/address/prefix-length",
+        "sid": "1099511927783"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface/mtu",
+        "sid": "1099511927784"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/interface/name",
+        "sid": "1099511927785"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols",
+        "sid": "1099511927786"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf",
+        "sid": "1099511927787"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf/area",
+        "sid": "1099511927788"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf/area/interfaces",
+        "sid": "1099511927789"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf/area/interfaces/interface",
+        "sid": "1099511927790"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf/area/interfaces/interface/name",
+        "sid": "1099511927791"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/protocols/ospf/area/name",
+        "sid": "1099511927792"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/route",
+        "sid": "1099511927793"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/route/prefix",
+        "sid": "1099511927794"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/route/via",
+        "sid": "1099511927795"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/static-address",
+        "sid": "1099511927796"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/tags",
+        "sid": "1099511927797"
+      }
+    ]
+  }
+}

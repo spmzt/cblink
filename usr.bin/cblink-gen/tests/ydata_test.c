@@ -5,12 +5,12 @@
  */
 
 /*
- * The instance tree (cbl_data.h) on the tables of shapes, ietf-system and
- * ietf-sid-file (yang_h_test's): built, walked and freed; list entries by
- * their keys, many of them; the order of what is added, a configuration
- * leaf-list's values once; a choice's cases never two; defaults on demand
- * and made; every struct through the tree and back to the same bytes,
- * and a module's data struct.
+ * The instance tree (cbl_data.h) on the tables of shapes, edits,
+ * ietf-system and ietf-sid-file (yang_h_test's): built, walked and freed;
+ * list entries by their keys, many of them; the order of what is added,
+ * a configuration leaf-list's values once; a choice's cases never two;
+ * defaults on demand and made; every struct through the tree and back to
+ * the same bytes, and a module's data struct.
  */
 
 #include <errno.h>

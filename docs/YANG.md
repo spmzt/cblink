@@ -100,7 +100,9 @@ nodes of the tables, for datastores, edits and XPath: it keeps a tree's
 shape (keys one entry, a configuration leaf-list's values once, a
 choice's cases never two), gives a default where it is in use, and makes
 nodes of them, non-presence containers too, as RFC 6243's report-all
-shows them.
+shows them. Edits apply NETCONF's operations to it (RFC 6241 section
+7.2: merge, replace, create, delete, remove; none as the default), all or
+nothing.
 
 ## 5. Expressions and patterns
 

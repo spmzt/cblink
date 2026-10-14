@@ -22,51 +22,17 @@
 #include <string.h>
 
 #include "cbl_data.h"
+#include "cbl_dimpl.h"
 #include "cbl_yimpl.h"
 
 #define	AT(p, off)	((const void *)((const char *)(p) + (off)))
 #define	WAT(p, off)	((void *)((char *)(p) + (off)))
-#define	DEPTH_MAX	64
+#define	DEPTH_MAX	CBL_D_DEPTH_MAX
 
 /* A list or a leaf-list member of a struct: its count, then its array. */
 struct yarr {
 	size_t		 n;
 	const void	*v;
-};
-
-struct cbl_dnode {
-	const struct cbl_ynode	*sn;
-	cbl_dtree		*tree;
-	cbl_dnode		*parent, *next, *prev, *first, *last;
-	/* By schema child: its first and last instance here, or NULL. */
-	cbl_dnode		**head, **tail;
-	cbl_dnode		*hnext;		/* an entry, in the index */
-	uint64_t		 hash;
-	uint16_t		 flags;
-	void			*value;
-};
-
-/* A default, parsed once for the tree. */
-struct dflt {
-	const struct cbl_ynode	*sn;
-	uint16_t		 k;
-	const void		*v;
-	struct dflt		*next;
-};
-
-#define	NDFLT	64
-
-struct cbl_dtree {
-	const struct cbl_yschema *schema;
-	cbl_dnode		 root;
-	/* The root's children: every module's top-level nodes, in turn. */
-	const struct cbl_ynode	**tops;
-	uint32_t		 ntops;
-	size_t			 count;
-	cbl_dnode		**slot;		/* the index, nslot a power of 2 */
-	size_t			 nslot, nentries;
-	struct dflt		*dflt[NDFLT];
-	cbl_yarena		*arena;		/* the defaults' */
 };
 
 /*
@@ -313,6 +279,23 @@ cbl_dnode_flags(const cbl_dnode *n)
 	return (n != NULL ? n->flags : 0);
 }
 
+int
+cbl_dnode_set_op(cbl_dnode *n, int op)
+{
+
+	if (n == NULL || n->sn == NULL || op < 0 || op > CBL_DOP_REMOVE)
+		return (EINVAL);
+	n->op = (uint8_t)op;
+	return (0);
+}
+
+int
+cbl_dnode_op(const cbl_dnode *n)
+{
+
+	return (n != NULL ? n->op : 0);
+}
+
 /* The schema nodes n's children may be. */
 static const struct cbl_ynode *const *
 kids(const cbl_dnode *n, uint32_t *nk)
@@ -340,9 +323,51 @@ kidx(const cbl_dnode *n, const struct cbl_ynode *sn)
 	return (-1);
 }
 
-/* c, the i-th kind of parent's children, after the last of its kind. */
+/* How many nodes n is, with all below it. */
+static size_t
+subtree(const cbl_dnode *n)
+{
+	size_t k = 1;
+
+	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
+		k += subtree(c);
+	return (k);
+}
+
+/*
+ * c linked as a child of parent of the i-th kind, after "after" (NULL:
+ * the first of all), its kind's first or last as it falls there.
+ */
+static void
+link_at(cbl_dnode *parent, cbl_dnode *c, uint32_t i, cbl_dnode *after)
+{
+
+	c->prev = after;
+	if (after == NULL) {
+		c->next = parent->first;
+		parent->first = c;
+	} else {
+		c->next = after->next;
+		after->next = c;
+	}
+	if (c->next != NULL)
+		c->next->prev = c;
+	else
+		parent->last = c;
+	if (after == NULL || after->sn != c->sn)
+		parent->head[i] = c;
+	if (c->next == NULL || c->next->sn != c->sn)
+		parent->tail[i] = c;
+	c->parent = parent;
+}
+
+/*
+ * c, of the i-th kind of parent's children, after the last of its kind;
+ * counted in the tree with all below it unless an entry's key, which is
+ * counted with its entry.
+ */
 static int
-attach(cbl_dnode *parent, cbl_dnode *c, uint32_t i)
+attach(cbl_dnode *parent, cbl_dnode *c, uint32_t i, bool counted)
 {
 	cbl_dnode *after;
 	uint32_t nk;
@@ -360,26 +385,16 @@ attach(cbl_dnode *parent, cbl_dnode *c, uint32_t i)
 	after = parent->tail[i];
 	for (uint32_t j = i; after == NULL && j-- > 0;)
 		after = parent->tail[j];
-	c->prev = after;
-	if (after == NULL) {
-		c->next = parent->first;
-		parent->first = c;
-	} else {
-		c->next = after->next;
-		after->next = c;
-	}
-	if (c->next != NULL)
-		c->next->prev = c;
-	else
-		parent->last = c;
-	if (parent->head[i] == NULL)
-		parent->head[i] = c;
-	parent->tail[i] = c;
-	c->parent = parent;
-	parent->tree->count++;
+	link_at(parent, c, i, after);
+	if (counted)
+		parent->tree->count += subtree(c);
 	return (0);
 }
 
+/*
+ * c, with all below it, out of the tree.  An entry stays in the index:
+ * with no parent, no lookup finds it.
+ */
 static void
 unlink_node(cbl_dnode *c)
 {
@@ -403,7 +418,35 @@ unlink_node(cbl_dnode *c)
 	else
 		parent->last = c->prev;
 	c->parent = c->next = c->prev = NULL;
-	parent->tree->count--;
+	parent->tree->count -= subtree(c);
+}
+
+void
+cbl_d_detach(cbl_dnode *n)
+{
+
+	unlink_node(n);
+}
+
+void
+cbl_d_move_after(cbl_dnode *n, cbl_dnode *prev)
+{
+	cbl_dnode *parent = n->parent;
+
+	if (prev == n || n->prev == prev)
+		return;
+	unlink_node(n);
+	cbl_d_reattach(parent, n, prev);
+}
+
+void
+cbl_d_reattach(cbl_dnode *parent, cbl_dnode *n, cbl_dnode *prev)
+{
+	int64_t i = kidx(parent, n->sn);
+
+	/* parent had n: its head and tail are there. */
+	link_at(parent, n, (uint32_t)i, prev);
+	parent->tree->count += subtree(n);
 }
 
 /*
@@ -411,8 +454,8 @@ unlink_node(cbl_dnode *c)
  */
 
 /* The value of an entry's k-th key. */
-static const void *
-key_value(const cbl_dnode *e, uint16_t k)
+const void *
+cbl_d_key_value(const cbl_dnode *e, uint16_t k)
 {
 	uint32_t i = e->sn->keys[k];
 
@@ -442,7 +485,7 @@ entry_is(const cbl_dnode *e, const cbl_dnode *parent,
 	if (e->parent != parent || e->sn != list)
 		return (false);
 	for (uint16_t k = 0; k < list->nkeys; k++)
-		if ((v = key_value(e, k)) == NULL ||
+		if ((v = cbl_d_key_value(e, k)) == NULL ||
 		    !cbl_dvalue_equal(list->child[list->keys[k]]->type, v,
 		    keys[k]))
 			return (false);
@@ -525,19 +568,11 @@ free_node(cbl_dnode *n)
 
 	for (c = n->first; c != NULL; c = next) {
 		next = c->next;
-		n->tree->count--;
 		free_node(c);
 	}
 	if (indexed(n))
 		index_remove(n->tree, n);
-	if (n->value != NULL) {
-		if (n->sn->type != NULL)
-			vfree(n->sn->type, n->value);
-		else
-			free((void *)(uintptr_t)
-			    ((struct cbl_bytes *)n->value)->p);
-		free(n->value);
-	}
+	cbl_d_free_value(n);
 	free(n->head);
 	free(n->tail);
 	if (n != &n->tree->root)
@@ -553,8 +588,8 @@ cbl_dtree_free(cbl_dtree *t)
 	free_node(&t->root);
 	free(t->tops);
 	free(t->slot);
-	for (int i = 0; i < NDFLT; i++)
-		for (struct dflt *d = t->dflt[i], *next; d != NULL; d = next) {
+	for (int i = 0; i < CBL_D_NDFLT; i++)
+		for (struct cbl_ddflt *d = t->dflt[i], *next; d != NULL; d = next) {
 			next = d->next;
 			free(d);
 		}
@@ -576,9 +611,16 @@ cbl_dnode_remove(cbl_dnode *n)
 	return (0);
 }
 
+void
+cbl_d_free(cbl_dnode *n)
+{
+
+	free_node(n);
+}
+
 /* The (choice, case) pairs a node is in, inmost first. */
-static bool
-same_case(const struct cbl_ynode *a, const struct cbl_ynode *b)
+bool
+cbl_d_same_case(const struct cbl_ynode *a, const struct cbl_ynode *b)
 {
 	const struct cbl_ychoice *ca, *cb;
 	uint32_t wa, wb;
@@ -604,7 +646,7 @@ case_clash(const cbl_dnode *parent, const struct cbl_ynode *sn)
 	k = kids(parent, &nk);
 	for (uint32_t i = 0; i < nk; i++)
 		if (parent->head[i] != NULL && k[i]->choice != NULL &&
-		    !same_case(sn, k[i]))
+		    !cbl_d_same_case(sn, k[i]))
 			return (true);
 	return (false);
 }
@@ -621,9 +663,23 @@ node_new(cbl_dtree *t, const struct cbl_ynode *sn)
 	return (n);
 }
 
+void
+cbl_d_free_value(cbl_dnode *n)
+{
+
+	if (n->value == NULL)
+		return;
+	if (n->sn->type != NULL)
+		vfree(n->sn->type, n->value);
+	else
+		free((void *)(uintptr_t)((struct cbl_bytes *)n->value)->p);
+	free(n->value);
+	n->value = NULL;
+}
+
 /* A leaf's or leaf-list entry's value, or anydata's bytes, copied. */
-static int
-set_value(cbl_dnode *n, const void *value)
+int
+cbl_d_set_value(cbl_dnode *n, const void *value)
 {
 	const struct cbl_ytype *t = n->sn->type;
 	void *v;
@@ -652,14 +708,7 @@ set_value(cbl_dnode *n, const void *value)
 			return (error);
 		}
 	}
-	if (n->value != NULL) {
-		if (t != NULL)
-			vfree(t, n->value);
-		else
-			free((void *)(uintptr_t)
-			    ((struct cbl_bytes *)n->value)->p);
-		free(n->value);
-	}
+	cbl_d_free_value(n);
 	n->value = v;
 	return (0);
 }
@@ -705,8 +754,8 @@ cbl_dnode_add(cbl_dnode *parent, const struct cbl_ynode *sn,
 		return (EINVAL);
 	if ((n = node_new(parent->tree, sn)) == NULL)
 		return (ENOMEM);
-	if ((value != NULL && (error = set_value(n, value)) != 0) ||
-	    (error = attach(parent, n, (uint32_t)i)) != 0) {
+	if ((value != NULL && (error = cbl_d_set_value(n, value)) != 0) ||
+	    (error = attach(parent, n, (uint32_t)i, true)) != 0) {
 		free_node(n);
 		return (error);
 	}
@@ -746,15 +795,15 @@ cbl_dnode_add_entry(cbl_dnode *parent, const struct cbl_ynode *list,
 
 		/* free_node() counts each key it frees off the tree. */
 		if ((k = node_new(parent->tree, list->child[ki])) == NULL ||
-		    (error = set_value(k, keys[j])) != 0 ||
-		    (error = attach(e, k, ki)) != 0) {
+		    (error = cbl_d_set_value(k, keys[j])) != 0 ||
+		    (error = attach(e, k, ki, false)) != 0) {
 			if (k != NULL)
 				free_node(k);
 			free_node(e);
 			return (k == NULL ? ENOMEM : error);
 		}
 	}
-	if ((error = attach(parent, e, (uint32_t)i)) != 0 ||
+	if ((error = attach(parent, e, (uint32_t)i, true)) != 0 ||
 	    (list->nkeys > 0 && (error = index_add(parent->tree, e)) != 0)) {
 		if (e->parent != NULL)
 			unlink_node(e);
@@ -783,7 +832,7 @@ cbl_dnode_set(cbl_dnode *n, const void *value)
 	    x != n)
 		return (EEXIST);
 	n->flags &= ~CBL_DN_DEFAULT;
-	return (set_value(n, value));
+	return (cbl_d_set_value(n, value));
 }
 
 /*
@@ -833,8 +882,8 @@ cbl_dnode_llentry(const cbl_dnode *parent, const struct cbl_ynode *ll,
 static const void *
 dflt_value(cbl_dtree *t, const struct cbl_ynode *sn, uint16_t k)
 {
-	struct dflt *d;
-	size_t b = ((uintptr_t)sn >> 4 ^ k) % NDFLT;
+	struct cbl_ddflt *d;
+	size_t b = ((uintptr_t)sn >> 4 ^ k) % CBL_D_NDFLT;
 	void *v;
 
 	for (d = t->dflt[b]; d != NULL; d = d->next)

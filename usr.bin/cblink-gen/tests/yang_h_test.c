@@ -6,10 +6,11 @@
 
 /*
  * The structs cblink-gen writes for YANG modules (yangh.h, made at build
- * time from shapes, ietf-system and ietf-sid-file): that they compile at
- * WARNS=6 is most of the test; here, that they hold what a reader would
- * put in them, each shape once.  And their schema tables (yangh_schema.c):
- * children by SID, keys, choices, types shared, what the runtime reads.
+ * time from shapes, edits, ietf-system and ietf-sid-file): that they
+ * compile at WARNS=6 is most of the test; here, that they hold what a
+ * reader would put in them, each shape once.  And their schema tables
+ * (yangh_schema.c): children by SID, keys, choices, types shared, what
+ * the runtime reads.
  */
 
 #include <atf-c.h>
@@ -173,10 +174,11 @@ ATF_TC_BODY(tables, tc)
 	size_t nodes = 0;
 	regex_t re;
 
-	ATF_REQUIRE_EQ(3u, yangh_schema.nmod);
+	ATF_REQUIRE_EQ(4u, yangh_schema.nmod);
 	ATF_REQUIRE((sh = module("shapes")) != NULL);
 	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
 	ATF_REQUIRE(module("ietf-sid-file") != NULL);
+	ATF_REQUIRE(module("edits") != NULL);
 	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
 		for (uint32_t j = 0; j < yangh_schema.mod[i]->ntop; j++) {
 			if (j > 0)

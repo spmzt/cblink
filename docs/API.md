@@ -428,6 +428,12 @@ int	cbl_dtree_to_module(const cbl_dtree *, const struct cbl_ymodule *, void *p,
 int	cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *, const void *, size_t,
 	    int flags, char *why, size_t whylen, cbl_dnode **out);
 int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
+/* edits (RFC 6241 section 7.2): all or nothing */
+#define	CBL_DOP_MERGE	1	/* and REPLACE, CREATE, DELETE, REMOVE; NONE, a default */
+int	cbl_dnode_set_op(cbl_dnode *, int op);	/* 0: its parent's */
+struct cbl_dederr { const cbl_dnode *node; const char *tag; char msg[160]; };
+int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
+	    struct cbl_dederr *);
 ```
 
 - **A tree's shape** is kept: a node only where its schema node is, one
@@ -443,6 +449,14 @@ int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
   in use and has no node, its case taken into account;
   `cbl_dtree_defaults()` makes a node of each, and of the non-presence
   containers that hold them.
+- **Edits** are another tree of the schema, each node with an
+  operation or its parent's: merge, replace, create (data-exists where
+  the node is), delete (data-missing where it is not), remove; the
+  default none changes nothing not asked for. A node of a choice's case
+  takes the other cases' place; a replaced entry keeps its place. Every
+  change goes in an undo log as it is made, played back on an error:
+  the target is as it was, and the error names the edit's node, its
+  error-tag and why.
 
 - **Decoding** checks what the CBOR is: its shape, its kinds, its tags,
   UTF-8, and with `CBL_YD_STRICT` a key the node has no child for.

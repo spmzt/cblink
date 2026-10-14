@@ -215,6 +215,9 @@ build time.
   edit and its rollback, refusals, rpc, dump, notifications.
 - **yvalid_test:** the static validator, a rule a case, on RFC 7950's
   examples; the defaults.
+- **ydata_test, yedit_test:** the instance tree on those tables: built,
+  walked, keys, defaults, every struct through it; and its edits, RFC
+  6241's examples among them, all or nothing.
 - **ymod_regen:** the committed files of cblink's modules are up to date.
 - **determinism, cli, big_input, cblink_mk:** repeated runs give identical
   output, the command line, the size limit, and cblink.mk finding a

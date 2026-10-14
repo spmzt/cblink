@@ -41,7 +41,8 @@ atf_test_case ymod_regen
 ymod_regen_head()
 {
 	atf_set "descr" "The committed structs and tables of the cblink" \
-	    "modules match them: the framework's and the control family's"
+	    "modules match them: the framework's and the control family's," \
+	    "and fuzz_ycodec's of shapes"
 }
 ymod_regen_body()
 {
@@ -56,8 +57,11 @@ ymod_regen_body()
 	# The control family's reference, committed as docs/ctrl.md.
 	atf_check $gen -m md -b ctrl -o out \
 	    -s "$y/cblink-ctrl@2026-10-13.sid" "$y/cblink-ctrl@2026-10-13.yang"
+	# The tables fuzz_ycodec decodes by, committed in fuzz.
+	atf_check -o ignore $gen -m h,schema -b yshapes -o out \
+	    -s "$y/shapes@2026-10-13.sid" "$y/shapes@2026-10-13.yang"
 	for f in cbl_ymod.h cbl_ymod_schema.c cbl_yctrl.h cbl_yctrl_schema.c \
-	    ctrl.md; do
+	    ctrl.md yshapes.h yshapes_schema.c; do
 		atf_check -o file:"$(atf_get_srcdir)/ctrl/${f}" cat "out/${f}"
 	done
 }

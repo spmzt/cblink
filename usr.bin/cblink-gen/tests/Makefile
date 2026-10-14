@@ -73,7 +73,9 @@ CTRL=		${LIBCBLINK_SRC}/cbl_yctrl.h \
 		${LIBCBLINK_SRC}/cbl_yctrl_schema.c \
 		${LIBCBLINK_SRC}/cbl_ymod.h \
 		${LIBCBLINK_SRC}/cbl_ymod_schema.c \
-		${.CURDIR}/../../../docs/ctrl.md
+		${.CURDIR}/../../../docs/ctrl.md \
+		${.CURDIR}/../../../fuzz/yshapes.h \
+		${.CURDIR}/../../../fuzz/yshapes_schema.c
 CTRLDIR=	${TESTSDIR}/ctrl
 # cblink.mk, to build from modules given in each form of path.
 CBLMK=		${.CURDIR}/../../../share/cblink/cblink.mk

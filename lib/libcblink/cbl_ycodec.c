@@ -1255,6 +1255,8 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
 		why[0] = '\0';
 	if (n == NULL || data == NULL || p == NULL || a == NULL)
 		return (EINVAL);
+	/* Zeroed as said: what the value leaves out is not there. */
+	memset(p, 0, n->size);
 	if ((error = dec_map(&r, n, p, 0)) != 0)
 		return (error);
 	if (r.p != r.end)

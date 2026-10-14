@@ -100,6 +100,7 @@ input. They are built with ASan and UBSan, and seeded from `fuzz/corpus/`:
 |---------|-------|
 | `fuzz_frame` | A frame: decoding, the decoder's tree, each top-level item found again at its bytes, and the YANG codec reading it as every control-family input and output, the hello and get structures, a notification, and its error. |
 | `fuzz_proxy` | A PROXY protocol header, read from a socket: the reader must stop exactly at the end of the header. |
+| `fuzz_ycodec` | YANG-CBOR decoded into every struct of the test module `shapes` (every kind of node and type: tags 4 and 43 to 47, deltas from a node's and from an rpc's SID, unions, choices, lists), strictly and not; what decodes validated, encoded, decoded and encoded again to the same bytes, and likewise with its defaults. Its tables are committed (`fuzz/yshapes.*`, `make -C fuzz regen`; `ymod_regen` checks them). |
 | `fuzz_xpath` | An XPath expression: what parses is printed, and the print parses again to the same print. |
 | `fuzz_pattern` | An XSD pattern: the translation to an ERE, compiled by regcomp(3). |
 

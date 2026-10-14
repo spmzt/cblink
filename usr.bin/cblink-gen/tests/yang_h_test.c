@@ -561,6 +561,13 @@ ATF_TC_BODY(rpc_deltas, tc)
 	memset(&got, 0, sizeof(got));
 	ATF_CHECK(shapes_ping_input_decode("\xa1\x01\x05", 3, &got, a,
 	    CBL_YD_STRICT, NULL, 0) != 0 || !got.has_count);
+	/* cbl_ydecode() zeroes the struct: nothing of before stays (as
+	 * fuzz_ycodec found, decoding into one buffer again and again). */
+	memset(&got, 0xa5, sizeof(got));
+	ATF_REQUIRE_EQ(0, cbl_ydecode(cbl_yschema_node(&yangh_schema,
+	    UINT64_C(1099511727785)), "\xa0", 1, &got, a, CBL_YD_STRICT, NULL,
+	    0));
+	ATF_CHECK(!got.has_count);
 	cbl_yarena_free(a);
 	cbl_ybuf_free(&b);
 }

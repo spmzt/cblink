@@ -755,6 +755,16 @@ base64(const char *s, cbl_yarena *a, struct cbl_bytes *b)
 static int	parse_value(const struct cbl_ynode *, const struct cbl_ytype *,
 		    const char *, void *, cbl_yarena *);
 
+int
+cbl_yvalue_parse(const struct cbl_ynode *n, const struct cbl_ytype *t,
+    const char *s, void *out, cbl_yarena *a)
+{
+
+	if (n == NULL || t == NULL || s == NULL || out == NULL)
+		return (EINVAL);
+	return (parse_value(n, t, s, out, a));
+}
+
 static int
 parse_value(const struct cbl_ynode *n, const struct cbl_ytype *t,
     const char *s, void *out, cbl_yarena *a)

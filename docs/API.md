@@ -451,6 +451,13 @@ cbl_dfilter *cbl_dfilter_new(const struct cbl_yschema *);
 int	cbl_dfilter_add(cbl_dfnode *parent, const struct cbl_ynode *,
 	    const void *value, cbl_dfnode **);	/* parent: cbl_dfilter_root() */
 cbl_dtree *cbl_dtree_filter_subtree(const cbl_dtree *, const cbl_dfilter *);
+/* NACM's data-node rule paths: compiled once, matched against nodes */
+cbl_dnacm_path *cbl_dnacm_path_new(const struct cbl_yschema *, const char *path,
+	    char *why, size_t whylen);
+bool	cbl_dnacm_path_match(const cbl_dnacm_path *, const cbl_dnode *,
+	    const char *user);
+bool	cbl_dnacm_path_match_schema(const cbl_dnacm_path *,
+	    const struct cbl_ynode *);
 /* XPath-lite: an expression as the tables hold one, over a tree */
 struct cbl_xval { enum cbl_xv_kind kind; bool b; double num; char *s;
     const cbl_dnode **nodes; size_t n; };	/* NODES, BOOL, NUMBER, STRING */
@@ -504,6 +511,13 @@ void	cbl_xval_free(struct cbl_xval *);
   selection node. Its content match nodes all matching, a node is
   selected whole if it has no other filter nodes under it, else with
   what they match and select; an empty filter selects nothing.
+- **NACM paths**: a data-node rule's `path` (RFC 8341 section 3.4.5) is
+  an instance-identifier whose key predicates may be left out, any
+  entry then, and whose values may be `$USER`; `/` is every node. It is
+  compiled once against the schema, each step to its node and each
+  value to its key's type, and matches the node it names and all below
+  it. An rpc or a notification with no instance is matched by its
+  schema node, which a path with predicates never matches.
 - **A difference** of two trees is the edit that makes the first the
   second with the default none, what a YANG Patch carries: creates of
   what only the second has, merges of the leaves that differ, removes

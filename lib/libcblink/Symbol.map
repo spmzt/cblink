@@ -210,6 +210,10 @@ CBLINK_1.0 {
 	cbl_dnode_op;
 	cbl_dnode_set_where;
 	cbl_dtree_diff;
+	cbl_dnacm_path_free;
+	cbl_dnacm_path_match;
+	cbl_dnacm_path_match_schema;
+	cbl_dnacm_path_new;
 	cbl_dfilter_add;
 	cbl_dfilter_free;
 	cbl_dfilter_new;

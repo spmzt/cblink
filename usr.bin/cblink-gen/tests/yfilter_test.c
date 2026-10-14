@@ -440,6 +440,154 @@ ATF_TC_BODY(xpath, tc)
 	cbl_dtree_free(t);
 }
 
+static cbl_dnacm_path *
+npath(const char *path)
+{
+	cbl_dnacm_path *p;
+	char why[128];
+
+	p = cbl_dnacm_path_new(&yangh_schema, path, why, sizeof(why));
+	ATF_REQUIRE_MSG(p != NULL, "%s: %s", path, why);
+	return (p);
+}
+
+static void
+nrefused(const char *path, const char *msg)
+{
+	char why[128];
+
+	ATF_CHECK(cbl_dnacm_path_new(&yangh_schema, path, why,
+	    sizeof(why)) == NULL);
+	ATF_CHECK_MSG(strstr(why, msg) != NULL, "%s: %s", path, why);
+}
+
+/* The node of tree t expr finds, the one. */
+static const cbl_dnode *
+node(cbl_dtree *t, const char *expr)
+{
+	struct cbl_xval v;
+	const cbl_dnode *n;
+	char why[128];
+
+	ATF_REQUIRE_EQ_MSG(0, cbl_xp_eval(t, expr, NULL, NULL, &v, why,
+	    sizeof(why)), "%s", why);
+	ATF_REQUIRE_EQ_MSG(1u, v.n, "%s", expr);
+	n = v.nodes[0];
+	cbl_xval_free(&v);
+	return (n);
+}
+
+/*
+ * NACM's paths (RFC 8341 section 3.4.5): a node and all below it, a
+ * list's entries by keys or all of them, $USER; a key not a string, a
+ * leaf-list's value; schema nodes; and what is not a
+ * node-instance-identifier refused.
+ */
+ATF_TC_WITHOUT_HEAD(nacm);
+ATF_TC_BODY(nacm, tc)
+{
+	cbl_dtree *t = config();
+	const cbl_dnode *users = node(t, "/filters:top/filters:users");
+	const cbl_dnode *ifs = node(t, "/filters:top/filters:interfaces");
+	const cbl_dnode *fred = node(t, "//filters:user[filters:name = "
+	    "'fred']");
+	const cbl_dnode *fid = node(t, "//filters:user[filters:name = "
+	    "'fred']/filters:company-info/filters:id");
+	const cbl_dnode *rdept = node(t, "//filters:user[filters:name = "
+	    "'root']/filters:company-info/filters:dept");
+	const cbl_dnode *barney = node(t, "//filters:user[filters:name = "
+	    "'barney']");
+	cbl_dnacm_path *p;
+
+	p = npath("/");
+	ATF_CHECK(cbl_dnacm_path_match(p, ifs, NULL));
+	ATF_CHECK(cbl_dnacm_path_match(p, fid, NULL));
+	cbl_dnacm_path_free(p);
+	/* Its module the previous step's. */
+	p = npath("/filters:top/users");
+	ATF_CHECK(cbl_dnacm_path_match(p, users, NULL));
+	ATF_CHECK(cbl_dnacm_path_match(p, fid, NULL));
+	ATF_CHECK(!cbl_dnacm_path_match(p, ifs, NULL));
+	ATF_CHECK(!cbl_dnacm_path_match(p, cbl_dnode_parent(users), NULL));
+	cbl_dnacm_path_free(p);
+	p = npath("/filters:top/filters:users/filters:user[filters:name = "
+	    "'fred']");
+	ATF_CHECK(cbl_dnacm_path_match(p, fred, NULL));
+	ATF_CHECK(cbl_dnacm_path_match(p, fid, NULL));
+	ATF_CHECK(!cbl_dnacm_path_match(p, rdept, NULL));
+	ATF_CHECK(!cbl_dnacm_path_match(p, users, NULL));
+	cbl_dnacm_path_free(p);
+	/* Every entry: the key left out. */
+	p = npath("/filters:top/users/user/company-info/id");
+	ATF_CHECK(cbl_dnacm_path_match(p, fid, NULL));
+	ATF_CHECK(!cbl_dnacm_path_match(p, rdept, NULL));
+	cbl_dnacm_path_free(p);
+	/* $USER: the session's user. */
+	p = npath("/filters:top/users/user[name=$USER]");
+	ATF_CHECK(cbl_dnacm_path_match(p, fid, "fred"));
+	ATF_CHECK(!cbl_dnacm_path_match(p, fid, "barney"));
+	ATF_CHECK(cbl_dnacm_path_match(p, barney, "barney"));
+	ATF_CHECK(!cbl_dnacm_path_match(p, fid, NULL));
+	cbl_dnacm_path_free(p);
+	/* Schema nodes: a path with predicates names none. */
+	p = npath("/filters:top/users");
+	ATF_CHECK(cbl_dnacm_path_match_schema(p, T("/users/user/name")));
+	ATF_CHECK(!cbl_dnacm_path_match_schema(p, T("/interfaces")));
+	cbl_dnacm_path_free(p);
+	p = npath("/filters:top/users/user[name='fred']");
+	ATF_CHECK(!cbl_dnacm_path_match_schema(p, T("/users/user/name")));
+	cbl_dnacm_path_free(p);
+	cbl_dtree_free(t);
+
+	/* A key of uint32, by its value; a leaf-list's value. */
+	{
+		const char *pl = "mix", *tags[] = { "a", "b" };
+		const void *k[1] = { &pl };
+		uint32_t idx[] = { 1, 2 };
+		cbl_dnode *top, *e;
+
+		ATF_REQUIRE((t = cbl_dtree_new(&yangh_schema)) != NULL);
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t),
+		    sn("edits", "top"), NULL, &top));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(top,
+		    sn("edits", "top/playlist"), k, &e));
+		for (int i = 0; i < 2; i++) {
+			const void *ki[1] = { &idx[i] };
+
+			ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(e,
+			    sn("edits", "top/playlist/song"), ki, NULL));
+			ATF_REQUIRE_EQ(0, cbl_dnode_add(top,
+			    sn("edits", "top/tags"), &tags[i], NULL));
+		}
+		p = npath("/edits:top/playlist[name='mix']/song[index='2']");
+		ATF_CHECK(cbl_dnacm_path_match(p, node(t,
+		    "//edits:song[edits:index = 2]/edits:index"), NULL));
+		ATF_CHECK(!cbl_dnacm_path_match(p, node(t,
+		    "//edits:song[edits:index = 1]"), NULL));
+		cbl_dnacm_path_free(p);
+		p = npath("/edits:top/playlist/song[index=2]");
+		ATF_CHECK(cbl_dnacm_path_match(p, node(t,
+		    "//edits:song[edits:index = 2]"), NULL));
+		cbl_dnacm_path_free(p);
+		p = npath("/edits:top/tags[.='b']");
+		ATF_CHECK(cbl_dnacm_path_match(p, node(t,
+		    "//edits:tags[. = 'b']"), NULL));
+		ATF_CHECK(!cbl_dnacm_path_match(p, node(t,
+		    "//edits:tags[. = 'a']"), NULL));
+		cbl_dnacm_path_free(p);
+		cbl_dtree_free(t);
+	}
+
+	nrefused("filters:top", "absolute");
+	nrefused("/top", "no module");
+	nrefused("/filters:top/nothing", "no such node");
+	nrefused("/filters:top/users/user[1]", "key = value");
+	nrefused("/filters:top/users/user[type='x']", "not a key");
+	nrefused("/filters:top/users/user[name=$OTHER]", "variable");
+	nrefused("/edits:top/playlist/song[index='two']", "not a value");
+	nrefused("/filters:top/users/user[", "at ");
+}
+
 /* A filter node is a child of its parent's; a value, a leaf's. */
 ATF_TC_WITHOUT_HEAD(refused);
 ATF_TC_BODY(refused, tc)
@@ -468,6 +616,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, rfc6241_interface);
 	ATF_TP_ADD_TC(tp, content_match);
 	ATF_TP_ADD_TC(tp, xpath);
+	ATF_TP_ADD_TC(tp, nacm);
 	ATF_TP_ADD_TC(tp, refused);
 	return (atf_no_error());
 }

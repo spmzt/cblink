@@ -22,6 +22,13 @@
 bool	cbl_ypresent(const struct cbl_ynode *n, const void *p);
 /* n's case, and its choices', set in struct p; EINVAL: another's is. */
 int	cbl_yset_case(const struct cbl_ynode *n, void *p);
+/*
+ * A value of type t, leaf or leaf-list n's, from its canonical string s
+ * into out, as its member is (what it points to in a; a string's, s
+ * itself).  EOPNOTSUPP: a type not read from a string.
+ */
+int	cbl_yvalue_parse(const struct cbl_ynode *n, const struct cbl_ytype *t,
+	    const char *s, void *out, cbl_yarena *a);
 /* Leaf or leaf-list n's k-th default into out, as its member is. */
 int	cbl_ydefault_parse(const struct cbl_ynode *n, uint16_t k, void *out,
 	    cbl_yarena *a);

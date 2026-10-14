@@ -250,6 +250,26 @@ cbl_dtree	*cbl_dtree_filter_subtree(const cbl_dtree *t,
 		    const cbl_dfilter *f);
 
 /*
+ * NACM's data-node rule paths (RFC 8341 section 3.4.5): path, a
+ * node-instance-identifier (an instance-identifier whose key predicates
+ * may be left out, and whose values may be $USER; "/", every node), each
+ * name by its module, compiled for schema s (NULL, errno and why on
+ * failure).  It matches node n if it names n or a node above it, $USER
+ * being user (NULL: no predicate of $USER holds); schema node sn, an
+ * rpc's or a notification's that has no instance, likewise, a path with
+ * predicates never.
+ */
+typedef struct cbl_dnacm_path cbl_dnacm_path;
+
+cbl_dnacm_path	*cbl_dnacm_path_new(const struct cbl_yschema *s,
+		    const char *path, char *why, size_t whylen);
+void		 cbl_dnacm_path_free(cbl_dnacm_path *p);
+bool		 cbl_dnacm_path_match(const cbl_dnacm_path *p,
+		    const cbl_dnode *n, const char *user);
+bool		 cbl_dnacm_path_match_schema(const cbl_dnacm_path *p,
+		    const struct cbl_ynode *sn);
+
+/*
  * XPath-lite (YANG.md section 5) over a tree: expr, as the tables hold
  * one (its names by module), evaluated with context node ctx (NULL: the
  * root) and current node cur (NULL: ctx), current()'s.  The value is a

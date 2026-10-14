@@ -30,6 +30,8 @@ struct cbl_dnode {
 	uint64_t		 hash;
 	uint16_t		 flags;
 	uint8_t			 op;		/* an edit's, CBL_DOP_*; 0: its parent's */
+	uint8_t			 where;		/* and its CBL_DWHERE_*, or 0 */
+	void			**point;	/* before or after: its keys, or value */
 	void			*value;
 };
 

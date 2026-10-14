@@ -2,6 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "edits",
     "module-revision": "2026-10-14",
+    "sid-file-version": 1,
     "description": "cblink's test module of the instance tree's edits: 2^40 + 300 000, never on a wire.",
     "assignment-range": [
       {
@@ -119,6 +120,31 @@
         "namespace": "data",
         "identifier": "/edits:top/tags",
         "sid": "1099511927797"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/playlist",
+        "sid": "1099511927798"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/playlist/name",
+        "sid": "1099511927799"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/playlist/song",
+        "sid": "1099511927800"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/playlist/song/id",
+        "sid": "1099511927801"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/edits:top/playlist/song/index",
+        "sid": "1099511927802"
       }
     ]
   }

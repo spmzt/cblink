@@ -158,6 +158,21 @@ int		 cbl_dtree_to_module(const cbl_dtree *t,
 #define	CBL_DOP_DELETE		4
 #define	CBL_DOP_REMOVE		5
 #define	CBL_DOP_NONE		6	/* a default only */
+#define	CBL_DOP_INSERT		7	/* YANG Patch: a create, where said */
+#define	CBL_DOP_MOVE		8	/* YANG Patch: one there, moved */
+
+/*
+ * Where an ordered-by user list's entry or leaf-list's value goes (RFC
+ * 7950 section 7.8.6, RFC 8072 section 2.5): first, last, or before or
+ * after the one whose keys, or value, point gives (point[k] a key's
+ * value, point[0] a leaf-list's), copied.  A merge, replace or create
+ * puts its node there, an insert or a move must have one.  An entry not
+ * there to be put before or after is bad-attribute, missing-instance.
+ */
+#define	CBL_DWHERE_FIRST	1
+#define	CBL_DWHERE_LAST		2
+#define	CBL_DWHERE_BEFORE	3
+#define	CBL_DWHERE_AFTER	4
 
 struct cbl_dederr {
 	const cbl_dnode	*node;
@@ -167,6 +182,8 @@ struct cbl_dederr {
 
 int		 cbl_dnode_set_op(cbl_dnode *n, int op);
 int		 cbl_dnode_op(const cbl_dnode *n);
+int		 cbl_dnode_set_where(cbl_dnode *n, int where,
+		    const void *const *point);
 int		 cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit,
 		    int dflt, struct cbl_dederr *err);
 

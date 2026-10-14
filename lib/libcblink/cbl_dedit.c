@@ -14,7 +14,10 @@
  * where it was, until the edit is done), a value replaced (the old one
  * kept); where one fails, the log is played back, last first, and the
  * target is as it was.  A node of a choice's case takes the place of
- * the other cases' (RFC 7950 section 7.9.2).
+ * the other cases' (RFC 7950 section 7.9.2).  An ordered-by user list's
+ * entry, or leaf-list's value, goes where its edit says (RFC 7950
+ * section 7.8.6; YANG Patch's insert and move, RFC 8072), each move
+ * logged with where it was.
  */
 
 #include <sys/param.h>
@@ -29,13 +32,13 @@
 #include "cbl_data.h"
 #include "cbl_dimpl.h"
 
-enum ulkind { UL_ADDED, UL_REMOVED, UL_VALUE };
+enum ulkind { UL_ADDED, UL_REMOVED, UL_VALUE, UL_MOVED };
 
 struct ul {
 	enum ulkind	 kind;
 	cbl_dnode	*n;
 	cbl_dnode	*parent;	/* removed: where it was */
-	cbl_dnode	*prev;
+	cbl_dnode	*prev;		/* removed, moved: after what */
 	void		*old;		/* value: the one replaced */
 	uint16_t	 oflags;
 };
@@ -179,6 +182,63 @@ make(struct edit *e, cbl_dnode *tn, const cbl_dnode *en, cbl_dnode **out)
 	return (added(e, *out));
 }
 
+/* The entry of tn that en's point names: by its keys, or its value. */
+static cbl_dnode *
+pointed(const cbl_dnode *tn, const cbl_dnode *en)
+{
+
+	if (en->sn->kind == CBL_YN_LIST)
+		return (cbl_dnode_entry(tn, en->sn,
+		    (const void *const *)en->point));
+	return (cbl_dnode_llentry(tn, en->sn, en->point[0]));
+}
+
+/* x, made or there for edit node en, put where en says, the move logged. */
+static int
+place(struct edit *e, cbl_dnode *x, const cbl_dnode *en)
+{
+	struct ul u = { .kind = UL_MOVED, .n = x, .prev = x->prev };
+	cbl_dnode *tn = x->parent, *pe, *after, *k;
+	int error;
+
+	if (en->where == 0)
+		return (0);
+	if ((en->sn->flags & CBL_YNF_USERORDER) == 0)
+		return (fail(e, en, "bad-attribute", EINVAL,
+		    "%s: ordered by the system, not where said",
+		    en->sn->name));
+	switch (en->where) {
+	case CBL_DWHERE_FIRST:
+		/* Before the first of its kind. */
+		k = cbl_dnode_child(tn, x->sn);
+		after = k == x ? x->prev : k->prev;
+		break;
+	case CBL_DWHERE_LAST:
+		for (k = x; k->next != NULL && k->next->sn == x->sn;)
+			k = k->next;
+		after = k;
+		break;
+	default:
+		if ((pe = pointed(tn, en)) == NULL)
+			return (fail(e, en, "bad-attribute", ENOENT,
+			    "%s: missing-instance, no entry to go %s",
+			    en->sn->name, en->where == CBL_DWHERE_BEFORE ?
+			    "before" : "after"));
+		if (pe == x)
+			return (fail(e, en, "bad-attribute", EINVAL,
+			    "%s: before or after itself", en->sn->name));
+		after = en->where == CBL_DWHERE_AFTER ? pe :
+		    pe->prev == x ? x->prev : pe->prev;
+		break;
+	}
+	if (after == x || x->prev == after)
+		return (0);
+	if ((error = logged(e, &u)) != 0)
+		return (error);
+	cbl_d_move_after(x, after);
+	return (0);
+}
+
 static int	apply(struct edit *, cbl_dnode *, const cbl_dnode *, int, int);
 
 /* en's children applied to tn's, each with op unless its own. */
@@ -238,6 +298,11 @@ apply(struct edit *e, cbl_dnode *tn, const cbl_dnode *en, int op, int depth)
 		op = en->op;
 	x = match(tn, en);
 	switch (op) {
+	case CBL_DOP_INSERT:
+		if (en->where == 0)
+			return (fail(e, en, "missing-attribute", EINVAL,
+			    "%s: insert, but where", en->sn->name));
+		/* FALLTHROUGH */
 	case CBL_DOP_CREATE:
 		if (x != NULL)
 			return (fail(e, en, "data-exists", EEXIST,
@@ -249,9 +314,18 @@ apply(struct edit *e, cbl_dnode *tn, const cbl_dnode *en, int op, int depth)
 		if (en->sn->kind == CBL_YN_LEAF &&
 		    (error = revalue(e, x, en->value)) != 0)
 			return (error);
-		/* Below a create, what is not there is made: a merge. */
-		return (apply_children(e, x, en, op == CBL_DOP_CREATE ?
-		    CBL_DOP_MERGE : op, depth));
+		if ((error = place(e, x, en)) != 0)
+			return (error);
+		/* Below, what is not there is made: a merge. */
+		return (apply_children(e, x, en, CBL_DOP_MERGE, depth));
+	case CBL_DOP_MOVE:
+		if (en->where == 0)
+			return (fail(e, en, "missing-attribute", EINVAL,
+			    "%s: move, but where", en->sn->name));
+		if (x == NULL)
+			return (fail(e, en, "data-missing", ENOENT,
+			    "%s: not there to move", en->sn->name));
+		return (place(e, x, en));
 	case CBL_DOP_REPLACE: {
 		cbl_dnode *prev = NULL;
 		bool had = x != NULL;
@@ -266,6 +340,8 @@ apply(struct edit *e, cbl_dnode *tn, const cbl_dnode *en, int op, int depth)
 			return (error);
 		if (had)
 			cbl_d_move_after(x, prev);
+		if ((error = place(e, x, en)) != 0)
+			return (error);
 		return (apply_children(e, x, en, CBL_DOP_MERGE, depth));
 	}
 	case CBL_DOP_DELETE:
@@ -306,6 +382,9 @@ undo(struct edit *e)
 			cbl_d_free_value(u->n);
 			u->n->value = u->old;
 			u->n->flags = u->oflags;
+			break;
+		case UL_MOVED:
+			cbl_d_move_after(u->n, u->prev);
 			break;
 		}
 	}

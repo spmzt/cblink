@@ -283,9 +283,78 @@ int
 cbl_dnode_set_op(cbl_dnode *n, int op)
 {
 
-	if (n == NULL || n->sn == NULL || op < 0 || op > CBL_DOP_REMOVE)
+	if (n == NULL || n->sn == NULL || op < 0 || op > CBL_DOP_MOVE ||
+	    op == CBL_DOP_NONE)
 		return (EINVAL);
 	n->op = (uint8_t)op;
+	return (0);
+}
+
+/* The types of what a point gives: a list's keys, a leaf-list's value. */
+static const struct cbl_ytype *
+point_type(const struct cbl_ynode *sn, uint16_t k)
+{
+
+	return (sn->kind == CBL_YN_LIST ? sn->child[sn->keys[k]]->type :
+	    sn->type);
+}
+
+static uint16_t
+point_n(const struct cbl_ynode *sn)
+{
+
+	return (sn->kind == CBL_YN_LIST ? sn->nkeys : 1);
+}
+
+static void
+point_free(cbl_dnode *n)
+{
+
+	if (n->point == NULL)
+		return;
+	for (uint16_t k = 0; k < point_n(n->sn); k++)
+		if (n->point[k] != NULL) {
+			vfree(point_type(n->sn, k), n->point[k]);
+			free(n->point[k]);
+		}
+	free(n->point);
+	n->point = NULL;
+}
+
+int
+cbl_dnode_set_where(cbl_dnode *n, int where, const void *const *point)
+{
+	const struct cbl_ytype *t;
+	uint16_t np;
+	void **p;
+	int error;
+
+	if (n == NULL || n->sn == NULL || where < 0 ||
+	    where > CBL_DWHERE_AFTER ||
+	    (n->sn->kind != CBL_YN_LIST && n->sn->kind != CBL_YN_LEAFLIST) ||
+	    ((where == CBL_DWHERE_BEFORE || where == CBL_DWHERE_AFTER) !=
+	    (point != NULL)))
+		return (EINVAL);
+	point_free(n);
+	n->where = (uint8_t)where;
+	if (point == NULL)
+		return (0);
+	np = point_n(n->sn);
+	if ((p = calloc(np, sizeof(*p))) == NULL)
+		return (ENOMEM);
+	n->point = p;
+	for (uint16_t k = 0; k < np; k++) {
+		t = point_type(n->sn, k);
+		if (point[k] == NULL ||
+		    (p[k] = calloc(1, t->csize > 0 ? t->csize : 1)) == NULL ||
+		    (error = vcopy(t, p[k], point[k])) != 0) {
+			free(p[k]);
+			p[k] = NULL;
+			point_free(n);
+			n->where = 0;
+			return (point[k] == NULL ? EINVAL : ENOMEM);
+		}
+	}
 	return (0);
 }
 
@@ -573,6 +642,7 @@ free_node(cbl_dnode *n)
 	if (indexed(n))
 		index_remove(n->tree, n);
 	cbl_d_free_value(n);
+	point_free(n);
 	free(n->head);
 	free(n->tail);
 	if (n != &n->tree->root)

@@ -11,11 +11,14 @@
  * none); create where there is one, delete where there is none, remove
  * either way; none through what is not there; a choice's case taking the
  * other's place; leaf-lists and an ordered list; and an edit that fails
- * halfway leaving the target as it was.  A tree's state is compared by
- * its YANG-CBOR.
+ * halfway leaving the target as it was.  RFC 8072's (YANG Patch): songs
+ * of a playlist ordered by the user inserted and moved, first, last,
+ * before and after another.  A tree's state is compared by its
+ * YANG-CBOR.
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <atf-c.h>
@@ -400,6 +403,144 @@ ATF_TC_BODY(lists, tc)
 	cbl_dtree_free(t);
 }
 
+/* A playlist's song, its index the key. */
+static cbl_dnode *
+song(cbl_dnode *pl, uint32_t index)
+{
+	const void *keys[1] = { &index };
+	cbl_dnode *e;
+
+	if ((e = cbl_dnode_entry(pl, sn("top/playlist/song"), keys)) == NULL)
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(pl,
+		    sn("top/playlist/song"), keys, &e));
+	return (e);
+}
+
+static cbl_dnode *
+playlist(cbl_dtree *t, const char *name)
+{
+
+	return (entry(top(t), "top/playlist", name));
+}
+
+/* The songs' indexes, in order, as "1 2 3". */
+static const char *
+songs(cbl_dtree *t)
+{
+	static char buf[128];
+	cbl_dnode *pl = playlist(t, "Foo-One"), *x;
+	size_t n = 0;
+
+	buf[0] = '\0';
+	for (x = cbl_dnode_child(pl, sn("top/playlist/song")); x != NULL &&
+	    cbl_dnode_schema(x) == sn("top/playlist/song");
+	    x = cbl_dnode_next(x))
+		n += (size_t)snprintf(buf + n, sizeof(buf) - n, "%s%u",
+		    n > 0 ? " " : "",
+		    *(const uint32_t *)cbl_dnode_value(cbl_dnode_first(x)));
+	return (buf);
+}
+
+/* A one-node edit: a song of Foo-One with op and where. */
+static cbl_dtree *
+song_edit(uint32_t index, int op, int where, const uint32_t *point)
+{
+	const void *pt[1] = { point };
+	cbl_dtree *e = tree();
+	cbl_dnode *x = song(playlist(e, "Foo-One"), index);
+
+	ATF_REQUIRE_EQ(0, cbl_dnode_set_op(x, op));
+	if (where != 0)
+		ATF_REQUIRE_EQ(0, cbl_dnode_set_where(x, where,
+		    point != NULL ? pt : NULL));
+	return (e);
+}
+
+static int
+apply1(cbl_dtree *t, cbl_dtree *e, struct cbl_dederr *err)
+{
+	int error = cbl_dtree_edit(t, e, CBL_DOP_MERGE, err);
+
+	cbl_dtree_free(e);
+	return (error);
+}
+
+ATF_TC_WITHOUT_HEAD(rfc8072);
+ATF_TC_BODY(rfc8072, tc)
+{
+	struct cbl_dederr err;
+	uint32_t one = 1, two = 2, three = 3, nine = 9;
+	cbl_dtree *t, *e;
+	cbl_dnode *pl;
+
+	t = tree();
+	pl = playlist(t, "Foo-One");
+	song(pl, 1);
+	song(pl, 2);
+	song(pl, 3);
+	ATF_CHECK_STREQ("1 2 3", songs(t));
+	/* Insert a song after another (A.1.3's), and move one after
+	 * another (A.1.4's). */
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(5, CBL_DOP_INSERT,
+	    CBL_DWHERE_AFTER, &two), &err));
+	ATF_CHECK_STREQ("1 2 5 3", songs(t));
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(1, CBL_DOP_MOVE,
+	    CBL_DWHERE_AFTER, &three), &err));
+	ATF_CHECK_STREQ("2 5 3 1", songs(t));
+	/* First, last, before; a merge that says where moves what is
+	 * there; a move where it already is changes nothing. */
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(6, CBL_DOP_INSERT,
+	    CBL_DWHERE_FIRST, NULL), &err));
+	ATF_CHECK_STREQ("6 2 5 3 1", songs(t));
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(6, CBL_DOP_MOVE,
+	    CBL_DWHERE_LAST, NULL), &err));
+	ATF_CHECK_STREQ("2 5 3 1 6", songs(t));
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(3, CBL_DOP_MERGE,
+	    CBL_DWHERE_BEFORE, &two), &err));
+	ATF_CHECK_STREQ("3 2 5 1 6", songs(t));
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(2, CBL_DOP_MOVE,
+	    CBL_DWHERE_BEFORE, &one), &err));
+	ATF_CHECK_STREQ("3 5 2 1 6", songs(t));
+	ATF_REQUIRE_EQ(0, apply1(t, song_edit(2, CBL_DOP_MOVE,
+	    CBL_DWHERE_BEFORE, &one), &err));
+	ATF_CHECK_STREQ("3 5 2 1 6", songs(t));
+
+	/* Refused: insert of one there (A.1.1's data-exists); before one
+	 * not there; a move of one not there; where on a list the system
+	 * orders. */
+	ATF_CHECK_EQ(EEXIST, apply1(t, song_edit(5, CBL_DOP_INSERT,
+	    CBL_DWHERE_LAST, NULL), &err));
+	ATF_CHECK_STREQ("data-exists", err.tag);
+	ATF_CHECK_EQ(ENOENT, apply1(t, song_edit(7, CBL_DOP_INSERT,
+	    CBL_DWHERE_BEFORE, &nine), &err));
+	ATF_CHECK_STREQ("bad-attribute", err.tag);
+	ATF_CHECK(strstr(err.msg, "missing-instance") != NULL);
+	ATF_CHECK_EQ(ENOENT, apply1(t, song_edit(9, CBL_DOP_MOVE,
+	    CBL_DWHERE_FIRST, NULL), &err));
+	ATF_CHECK_STREQ("data-missing", err.tag);
+	e = tree();
+	ATF_REQUIRE_EQ(0, cbl_dnode_set_op(playlist(e, "Bar"),
+	    CBL_DOP_CREATE));
+	ATF_CHECK_EQ(EINVAL, cbl_dnode_set_where(playlist(e, "Bar"),
+	    CBL_DWHERE_AFTER, NULL));
+	ATF_REQUIRE_EQ(0, cbl_dnode_set_where(playlist(e, "Bar"),
+	    CBL_DWHERE_FIRST, NULL));
+	ATF_CHECK_EQ(EINVAL, apply1(t, e, &err));
+	ATF_CHECK_STREQ("bad-attribute", err.tag);
+	ATF_CHECK_STREQ("3 5 2 1 6", songs(t));
+
+	/* Moves undone with the rest when a later change fails. */
+	e = song_edit(6, CBL_DOP_MOVE, CBL_DWHERE_FIRST, NULL);
+	song(playlist(e, "Foo-One"), 1);
+	ATF_REQUIRE_EQ(0, cbl_dnode_set_where(song(playlist(e, "Foo-One"), 1),
+	    CBL_DWHERE_AFTER, (const void *[]){ &three }));
+	ATF_REQUIRE_EQ(0, cbl_dnode_set_op(iface(e, "Ethernet9/9", 0),
+	    CBL_DOP_DELETE));
+	ATF_CHECK_EQ(ENOENT, apply1(t, e, &err));
+	ATF_CHECK_STREQ("3 5 2 1 6", songs(t));
+	cbl_dtree_free(t);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -408,5 +549,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, atomic);
 	ATF_TP_ADD_TC(tp, choice);
 	ATF_TP_ADD_TC(tp, lists);
+	ATF_TP_ADD_TC(tp, rfc8072);
 	return (atf_no_error());
 }

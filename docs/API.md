@@ -429,8 +429,11 @@ int	cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *, const void *, 
 	    int flags, char *why, size_t whylen, cbl_dnode **out);
 int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
 /* edits (RFC 6241 section 7.2): all or nothing */
-#define	CBL_DOP_MERGE	1	/* and REPLACE, CREATE, DELETE, REMOVE; NONE, a default */
+#define	CBL_DOP_MERGE	1	/* and REPLACE, CREATE, DELETE, REMOVE; NONE, a default;
+				   INSERT and MOVE, YANG Patch's */
 int	cbl_dnode_set_op(cbl_dnode *, int op);	/* 0: its parent's */
+#define	CBL_DWHERE_FIRST 1	/* and LAST, BEFORE, AFTER */
+int	cbl_dnode_set_where(cbl_dnode *, int where, const void *const *point);
 struct cbl_dederr { const cbl_dnode *node; const char *tag; char msg[160]; };
 int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
 	    struct cbl_dederr *);
@@ -453,7 +456,11 @@ int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
   operation or its parent's: merge, replace, create (data-exists where
   the node is), delete (data-missing where it is not), remove; the
   default none changes nothing not asked for. A node of a choice's case
-  takes the other cases' place; a replaced entry keeps its place. Every
+  takes the other cases' place; a replaced entry keeps its place. An
+  ordered-by user list's entry, or leaf-list's value, goes where its
+  edit says: first, last, or before or after another, by its keys or
+  value (RFC 7950 section 7.8.6); YANG Patch's insert and move (RFC 8072)
+  must say where, and a move's entry must be there. Every
   change goes in an undo log as it is made, played back on an error:
   the target is as it was, and the error names the edit's node, its
   error-tag and why.

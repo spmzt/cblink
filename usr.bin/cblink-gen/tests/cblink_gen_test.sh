@@ -338,6 +338,18 @@ sid_cbor_body()
 	# Read as the file, verified as the file.
 	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n \
 	    -s one/ietf-system@2014-08-06.sid.cbor "$m"
+	# A file numbers every item of its module, whatever features a
+	# program enables (RFC 9595): read with them all off, numbered with
+	# them all off as with them on, and the tables made without them.
+	atf_check -o match:', 81 SIDs from 1 .sid files$' $gen -n \
+	    -F ietf-system: -s full.sid "$m"
+	cat "$y/ietf-system@2014-08-06.sid" > nofeat.sid
+	atf_check -o ignore $gen -n -a -F ietf-system: -s nofeat.sid "$m"
+	atf_check cmp nofeat.sid full.sid
+	mkdir four
+	atf_check -o ignore $gen -m h,schema -b sys -o four -F ietf-system: \
+	    -s full.sid "$m"
+	atf_check -o not-match:'radius' cat four/sys.h
 	# A .sid file with a status per item and a file status.
 	awk '{ print }
 	    /"sid-file-version": 1,/ {

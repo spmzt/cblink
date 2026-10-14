@@ -73,10 +73,12 @@ void		 sid_free(struct sidfile *f);
 /*
  * Give the schema's items their SIDs from f: the module, its identities
  * and features, and the data nodes it defines, by schema node path.
- * Items of f the schema does not have are diagnostics.
+ * Items of f the schema does not have are diagnostics, unless absent_ok:
+ * a schema compiled with some features off lacks what they guard, which
+ * the file numbers all the same (RFC 9595: every item of the module).
  */
 int		 sid_attach(struct schema *s, const struct sidfile *f,
-		    struct diags *d);
+		    struct diags *d, bool absent_ok);
 
 /*
  * Verify f against the schema, after sid_attach(): no SID given twice,

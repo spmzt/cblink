@@ -46,7 +46,11 @@ modules ──▶ libyang ──▶ schema model ──▶ .sid files ──▶ 
   item of the module with one, empty `input` and `output` included).
   `-a` numbers the items that have none, as RFC 9595 Appendix B says, and
   rewrites the file: by namespace (module, identities, features, data),
-  each in identifier order, from the file's assignment ranges.
+  each in identifier order, from the file's assignment ranges. A file
+  numbers every item of its module, whatever features a program enables:
+  with `-F`, the files are verified and numbered against the modules
+  compiled again with every feature on, and attached to what `-F`
+  leaves.
 - **All problems at once.** Errors are reported as
   `file:line:column: error: message` and collected up to a limit, so one
   run shows every mistake. Nothing is written if there is any error.

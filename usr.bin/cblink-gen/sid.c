@@ -322,7 +322,8 @@ find_structure(struct smodule *m, const char *path)
 }
 
 int
-sid_attach(struct schema *s, const struct sidfile *f, struct diags *d)
+sid_attach(struct schema *s, const struct sidfile *f, struct diags *d,
+    bool absent_ok)
 {
 	struct smodule *m;
 	struct attach a;
@@ -370,7 +371,7 @@ sid_attach(struct schema *s, const struct sidfile *f, struct diags *d)
 			break;
 		}
 		/* An obsolete item may name what the schema no longer has. */
-		if (!found && it->status != SID_ST_OBSOLETE)
+		if (!found && it->status != SID_ST_OBSOLETE && !absent_ok)
 			diag_add(d, 0, 0, "%s %s: not in %s", sid_ns_name(it->ns),
 			    it->id, m->name);
 	}

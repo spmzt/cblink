@@ -5,13 +5,16 @@
 #
 # The first stage builds the tree, runs the test suite (a failing test
 # fails the build; set CBLINK_TESTS=no to skip it) and installs the
-# runtime files; the second has only those and libcbor.
+# runtime files; the second has only those, libcbor, and libyang3, which
+# cblink-gen compiles modules with (yanglint, which the tests set its
+# trees beside, comes with it).
 
 FROM ghcr.io/spmzt/freebsd-base:latest AS build
 ARG CBLINK_TESTS=yes
 RUN pkg install -y FreeBSD-clang FreeBSD-lld FreeBSD-toolchain \
         FreeBSD-clibs-dev FreeBSD-openssl-dev FreeBSD-atf FreeBSD-atf-dev \
-        FreeBSD-kyua FreeBSD-libcasper-dev FreeBSD-utilities-dev libcbor && \
+        FreeBSD-kyua FreeBSD-libcasper-dev FreeBSD-utilities-dev libcbor \
+        libyang3 && \
     pkg clean -ay
 COPY . /usr/src/cblink
 WORKDIR /usr/src/cblink
@@ -32,7 +35,7 @@ LABEL org.opencontainers.image.source="https://github.com/spmzt/cblink" \
     org.opencontainers.image.description="Netlink-style messaging over CBOR for FreeBSD userland: libcblink and cblink-gen" \
     org.opencontainers.image.licenses="BSD-2-Clause" \
     org.opencontainers.image.authors="spmzt"
-RUN pkg install -y libcbor && \
+RUN pkg install -y libcbor libyang3 && \
     pkg clean -ay && \
     rm -rf /var/db/pkg/repos/*
 COPY --from=build /dist/usr/local/ /usr/local/

@@ -174,11 +174,12 @@ ATF_TC_BODY(tables, tc)
 	size_t nodes = 0;
 	regex_t re;
 
-	ATF_REQUIRE_EQ(6u, yangh_schema.nmod);
+	ATF_REQUIRE_EQ(7u, yangh_schema.nmod);
 	ATF_REQUIRE((sh = module("shapes")) != NULL);
 	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
 	ATF_REQUIRE(module("ietf-sid-file") != NULL);
 	ATF_REQUIRE(module("edits") != NULL);
+	ATF_REQUIRE(module("wdexample") != NULL);
 	for (uint32_t i = 0; i < yangh_schema.nmod; i++)
 		for (uint32_t j = 0; j < yangh_schema.mod[i]->ntop; j++) {
 			if (j > 0)

@@ -8,7 +8,9 @@
  * Filters over the instance tree (cbl_data.h): RFC 6241 section 6.4's
  * subtree filter examples on its configuration (the test module
  * filters), each output as the RFC has it; XPath filters (section 8.9)
- * selecting the same; and what a filter may not be refused.
+ * selecting the same; and what a filter may not be refused.  RFC 6243's
+ * retrieval modes on its Appendix A's data (the test module wdexample),
+ * each as the RFC's examples have it.
  */
 
 #include <sys/param.h>
@@ -711,6 +713,182 @@ ATF_TC_BODY(refused, tc)
 	cbl_dfilter_free(f);
 }
 
+/*
+ * RFC 6243's data set (A.2): eth1's mtu not set, the server's default;
+ * eth3's set to the default by a client.  The RFC's status "up" is no
+ * value of its enumeration: ok, the default, as its trim example, which
+ * leaves it out, has it.
+ */
+#define	W(path)	sn("wdexample", path)
+#define	WD_OK		0
+#define	WD_WAKING	1
+#define	WD_NOT_SO_GOOD	2
+
+static cbl_dtree *
+wd_data(void)
+{
+	static const struct {
+		const char	*name;
+		uint32_t	 mtu;		/* 0: not set */
+		int32_t		 status;
+	} e[] = {
+		{ "eth0", 8192, WD_OK },
+		{ "eth1", 0, WD_OK },
+		{ "eth2", 9000, WD_NOT_SO_GOOD },
+		{ "eth3", 1500, WD_WAKING },
+	};
+	cbl_dnode *ifs, *x;
+	cbl_dtree *t;
+
+	ATF_REQUIRE((t = cbl_dtree_new(&yangh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t), W("interfaces"),
+	    NULL, &ifs));
+	for (size_t i = 0; i < nitems(e); i++) {
+		const void *keys[1] = { &e[i].name };
+
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(ifs,
+		    W("interfaces/interface"), keys, &x));
+		if (e[i].mtu != 0)
+			ATF_REQUIRE_EQ(0, cbl_dnode_add(x,
+			    W("interfaces/interface/mtu"), &e[i].mtu, NULL));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(x,
+		    W("interfaces/interface/status"), &e[i].status, NULL));
+	}
+	return (t);
+}
+
+/*
+ * The tree in mode; then, as the RFC's examples ask for the example's
+ * data alone, the other test modules' (whose defaults report-all made
+ * too) taken out.
+ */
+static cbl_dtree *
+wd(cbl_dtree *t, int mode)
+{
+	cbl_dnode *x, *next;
+
+	ATF_REQUIRE_EQ_MSG(0, cbl_dtree_with_defaults(cbl_dtree_root(t),
+	    mode), "%s", strerror(errno));
+	for (x = cbl_dnode_first(cbl_dtree_root(t)); x != NULL; x = next) {
+		next = cbl_dnode_next(x);
+		if (cbl_dnode_schema(x) != W("interfaces") &&
+		    cbl_dnode_schema(x) != W("settings"))
+			ATF_REQUIRE_EQ(0, cbl_dnode_remove(x));
+	}
+	return (t);
+}
+
+#define	WD_IF(n)	"/interfaces/interface[" n "]"
+#define	WD_SETTINGS	"/settings/resolver 192.0.2.53\n" \
+			"/settings/resolver 198.51.100.53\n" \
+			"/settings/retries 3\n"
+static const char wd_all[] =
+    WD_IF("eth0") "/name eth0\n" WD_IF("eth0") "/mtu 8192\n"
+    WD_IF("eth0") "/status ok\n"
+    WD_IF("eth1") "/name eth1\n" WD_IF("eth1") "/mtu 1500\n"
+    WD_IF("eth1") "/status ok\n"
+    WD_IF("eth2") "/name eth2\n" WD_IF("eth2") "/mtu 9000\n"
+    WD_IF("eth2") "/status not feeling so good\n"
+    WD_IF("eth3") "/name eth3\n" WD_IF("eth3") "/mtu 1500\n"
+    WD_IF("eth3") "/status waking up\n";
+static const char wd_trim[] =
+    WD_IF("eth0") "/name eth0\n" WD_IF("eth0") "/mtu 8192\n"
+    WD_IF("eth1") "/name eth1\n"
+    WD_IF("eth2") "/name eth2\n" WD_IF("eth2") "/mtu 9000\n"
+    WD_IF("eth2") "/status not feeling so good\n"
+    WD_IF("eth3") "/name eth3\n"
+    WD_IF("eth3") "/status waking up\n";
+static const char wd_explicit[] =
+    WD_IF("eth0") "/name eth0\n" WD_IF("eth0") "/mtu 8192\n"
+    WD_IF("eth0") "/status ok\n"
+    WD_IF("eth1") "/name eth1\n"
+    WD_IF("eth1") "/status ok\n"
+    WD_IF("eth2") "/name eth2\n" WD_IF("eth2") "/mtu 9000\n"
+    WD_IF("eth2") "/status not feeling so good\n"
+    WD_IF("eth3") "/name eth3\n" WD_IF("eth3") "/mtu 1500\n"
+    WD_IF("eth3") "/status waking up\n";
+
+/* A.3.1, A.3.3, A.3.4: report-all (settings' defaults too: the RFC's
+ * module has none), trim, explicit. */
+ATF_TC_WITHOUT_HEAD(rfc6243);
+ATF_TC_BODY(rfc6243, tc)
+{
+	char all[sizeof(wd_all) + sizeof(WD_SETTINGS)];
+
+	snprintf(all, sizeof(all), "%s%s", wd_all, WD_SETTINGS);
+	check_out(wd(wd_data(), CBL_WD_REPORT_ALL), all);
+	check_out(wd(wd_data(), CBL_WD_TRIM), wd_trim);
+	check_out(wd(wd_data(), CBL_WD_EXPLICIT), wd_explicit);
+}
+
+/*
+ * A datastore that has made its defaults: reported as the same, the
+ * defaults made (eth1's mtu, settings and all in it) taken out, the
+ * container that held them too; report-all twice the same.
+ */
+ATF_TC_WITHOUT_HEAD(wd_made);
+ATF_TC_BODY(wd_made, tc)
+{
+	char all[sizeof(wd_all) + sizeof(WD_SETTINGS)];
+
+	snprintf(all, sizeof(all), "%s%s", wd_all, WD_SETTINGS);
+	check_out(wd(wd(wd_data(), CBL_WD_REPORT_ALL), CBL_WD_REPORT_ALL),
+	    all);
+	check_out(wd(wd(wd_data(), CBL_WD_REPORT_ALL), CBL_WD_TRIM),
+	    wd_trim);
+	check_out(wd(wd(wd_data(), CBL_WD_REPORT_ALL), CBL_WD_EXPLICIT),
+	    wd_explicit);
+}
+
+/*
+ * A leaf-list a client set: to its defaults, all of them in order,
+ * trimmed whole, and the container then empty with it; to some of them
+ * only, kept.  explicit keeps both.
+ */
+static cbl_dtree *
+wd_settings(int nres, uint8_t retries)
+{
+	const char *res[] = { "192.0.2.53", "198.51.100.53" };
+	cbl_dnode *st;
+	cbl_dtree *t;
+
+	ATF_REQUIRE((t = cbl_dtree_new(&yangh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t), W("settings"),
+	    NULL, &st));
+	for (int i = 0; i < nres; i++)
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(st, W("settings/resolver"),
+		    &res[i], NULL));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(st, W("settings/retries"), &retries,
+	    NULL));
+	return (t);
+}
+
+ATF_TC_WITHOUT_HEAD(wd_leaflist);
+ATF_TC_BODY(wd_leaflist, tc)
+{
+
+	check_out(wd(wd_settings(2, 3), CBL_WD_TRIM), "");
+	check_out(wd(wd_settings(2, 3), CBL_WD_EXPLICIT), WD_SETTINGS);
+	check_out(wd(wd_settings(2, 5), CBL_WD_TRIM),
+	    "/settings/retries 5\n");
+	check_out(wd(wd_settings(1, 3), CBL_WD_TRIM),
+	    "/settings/resolver 192.0.2.53\n");
+}
+
+/* No such mode: refused, nothing changed. */
+ATF_TC_WITHOUT_HEAD(wd_refused);
+ATF_TC_BODY(wd_refused, tc)
+{
+	cbl_dtree *t = wd_data();
+	size_t n = cbl_dtree_count(t);
+
+	ATF_CHECK_EQ(-1, cbl_dtree_with_defaults(cbl_dtree_root(t), 0));
+	ATF_CHECK_EQ(EINVAL, errno);
+	ATF_CHECK_EQ(-1, cbl_dtree_with_defaults(NULL, CBL_WD_TRIM));
+	ATF_CHECK_EQ(n, cbl_dtree_count(t));
+	cbl_dtree_free(t);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -726,5 +904,9 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, nacm);
 	ATF_TP_ADD_TC(tp, parent_refs);
 	ATF_TP_ADD_TC(tp, refused);
+	ATF_TP_ADD_TC(tp, rfc6243);
+	ATF_TP_ADD_TC(tp, wd_made);
+	ATF_TP_ADD_TC(tp, wd_leaflist);
+	ATF_TP_ADD_TC(tp, wd_refused);
 	return (atf_no_error());
 }

@@ -1166,6 +1166,109 @@ cbl_dtree_defaults(cbl_dnode *n)
 	return (made - gone);
 }
 
+static bool
+is_default(cbl_dnode *x, int mode)
+{
+	const void *v;
+
+	if ((x->flags & CBL_DN_DEFAULT) != 0)
+		return (true);
+	return (mode == CBL_WD_TRIM && x->sn->ndflt > 0 &&
+	    (v = dflt_value(x->tree, x->sn, 0)) != NULL &&
+	    cbl_dvalue_equal(x->sn->type, x->value, v));
+}
+
+/* A leaf-list's run of entries from x: all its defaults, as the mode
+ * sees them; *after, the node after the run. */
+static bool
+run_default(cbl_dnode *x, int mode, cbl_dnode **after)
+{
+	const struct cbl_ynode *sn = x->sn;
+	bool made = true, same = true;
+	uint16_t j = 0;
+
+	for (; x != NULL && x->sn == sn; x = x->next, j++) {
+		const void *v;
+
+		if ((x->flags & CBL_DN_DEFAULT) == 0)
+			made = false;
+		if (j >= sn->ndflt ||
+		    (v = dflt_value(x->tree, sn, j)) == NULL ||
+		    !cbl_dvalue_equal(sn->type, x->value, v))
+			same = false;
+	}
+	*after = x;
+	return (made || (mode == CBL_WD_TRIM && same && j == sn->ndflt));
+}
+
+static int
+wd_node(cbl_dnode *n, int mode, int depth)
+{
+	cbl_dnode *x, *next, *y;
+	int error;
+
+	if (depth > DEPTH_MAX)
+		return (ELOOP);
+	for (x = n->first; x != NULL; x = next) {
+		next = x->next;
+		switch (x->sn->kind) {
+		case CBL_YN_LEAF:
+			/* A key stays (EPERM), its default or not. */
+			if (is_default(x, mode) && (error =
+			    cbl_dnode_remove(x)) != 0 && error != EPERM)
+				return (error);
+			break;
+		case CBL_YN_LEAFLIST:
+			if (!run_default(x, mode, &next))
+				break;
+			for (; x != next; x = y) {
+				y = x->next;
+				if ((error = cbl_dnode_remove(x)) != 0)
+					return (error);
+			}
+			break;
+		case CBL_YN_CONTAINER:
+		case CBL_YN_LIST:
+		case CBL_YN_RPC:
+		case CBL_YN_ACTION:
+		case CBL_YN_INPUT:
+		case CBL_YN_OUTPUT:
+		case CBL_YN_NOTIF:
+		case CBL_YN_STRUCTURE:
+			if ((error = wd_node(x, mode, depth + 1)) != 0)
+				return (error);
+			if (x->sn->kind == CBL_YN_CONTAINER &&
+			    (x->sn->flags & CBL_YNF_PRESENCE) == 0 &&
+			    x->first == NULL &&
+			    (error = cbl_dnode_remove(x)) != 0)
+				return (error);
+			break;
+		default:
+			break;
+		}
+	}
+	return (0);
+}
+
+int
+cbl_dtree_with_defaults(cbl_dnode *n, int mode)
+{
+	int error;
+
+	if (n == NULL || (mode != CBL_WD_REPORT_ALL && mode != CBL_WD_TRIM &&
+	    mode != CBL_WD_EXPLICIT)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if (mode == CBL_WD_REPORT_ALL)
+		return (cbl_dtree_defaults(n) < 0 ? -1 : 0);
+	if ((error = wd_node(n, mode, 0)) != 0) {
+		errno = error;
+		return (-1);
+	}
+	return (0);
+}
+
 /*
  * Structs.
  */

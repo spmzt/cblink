@@ -1,0 +1,78 @@
+module wdexample {
+  yang-version 1.1;
+  namespace "http://example.com/ns/interfaces";
+  prefix exam;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of RFC 6243's retrieval modes: the module of its
+     Appendix A.1, its example interfaces table, as the RFC has it; and,
+     beyond it, settings: a leaf-list with defaults (YANG 1.1) and a
+     leaf with one, in a non-presence container.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+    reference
+      "RFC 6243: With-defaults Capability for NETCONF, Appendix A.1";
+  }
+
+  typedef status-type {
+    description "Interface status";
+    type enumeration {
+      enum ok;
+      enum 'waking up';
+      enum 'not feeling so good';
+      enum 'better check it out';
+      enum 'better call for help';
+    }
+    default ok;
+  }
+
+  container interfaces {
+    description "Example interfaces group";
+    list interface {
+      description "Example interface entry";
+      key name;
+      leaf name {
+        description
+          "The administrative name of the interface.
+           This is an identifier that is only unique
+           within the scope of this list, and only
+           within a specific server.";
+        type string {
+          length "1 .. max";
+        }
+      }
+      leaf mtu {
+        description
+          "The maximum transmission unit (MTU) value assigned to
+           this interface.";
+        type uint32;
+        default 1500;
+      }
+      leaf status {
+        description
+          "The current status of this interface.";
+        type status-type;
+        config false;
+      }
+    }
+  }
+
+  container settings {
+    description "Not RFC 6243's: what its example has not.";
+    leaf-list resolver {
+      type string;
+      default "192.0.2.53";
+      default "198.51.100.53";
+    }
+    leaf retries {
+      type uint8;
+      default 3;
+    }
+  }
+}

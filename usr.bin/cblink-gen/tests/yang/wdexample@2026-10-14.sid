@@ -1,0 +1,61 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "wdexample",
+    "module-revision": "2026-10-14",
+    "sid-file-version": 1,
+    "description": "cblink's test module of RFC 6243's modes: 2^40 + 300 300, never on a wire.",
+    "assignment-range": [
+      {
+        "entry-point": "1099511928076",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "wdexample",
+        "sid": "1099511928076"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:interfaces",
+        "sid": "1099511928077"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:interfaces/interface",
+        "sid": "1099511928078"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:interfaces/interface/mtu",
+        "sid": "1099511928079"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:interfaces/interface/name",
+        "sid": "1099511928080"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:interfaces/interface/status",
+        "sid": "1099511928081"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:settings",
+        "sid": "1099511928082"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:settings/resolver",
+        "sid": "1099511928083"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/wdexample:settings/retries",
+        "sid": "1099511928084"
+      }
+    ]
+  }
+}

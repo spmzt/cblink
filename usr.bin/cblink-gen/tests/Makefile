@@ -28,6 +28,7 @@ YANGH_SRC=	${.CURDIR}/yang/shapes@2026-10-13.yang \
 		${.CURDIR}/yang/edits@2026-10-14.yang \
 		${.CURDIR}/yang/conds@2026-10-14.yang \
 		${.CURDIR}/yang/filters@2026-10-14.yang \
+		${.CURDIR}/yang/wdexample@2026-10-14.yang \
 		${.CURDIR}/yang/ietf-system@2014-08-06.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang
 # Their SIDs: RFC 9595's ietf-system completed (-a), as it leaves empty
@@ -36,6 +37,7 @@ YANGH_SID=	-s ${.CURDIR}/yang/shapes@2026-10-13.sid \
 		-s ${.CURDIR}/yang/edits@2026-10-14.sid \
 		-s ${.CURDIR}/yang/conds@2026-10-14.sid \
 		-s ${.CURDIR}/yang/filters@2026-10-14.sid \
+		-s ${.CURDIR}/yang/wdexample@2026-10-14.sid \
 		-s ${.OBJDIR}/ietf-system.sid \
 		-s ${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid
 SRCS.yang_h_test=	yangh.h yang_h_test.c yangh_schema.c yfill.c
@@ -116,6 +118,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/edits@2026-10-14.yang yang/edits@2026-10-14.sid \
 		yang/conds@2026-10-14.yang yang/conds@2026-10-14.sid \
 		yang/filters@2026-10-14.yang yang/filters@2026-10-14.sid \
+		yang/wdexample@2026-10-14.yang yang/wdexample@2026-10-14.sid \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
 		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \

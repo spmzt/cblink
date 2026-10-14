@@ -200,6 +200,7 @@ CBLINK_1.0 {
 	cbl_dvalue_equal;
 	cbl_dnode_leaf;
 	cbl_dtree_defaults;
+	cbl_dtree_with_defaults;
 	cbl_dnode_from_struct;
 	cbl_dnode_to_struct;
 	cbl_dtree_from_module;

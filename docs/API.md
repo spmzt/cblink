@@ -418,6 +418,8 @@ cbl_dnode *cbl_dnode_llentry(const cbl_dnode *parent, const struct cbl_ynode *,
 /* defaults: on demand, or made (CBL_DN_DEFAULT) */
 const void *cbl_dnode_leaf(const cbl_dnode *, const struct cbl_ynode *leaf, bool *isdflt);
 ssize_t	cbl_dtree_defaults(cbl_dnode *);
+/* RFC 6243: CBL_WD_REPORT_ALL, CBL_WD_TRIM, CBL_WD_EXPLICIT */
+int	cbl_dtree_with_defaults(cbl_dnode *, int mode);
 /* the structs and YANG-CBOR */
 int	cbl_dnode_from_struct(cbl_dnode *parent, const struct cbl_ynode *, const void *p,
 	    cbl_dnode **out);
@@ -483,7 +485,14 @@ void	cbl_xval_free(struct cbl_xval *);
   in use and has no node, its case taken into account;
   `cbl_dtree_defaults()` makes a node of each, and of the non-presence
   containers that hold them; not of one under a `when` that does not
-  hold, and it removes one made before.
+  hold, and it removes one made before. `cbl_dtree_with_defaults()`
+  makes a subtree as RFC 6243's retrieval modes report it: report-all
+  makes the defaults; explicit keeps what was set, by a client or the
+  server, whatever its value, and takes the defaults made out; trim
+  takes out too every leaf whose value is its default and a leaf-list
+  whose values are its defaults (never a key). Both take out a
+  non-presence container left empty. report-all-tagged waits for the
+  codec's metadata.
 - **Edits** are another tree of the schema, each node with an
   operation or its parent's: merge, replace, create (data-exists where
   the node is), delete (data-missing where it is not), remove; the

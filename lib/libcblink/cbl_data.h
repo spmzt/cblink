@@ -120,6 +120,22 @@ const void	*cbl_dnode_leaf(const cbl_dnode *n,
 ssize_t		 cbl_dtree_defaults(cbl_dnode *n);
 
 /*
+ * RFC 6243's retrieval modes, n and below made as each reports them.
+ * report-all: every default in use made (cbl_dtree_defaults()).
+ * explicit: what was set kept, a client's or the server's, its value the
+ * default or not; the defaults made taken out.  trim: those, and every
+ * leaf whose value is its default, a leaf-list whose values are its
+ * defaults, taken out (never a list's key).  In both, a non-presence
+ * container left with nothing in it goes too.  report-all-tagged needs
+ * the codec's metadata and is not here.  0, or -1 and errno: EINVAL, a
+ * mode there is not; ELOOP, too deep; ENOMEM.
+ */
+#define	CBL_WD_REPORT_ALL	1
+#define	CBL_WD_TRIM		2
+#define	CBL_WD_EXPLICIT		3
+int		 cbl_dtree_with_defaults(cbl_dnode *n, int mode);
+
+/*
  * The structs: struct p of node sn (a container, a list entry, an rpc's
  * input or output, a notification, a structure) made a child of parent,
  * and all it has under it (*out the node made); a node's subtree into

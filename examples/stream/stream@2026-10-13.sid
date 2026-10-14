@@ -1,0 +1,46 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "stream",
+    "module-revision": "2026-10-13",
+    "description": "cblink example (Arcana share/yang/SIDS.md: 2^40 + 400, 100).",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-structure-ext",
+        "module-revision": "2020-06-17"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "1099511628176",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "stream",
+        "sid": "1099511628176"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/stream:line",
+        "sid": "1099511628177"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/stream:line/count",
+        "sid": "1099511628178"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/stream:line/number",
+        "sid": "1099511628179"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/stream:line/text",
+        "sid": "1099511628180"
+      }
+    ]
+  }
+}

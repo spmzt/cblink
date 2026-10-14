@@ -5,7 +5,8 @@
  */
 
 /*
- * cbl-echo: the smallest cblink server and client, built from echo.yaml.
+ * cbl-echo: the smallest cblink server and client, built from the YANG
+ * module echo@2026-10-13.yang: its rpc served by family 1.
  *
  *	cbl-echo -l [-pt] [-c cert -k key -a ca] uri	serve
  *	cbl-echo [-p] [-c cert -k key -a ca] uri text	ask
@@ -16,6 +17,7 @@
 #include <sys/types.h>
 
 #include <err.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,27 +25,30 @@
 #include <unistd.h>
 
 #include <cblink.h>
+#include <cbl_schema.h>
 
 #include "echo.h"
 
-/* The handler the generated server code calls for "echo". */
+/* The rpc's handler, as echo.h declares it: what it allocates is a's. */
 int
-echo_echo_doit(cbl_req *req, const struct echo_echo_req *rq,
-    void *arg __unused)
+echo_echo_rpc(cbl_req *req, const struct echo_echo_input *in,
+    struct echo_echo_output *out, cbl_yarena *a)
 {
 	const cbl_peer *p = cbl_req_peer(req);
-	struct echo_echo_rsp rsp = { .text = rq->text };
-	char who[64];
+	char *who;
 	uid_t uid;
 
+	out->text = in->text;
 	if (cbl_peer_subject(p) != NULL)
-		rsp.peer = cbl_peer_subject(p);
+		out->peer = cbl_peer_subject(p);
 	else if (cbl_peer_cred(p, &uid, NULL) == 0) {
-		snprintf(who, sizeof(who), "uid %u", (unsigned)uid);
-		rsp.peer = who;
+		if ((who = cbl_yarena_alloc(a, 32)) == NULL)
+			return (ENOMEM);
+		snprintf(who, 32, "uid %u", (unsigned)uid);
+		out->peer = who;
 	} else
-		rsp.peer = "anonymous";
-	return (echo_echo_reply(req, &rsp));
+		out->peer = "anonymous";
+	return (0);
 }
 
 static cbl_tls *
@@ -71,12 +76,11 @@ static int
 serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls)
 {
 	cbl_listener *l;
-	cbl_family *fam;
 	cbl_loop *loop;
 	int error;
 
-	if ((error = echo_register(ctx, NULL, &fam)) != 0)
-		errc(1, error, "register");
+	if ((error = cbl_yserver_add(ctx, &echo_server, NULL)) != 0)
+		errc(1, error, "serve");
 	if ((error = cbl_loop_new(ctx, &loop)) != 0 ||
 	    (error = cbl_listener_new(ctx, uri, flags, &l)) != 0)
 		errc(1, error, "%s", uri);
@@ -91,7 +95,6 @@ serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls)
 	error = cbl_loop_run(loop);
 	cbl_listener_free(l);
 	cbl_loop_free(loop);
-	(void)cbl_family_unregister(fam);
 	return (error);
 }
 
@@ -99,9 +102,9 @@ static int
 ask(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
     const char *text)
 {
-	struct echo_echo_req req = { .text = text };
-	struct echo_echo_rsp *rsp;
-	struct echo_client cl;
+	struct echo_echo_input in = { .text = text };
+	struct echo_echo_output out;
+	cbl_yarena *a;
 	cbl_conn *conn;
 	int error;
 
@@ -111,17 +114,14 @@ ask(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
 		(void)cbl_conn_set_tls(conn, tls);
 	if ((error = cbl_conn_connect(conn)) != 0)
 		errx(1, "%s: %s", uri, cbl_conn_errstr(conn));
-	/* Looks up the family by name: its id is chosen by the server. */
-	if ((error = echo_client_init(&cl, conn)) != 0)
-		errc(1, error, "echo family");
-	if ((error = echo_echo(&cl, &req, &rsp)) != 0)
-		errx(1, "echo: %s", cl.err != NULL &&
-		    cbl_msg_err_str(cl.err) != NULL ?
-		    cbl_msg_err_str(cl.err) : strerror(error));
-	printf("%s (as seen by the server: %s)\n", rsp->text,
-	    rsp->peer != NULL ? rsp->peer : "?");
-	echo_echo_rsp_free(rsp);
-	echo_client_fini(&cl);
+	if ((a = cbl_yarena_new()) == NULL)
+		err(1, "cbl_yarena_new");
+	/* Family 1's RPC: the server serves the module by SID. */
+	if ((error = echo_echo_call(conn, &in, &out, a, -1)) != 0)
+		errc(1, error, "echo");
+	printf("%s (as seen by the server: %s)\n", out.text,
+	    out.peer != NULL ? out.peer : "?");
+	cbl_yarena_free(a);
 	cbl_conn_free(conn);
 	return (0);
 }

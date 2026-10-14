@@ -1,0 +1,35 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "notify",
+    "module-revision": "2026-10-13",
+    "description": "cblink example (Arcana share/yang/SIDS.md: 2^40 + 500, 100).",
+    "assignment-range": [
+      {
+        "entry-point": "1099511628276",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "notify",
+        "sid": "1099511628276"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/notify:tick",
+        "sid": "1099511628277"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/notify:tick/msec",
+        "sid": "1099511628278"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/notify:tick/seq",
+        "sid": "1099511628279"
+      }
+    ]
+  }
+}

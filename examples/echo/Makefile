@@ -1,6 +1,7 @@
 PROG=		cbl-echo
 SRCS=		main.c
-CBLINK_SPECS=	echo.yaml
+CBLINK_YANG=	echo@2026-10-13.yang
+CBLINK_SIDS=	echo@2026-10-13.sid
 
 # In the source tree, build against the tree; elsewhere, the installed cblink.
 .if exists(${.CURDIR}/../examples.mk)

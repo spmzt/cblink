@@ -370,7 +370,9 @@ int		 cbl_ydecode_member(const struct cbl_ynode *n,
  * encoded; cbl_msg_ydecode() reads the value under n's SID of a
  * received body into p (ENOENT: none), cbl_msg_sid_raw() gives its
  * bytes.  An rpc's or an action's input and output are under the rpc's
- * or the action's SID, and null is an empty one (CORECONF).
+ * or the action's SID, and null is an empty one (CORECONF); a
+ * notification is read from family 1's envelope (cbl_msg_ynotif()), and
+ * one of another SID is ENOENT.
  * cbl_msg_put_ymember() and cbl_msg_ydecode_member() do a top-level
  * node in its module's data struct (cbl_yencode_member()); not there,
  * the encoder adds nothing.  cbl_msg_put_ynull() adds {sid: null}: in

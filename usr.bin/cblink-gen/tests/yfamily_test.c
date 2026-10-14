@@ -470,7 +470,6 @@ heard_cb(cbl_conn *conn, cbl_msg *m, void *arg)
 	    nt.len, &al, a, CBL_YD_STRICT, NULL, 0));
 	strlcpy(h->text, al.text != NULL ? al.text : "", sizeof(h->text));
 	cbl_yarena_free(a);
-	cbl_msg_free(m);
 	h->n++;
 }
 

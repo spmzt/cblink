@@ -30,13 +30,6 @@ server_start()
 	rm -f server.out
 }
 
-# Wait for a backgrounded client to print "ready".
-client_ready()
-{
-	retry 10 grep -q '^ready' "$1" ||
-	    atf_fail "client not ready: $(cat "$1")"
-}
-
 servers_stop()
 {
 	[ -f servers.pid ] && kill $(cat servers.pid) 2>/dev/null
@@ -60,51 +53,6 @@ echo_body()
 	    tcp://127.0.0.1:1 hi
 }
 echo_cleanup()
-{
-	servers_stop
-}
-
-atf_test_case kv cleanup
-kv_head()
-{
-	atf_set "descr" "cbl-kv: do, dump, auth, notifications, a stream"
-}
-kv_body()
-{
-	K="$(atf_get_srcdir)/cbl-kv"
-	T="unix:$(pwd)/trusted.sock"
-	U="unix:$(pwd)/untrusted.sock"
-	server_start cbl-kv -t "${T}"
-
-	"${K}" "${T}" changes 2 > changes.out 2>&1 &
-	client_ready changes.out
-	atf_check "${K}" "${T}" set apple red
-	atf_check "${K}" "${T}" set banana yellow
-	wait $!
-	atf_check -o \
-	    inline:"ready\nchanged apple flags=0\nchanged banana flags=0\n" \
-	    cat changes.out
-
-	atf_check -o inline:"apple = red\n" "${K}" "${T}" get apple
-	atf_check -o inline:"apple = red\nbanana = yellow\n" \
-	    "${K}" "${T}" list
-	atf_check -o inline:"banana = yellow\n" "${K}" "${T}" list ban
-	atf_check -s exit:1 -e match:"no such key" "${K}" "${T}" get cherry
-
-	# A watch starts with the matching entries, then follows changes.
-	"${K}" "${T}" watch app 2 > watch.out 2>&1 &
-	client_ready watch.out
-	atf_check "${K}" "${T}" set banana green
-	atf_check "${K}" "${T}" set apple green
-	wait $!
-	atf_check -o inline:"ready\napple = red\napple = green\n" cat watch.out
-
-	# "set" is auth: true; an untrusted unix socket is anonymous.
-	server_start cbl-kv "${U}"
-	atf_check -s exit:1 -e match:"set:" "${K}" "${U}" set apple x
-	atf_check -s exit:1 -e ignore "${K}" "${U}" get apple
-}
-kv_cleanup()
 {
 	servers_stop
 }
@@ -148,18 +96,17 @@ notify_cleanup()
 	servers_stop
 }
 
-atf_test_case kvy
-kvy_head()
+atf_test_case kv
+kv_head()
 {
-	atf_set "descr" "cbl-kvy: the kv example in YANG, its table served" \
+	atf_set "descr" "cbl-kv: the kv example in YANG, its table served" \
 	    "by family 1: an edit, the store read back, an rpc, a" \
 	    "notification"
 }
-kvy_body()
+kv_body()
 {
-	K="$(atf_get_srcdir)/cbl-kvy"
+	K="$(atf_get_srcdir)/cbl-kv"
 
-	[ -x "$K" ] || atf_skip "built without libyang: no cbl-kvy"
 	atf_check -o save:out "$K"
 	atf_check -o match:'^edit: 2 entries$' cat out
 	atf_check -o match:'^get: 2 entries, count 2$' cat out
@@ -181,7 +128,6 @@ atf_init_test_cases()
 {
 	atf_add_test_case echo
 	atf_add_test_case kv
-	atf_add_test_case kvy
 	atf_add_test_case stream
 	atf_add_test_case notify
 }

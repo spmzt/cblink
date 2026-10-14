@@ -803,7 +803,18 @@ cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n, void *p,
 		why[0] = '\0';
 	if (n == NULL || p == NULL || a == NULL)
 		return (EINVAL);
-	if ((error = cbl_msg_sid_raw(msg, cbl_ynode_base(n), &v, &len)) != 0)
+	error = cbl_msg_sid_raw(msg, cbl_ynode_base(n), &v, &len);
+	/* A notification sent: in the cblink:notification envelope. */
+	if (error == ENOENT && n->kind == CBL_YN_NOTIF) {
+		struct cbl_ynotif nt;
+
+		if (cbl_msg_ynotif(msg, &nt, a) != 0 || nt.sid != n->sid)
+			return (ENOENT);
+		memset(p, 0, n->size);
+		return (cbl_ydecode(n, nt.content, nt.len, p, a, flags, why,
+		    whylen));
+	}
+	if (error != 0)
 		return (error);
 	memset(p, 0, n->size);
 	/* No input or no output: null, as CORECONF sends it. */

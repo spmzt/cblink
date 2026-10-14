@@ -221,7 +221,9 @@ CBLINK_1.0 {
 	cbl_dtree_check_conds;
 	cbl_dtree_filter_subtree;
 	cbl_dtree_filter_xpath;
+	cbl_dtree_parent_refs;
 	cbl_dtree_select;
+	cbl_dtree_set_refs;
 	cbl_dtree_check_refs;
 	cbl_xp_eval;
 	cbl_xval_free;

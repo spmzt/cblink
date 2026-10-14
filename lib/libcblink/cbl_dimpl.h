@@ -56,6 +56,8 @@ struct cbl_dtree {
 	size_t			 nslot, nentries;
 	struct cbl_ddflt	*dflt[CBL_D_NDFLT];
 	cbl_yarena		*arena;		/* the defaults' */
+	/* A mounted tree's parent references (cbl_dtree_set_refs()). */
+	const struct cbl_dtree	*refs;
 };
 
 /*

@@ -451,6 +451,10 @@ cbl_dfilter *cbl_dfilter_new(const struct cbl_yschema *);
 int	cbl_dfilter_add(cbl_dfnode *parent, const struct cbl_ynode *,
 	    const void *value, cbl_dfnode **);	/* parent: cbl_dfilter_root() */
 cbl_dtree *cbl_dtree_filter_subtree(const cbl_dtree *, const cbl_dfilter *);
+/* a mount point's parent references, and the mounted tree given them */
+cbl_dtree *cbl_dtree_parent_refs(const cbl_dtree *, const cbl_dnode *mp,
+	    const char *const *exprs, size_t n, char *why, size_t whylen);
+int	cbl_dtree_set_refs(cbl_dtree *mounted, const cbl_dtree *refs);
 /* NACM's data-node rule paths: compiled once, matched against nodes */
 cbl_dnacm_path *cbl_dnacm_path_new(const struct cbl_yschema *, const char *path,
 	    char *why, size_t whylen);
@@ -518,6 +522,12 @@ void	cbl_xval_free(struct cbl_xval *);
   value to its key's type, and matches the node it names and all below
   it. An rpc or a notification with no instance is matched by its
   schema node, which a path with predicates never matches.
+- **Parent references** (RFC 8528 section 4): a mounted tree's
+  expressions see only it, and what its mount point's parent-reference
+  expressions select of the parent tree, each a node set evaluated from
+  the mount point. `cbl_dtree_parent_refs()` makes that a tree as a
+  filter's is; `cbl_dtree_set_refs()` gives it to the mounted tree, whose
+  `when`s, `must`s and leafrefs then see its nodes beside their own.
 - **A difference** of two trees is the edit that makes the first the
   second with the default none, what a YANG Patch carries: creates of
   what only the second has, merges of the leaves that differ, removes

@@ -250,6 +250,20 @@ cbl_dtree	*cbl_dtree_filter_subtree(const cbl_dtree *t,
 		    const cbl_dfilter *f);
 
 /*
+ * Parent references (RFC 8528 section 4): what the XPath expressions of
+ * a mount point's parent-reference select of the parent tree t, each a
+ * node set evaluated from the mount point mp, a tree of its own as a
+ * filter's is (NULL, errno and why on failure).  cbl_dtree_set_refs()
+ * gives it to tree t, the mounted tree (NULL: none): t's expressions see
+ * its nodes as well as their own, its top-level nodes beside t's (a node
+ * of both, two), as when and must do, and leafrefs; t does not own it.
+ */
+cbl_dtree	*cbl_dtree_parent_refs(const cbl_dtree *t, const cbl_dnode *mp,
+		    const char *const *exprs, size_t n, char *why,
+		    size_t whylen);
+int		 cbl_dtree_set_refs(cbl_dtree *t, const cbl_dtree *refs);
+
+/*
  * NACM's data-node rule paths (RFC 8341 section 3.4.5): path, a
  * node-instance-identifier (an instance-identifier whose key predicates
  * may be left out, and whose values may be $USER; "/", every node), each

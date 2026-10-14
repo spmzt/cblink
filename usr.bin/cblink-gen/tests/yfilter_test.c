@@ -588,6 +588,113 @@ ATF_TC_BODY(nacm, tc)
 	nrefused("/filters:top/users/user[", "at ");
 }
 
+static double
+num(cbl_dtree *t, const char *expr)
+{
+	struct cbl_xval v;
+	char why[128];
+	double d;
+
+	ATF_REQUIRE_EQ_MSG(0, cbl_xp_eval(t, expr, NULL, NULL, &v, why,
+	    sizeof(why)), "%s: %s", expr, why);
+	ATF_REQUIRE_EQ(CBL_XV_NUMBER, v.kind);
+	d = v.num;
+	cbl_xval_free(&v);
+	return (d);
+}
+
+/*
+ * Parent references (RFC 8528 section 4): a mounted tree's OSPF link,
+ * its interface a leafref to an area's interfaces in the parent tree,
+ * by a predicate; the parent references the areas it may see, from the
+ * mount point.
+ */
+ATF_TC_WITHOUT_HEAD(parent_refs);
+ATF_TC_BODY(parent_refs, tc)
+{
+	const char *areas[] = { "0", "1" }, *ifs[] = { "eth0", "eth1" };
+	const char *area0 = "area0", *one = "1";
+	const char *e0[] = { "edits:ospf/edits:area[edits:name = '0']" };
+	const char *e1[] = { "current()/edits:ospf/edits:area[edits:name = "
+	    "'1']" };
+	const char *bad[] = { "count(.)" };
+	struct cbl_dederr err;
+	cbl_dtree *parent, *mounted, *refs;
+	cbl_dnode *top, *protocols, *ospf, *a, *ol, *x;
+	char why[128];
+
+	ATF_REQUIRE((parent = cbl_dtree_new(&yangh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(parent),
+	    sn("edits", "top"), NULL, &top));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top, sn("edits", "top/protocols"),
+	    NULL, &protocols));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(protocols,
+	    sn("edits", "top/protocols/ospf"), NULL, &ospf));
+	for (int i = 0; i < 2; i++) {
+		const void *k[1] = { &areas[i] }, *ki[1] = { &ifs[i] };
+
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(ospf,
+		    sn("edits", "top/protocols/ospf/area"), k, &a));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(a,
+		    sn("edits", "top/protocols/ospf/area/interfaces"), NULL,
+		    &a));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(a, sn("edits",
+		    "top/protocols/ospf/area/interfaces/interface"), ki, NULL));
+	}
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(top, sn("edits", "top/primary"),
+	    &area0, NULL));
+
+	/* The mounted tree: a link in area 0 by eth0. */
+	ATF_REQUIRE((mounted = cbl_dtree_new(&yangh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(mounted),
+	    sn("conds", "ospf-link"), NULL, &ol));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(ol, sn("conds", "ospf-link/area"),
+	    &areas[0], NULL));
+	ATF_REQUIRE_EQ(0, cbl_dnode_add(ol, sn("conds", "ospf-link/interface"),
+	    &ifs[0], &x));
+	/* Without parent references, the areas are not there. */
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(mounted, &err));
+
+	/* Area 0, from the mount point: it, and the nodes above it. */
+	refs = cbl_dtree_parent_refs(parent, protocols, e0, 1, why,
+	    sizeof(why));
+	ATF_REQUIRE_MSG(refs != NULL, "%s", why);
+	ATF_REQUIRE_EQ(0, cbl_dtree_set_refs(mounted, refs));
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_check_refs(mounted, &err), "%s",
+	    err.msg);
+	ATF_CHECK_EQ(1, num(mounted,
+	    "count(/edits:top/edits:protocols/edits:ospf/edits:area)"));
+	ATF_CHECK_EQ(0, num(mounted, "count(/edits:top/edits:primary)"));
+	ATF_CHECK_EQ(1, num(mounted, "count(/edits:top/../conds:ospf-link)"));
+	ATF_CHECK_EQ(2, num(mounted, "count(/*)"));
+	/* eth1 is area 1's, which the mounted tree does not see. */
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(x, &ifs[1]));
+	ATF_REQUIRE_EQ(0, cbl_dnode_set(cbl_dnode_child(ol,
+	    sn("conds", "ospf-link/area")), &one));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(mounted, &err));
+	cbl_dtree_free(refs);
+
+	/* current() is the mount point: area 1 referenced. */
+	refs = cbl_dtree_parent_refs(parent, protocols, e1, 1, why,
+	    sizeof(why));
+	ATF_REQUIRE_MSG(refs != NULL, "%s", why);
+	ATF_REQUIRE_EQ(0, cbl_dtree_set_refs(mounted, refs));
+	ATF_CHECK_EQ_MSG(0, cbl_dtree_check_refs(mounted, &err), "%s",
+	    err.msg);
+	ATF_REQUIRE_EQ(0, cbl_dtree_set_refs(mounted, NULL));
+	ATF_CHECK_EQ(ENOENT, cbl_dtree_check_refs(mounted, &err));
+	cbl_dtree_free(refs);
+
+	/* Each must be a node set. */
+	ATF_CHECK(cbl_dtree_parent_refs(parent, protocols, bad, 1, why,
+	    sizeof(why)) == NULL);
+	ATF_CHECK_EQ(EINVAL, errno);
+	ATF_CHECK(strstr(why, "not a node set") != NULL);
+	ATF_CHECK_EQ(EINVAL, cbl_dtree_set_refs(mounted, mounted));
+	cbl_dtree_free(mounted);
+	cbl_dtree_free(parent);
+}
+
 /* A filter node is a child of its parent's; a value, a leaf's. */
 ATF_TC_WITHOUT_HEAD(refused);
 ATF_TC_BODY(refused, tc)
@@ -617,6 +724,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, content_match);
 	ATF_TP_ADD_TC(tp, xpath);
 	ATF_TP_ADD_TC(tp, nacm);
+	ATF_TP_ADD_TC(tp, parent_refs);
 	ATF_TP_ADD_TC(tp, refused);
 	return (atf_no_error());
 }

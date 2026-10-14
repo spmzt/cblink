@@ -446,6 +446,38 @@ seen(const struct ev *e, const cbl_dnode *c)
 	    !w->hide(w->harg, c->sn));
 }
 
+/*
+ * A node's first child as the expression sees it, and the next: the
+ * root's, the tree's own, then its parent references' (RFC 8528 section
+ * 4, cbl_dtree_set_refs()); and its parent, theirs the tree's root.
+ */
+static const cbl_dnode *
+kid1(const struct ev *e, const cbl_dnode *n)
+{
+
+	if (n->first == NULL && n == &e->t->root && e->t->refs != NULL)
+		return (e->t->refs->root.first);
+	return (n->first);
+}
+
+static const cbl_dnode *
+kidn(const struct ev *e, const cbl_dnode *c)
+{
+
+	if (c->next == NULL && c->parent == &e->t->root && e->t->refs != NULL)
+		return (e->t->refs->root.first);
+	return (c->next);
+}
+
+static const cbl_dnode *
+up(const struct ev *e, const cbl_dnode *n)
+{
+
+	if (e->t->refs != NULL && n->parent == &e->t->refs->root)
+		return (&e->t->root);
+	return (n->parent);
+}
+
 /* Node n's value as the expression sees it: none, the dummy's. */
 static const void *
 value(const struct ev *e, const cbl_dnode *n)
@@ -482,9 +514,10 @@ node_string(struct sbuf *b, const struct ev *e, const cbl_dnode *n,
 	if (n->sn != NULL && n->sn->type != NULL) {
 		if (value(e, n) == NULL)
 			return (0);
-		return (value_string(b, e->t->schema, n->sn->type, n->value));
+		return (value_string(b, n->tree->schema, n->sn->type,
+		    n->value));
 	}
-	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
+	for (const cbl_dnode *c = kid1(e, n); c != NULL; c = kidn(e, c))
 		if (seen(e, c) && (error = node_string(b, e, c, depth + 1)) !=
 		    0)
 			return (error);
@@ -838,7 +871,7 @@ descend(const struct ev *e, struct nset *out, const struct cbl_xp *x,
 		return (ELOOP);
 	if (test_ok(x, n) && (error = ns_add(out, n)) != 0)
 		return (error);
-	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
+	for (const cbl_dnode *c = kid1(e, n); c != NULL; c = kidn(e, c))
 		if (seen(e, c) && (error = descend(e, out, x, c, depth + 1)) !=
 		    0)
 			return (error);
@@ -857,14 +890,14 @@ step(struct ev *e, const struct cbl_xp *x, const struct nset *in,
 
 		switch (x->axis) {
 		case CBL_XA_CHILD:
-			for (const cbl_dnode *c = n->first; c != NULL &&
-			    error == 0; c = c->next)
+			for (const cbl_dnode *c = kid1(e, n); c != NULL &&
+			    error == 0; c = kidn(e, c))
 				if (seen(e, c) && test_ok(x, c))
 					error = ns_add(out, c);
 			break;
 		case CBL_XA_PARENT:
-			if (n->parent != NULL && test_ok(x, n->parent))
-				error = ns_add(out, n->parent);
+			if (up(e, n) != NULL && test_ok(x, up(e, n)))
+				error = ns_add(out, up(e, n));
 			break;
 		case CBL_XA_SELF:
 			if (test_ok(x, n))
@@ -1039,7 +1072,7 @@ func_deref(struct ev *e, const struct cbl_xval *a, struct cbl_xval *out)
 
 		if ((t->flags & CBL_YTF_LEAFREF) != 0 && t->path >= 0) {
 			/* Its path's nodes, those of its value. */
-			if ((error = eval_expr(e, e->t->schema->xpath[t->path],
+			if ((error = eval_expr(e, n->tree->schema->xpath[t->path],
 			    n, n, &tv)) != 0)
 				return (error);
 			for (size_t i = 0; i < tv.n && error == 0; i++)
@@ -1250,13 +1283,16 @@ eval_func(struct ev *e, const struct cbl_xp *x, const cbl_dnode *ctx,
 
 		if ((error = to_string(e, &a[1], &str)) != 0)
 			goto out;
-		base = ident_sid(e->t, str);
-		free(str);
-		for (size_t i = 0; i < a[0].n && !any && base != 0; i++)
+		/* By the schema of each node's tree. */
+		for (size_t i = 0; i < a[0].n && !any; i++) {
+			const cbl_dtree *nt = a[0].nodes[i]->tree;
+
 			if (value_of(e, a[0].nodes[i], CBL_YT_IDENTITYREF, &v) !=
-			    NULL)
-				any = cbl_yderived_from(e->t->schema,
+			    NULL && (base = ident_sid(nt, str)) != 0)
+				any = cbl_yderived_from(nt->schema,
 				    *(const uint64_t *)v, base, f[12] == '-');
+		}
+		free(str);
 		set_bool(out, any);
 	} else if (strcmp(f, "enum-value") == 0 && n == 1 &&
 	    a[0].kind == CBL_XV_NODES) {

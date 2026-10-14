@@ -12,13 +12,17 @@
  * expression finds (RFC 6241 section 8.9).  A subtree filter (section 6)
  * is a tree of the schema's nodes: one with a value is a content match
  * node, one with children a containment node, one with neither a
- * selection node; it selects as section 6.2 says.
+ * selection node; it selects as section 6.2 says.  A mount point's
+ * parent references (RFC 8528 section 4) are the nodes their expressions
+ * select of the parent tree, made a tree likewise, which the mounted
+ * tree's expressions see.
  */
 
 #include <sys/types.h>
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -211,6 +215,58 @@ cbl_dtree_filter_xpath(const cbl_dtree *t, const char *expr, char *why,
 	out = cbl_dtree_select(t, v.nodes, v.n);
 	cbl_xval_free(&v);
 	return (out);
+}
+
+/*
+ * Parent references (RFC 8528 section 4).
+ */
+
+cbl_dtree *
+cbl_dtree_parent_refs(const cbl_dtree *t, const cbl_dnode *mp,
+    const char *const *exprs, size_t n, char *why, size_t whylen)
+{
+	struct pset s = { 0 };
+	struct cbl_xval v;
+	cbl_dtree *out;
+	int error = 0;
+
+	if (t == NULL || mp == NULL || mp->tree != t ||
+	    (exprs == NULL && n > 0)) {
+		errno = EINVAL;
+		return (NULL);
+	}
+	for (size_t i = 0; i < n && error == 0; i++) {
+		if ((error = cbl_xp_eval(t, exprs[i], mp, mp, &v, why,
+		    whylen)) != 0)
+			break;
+		if (v.kind != CBL_XV_NODES) {
+			if (why != NULL && whylen > 0)
+				snprintf(why, whylen, "parent-reference %zu: "
+				    "not a node set", i + 1);
+			error = EINVAL;
+		}
+		for (size_t j = 0; error == 0 && j < v.n; j++)
+			error = ps_put(&s, v.nodes[j], true);
+		cbl_xval_free(&v);
+	}
+	if (error != 0) {
+		ps_free(&s);
+		errno = error;
+		return (NULL);
+	}
+	out = cbl_dtree_select(t, s.v, s.n);
+	ps_free(&s);
+	return (out);
+}
+
+int
+cbl_dtree_set_refs(cbl_dtree *t, const cbl_dtree *refs)
+{
+
+	if (t == NULL || refs == t)
+		return (EINVAL);
+	t->refs = refs;
+	return (0);
 }
 
 /*

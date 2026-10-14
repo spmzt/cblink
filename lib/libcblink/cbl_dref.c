@@ -48,7 +48,10 @@ missing(struct refs *r, const cbl_dnode *at, const char *fmt, ...)
 	return (ENOENT);
 }
 
-/* Whether a node of target in n's subtree has the value v. */
+/*
+ * Whether a node of target in n's subtree has the value v: by its SID,
+ * the same in a parent references' tree of another schema.
+ */
 static bool
 has_value(const cbl_dnode *n, const struct cbl_ynode *target, const void *v,
     int depth)
@@ -57,8 +60,8 @@ has_value(const cbl_dnode *n, const struct cbl_ynode *target, const void *v,
 	if (depth > CBL_D_DEPTH_MAX)
 		return (false);
 	for (const cbl_dnode *c = n->first; c != NULL; c = c->next) {
-		if (c->sn == target && cbl_dvalue_equal(target->type, c->value,
-		    v))
+		if (c->sn->sid == target->sid && c->value != NULL &&
+		    cbl_dvalue_equal(target->type, c->value, v))
 			return (true);
 		if (c->first != NULL && has_value(c, target, v, depth + 1))
 			return (true);
@@ -167,7 +170,9 @@ check(struct refs *r, const cbl_dnode *n, int depth)
 					    c->sn->name, target->name));
 			} else if ((t->flags & CBL_YTF_LEAFREF) != 0 &&
 			    (target = c->sn->lref) != NULL &&
-			    !has_value(&r->t->root, target, c->value, 0))
+			    !has_value(&r->t->root, target, c->value, 0) &&
+			    (r->t->refs == NULL || !has_value(&r->t->refs->root,
+			    target, c->value, 0)))
 				return (missing(r, c, "%s: no %s of its value",
 				    c->sn->name, target->name));
 			if (t->kind == CBL_YT_INSTANCEID) {

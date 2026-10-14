@@ -535,7 +535,7 @@ ATF_TC_BODY(notify, tc)
 }
 
 /*
- * The event's key is a delta from its own SID, 2^40 + 47: a notification
+ * The event's key is a delta from its own SID, 60 000 + 47: a notification
  * of a smaller SID, a negative one.
  */
 ATF_TC_WITHOUT_HEAD(notif_delta);
@@ -554,13 +554,13 @@ ATF_TC_BODY(notif_delta, tc)
 	/* Not a NOTIFY frame, which needs a group: the body is what counts. */
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, CBL_YANG_FAMILY, CBL_YCMD_NOTIFY, 0,
 	    &m));
-	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(m, UINT64_C(1099511627776) + 45,
+	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(m, UINT64_C(60000) + 45,
 	    env, sizeof(env)));
 	ATF_REQUIRE_EQ(0, cbl_msg_encode(m, &fr, &len));
 	ATF_REQUIRE_EQ(0, cbl_frame_decode(ctx, fr, len, NULL, &rx));
 	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
 	ATF_REQUIRE_EQ(0, cbl_msg_ynotif(rx, &nt, a));
-	ATF_REQUIRE_EQ(UINT64_C(1099511627776) + 44, nt.sid);
+	ATF_REQUIRE_EQ(UINT64_C(60000) + 44, nt.sid);
 	ATF_REQUIRE_STREQ("t", nt.event_time);
 	ATF_REQUIRE(nt.len == 1 && *(const uint8_t *)nt.content == 0xa0);
 	cbl_yarena_free(a);

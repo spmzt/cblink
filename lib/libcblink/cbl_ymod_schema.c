@@ -61,7 +61,7 @@ static const struct cbl_ytype t0 = {
 	.items = t0_i,
 };
 
-static const uint64_t t1_b[] = { UINT64_C(1099511627777) };
+static const uint64_t t1_b[] = { UINT64_C(60001) };
 static const struct cbl_ytype t1 = {
 	.kind = CBL_YT_IDENTITYREF,
 	.csize = sizeof(uint64_t),
@@ -146,7 +146,7 @@ static const struct cbl_ytype t10 = {
 };
 
 static const struct cbl_ynode n1 = {
-	.sid = UINT64_C(1099511627799),
+	.sid = UINT64_C(60023),
 	.name = "error-type",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -158,7 +158,7 @@ static const struct cbl_ynode n1 = {
 };
 
 static const struct cbl_ynode n2 = {
-	.sid = UINT64_C(1099511627800),
+	.sid = UINT64_C(60024),
 	.name = "error-tag",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -170,7 +170,7 @@ static const struct cbl_ynode n2 = {
 };
 
 static const struct cbl_ynode n3 = {
-	.sid = UINT64_C(1099511627801),
+	.sid = UINT64_C(60025),
 	.name = "error-app-tag",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_error, error_app_tag),
@@ -181,7 +181,7 @@ static const struct cbl_ynode n3 = {
 };
 
 static const struct cbl_ynode n4 = {
-	.sid = UINT64_C(1099511627802),
+	.sid = UINT64_C(60026),
 	.name = "error-path",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_error, error_path),
@@ -192,7 +192,7 @@ static const struct cbl_ynode n4 = {
 };
 
 static const struct cbl_ynode n5 = {
-	.sid = UINT64_C(1099511627803),
+	.sid = UINT64_C(60027),
 	.name = "error-message",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_error, error_message),
@@ -203,7 +203,7 @@ static const struct cbl_ynode n5 = {
 };
 
 static const struct cbl_ynode n6 = {
-	.sid = UINT64_C(1099511627804),
+	.sid = UINT64_C(60028),
 	.name = "error-info",
 	.kind = CBL_YN_ANYDATA,
 	.off = offsetof(struct cblink_error, error_info),
@@ -213,7 +213,7 @@ static const struct cbl_ynode n6 = {
 };
 
 static const struct cbl_ynode n7 = {
-	.sid = UINT64_C(1099511627805),
+	.sid = UINT64_C(60029),
 	.name = "errno",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_error, errno_),
@@ -224,7 +224,7 @@ static const struct cbl_ynode n7 = {
 };
 
 static const struct cbl_ynode n8 = {
-	.sid = UINT64_C(1099511627806),
+	.sid = UINT64_C(60030),
 	.name = "cookie",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_error, cookie),
@@ -239,7 +239,7 @@ static const struct cbl_ynode *const n0_c[] = {
 	&n7, &n8
 };
 static const struct cbl_ynode n0 = {
-	.sid = UINT64_C(1099511627798),
+	.sid = UINT64_C(60022),
 	.name = "error",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -252,7 +252,7 @@ static const struct cbl_ynode n0 = {
 };
 
 static const struct cbl_ynode n10 = {
-	.sid = UINT64_C(1099511627808),
+	.sid = UINT64_C(60032),
 	.name = "increment",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -268,7 +268,7 @@ static const struct cbl_ynode *const n9_c[] = {
 	&n10
 };
 static const struct cbl_ynode n9 = {
-	.sid = UINT64_C(1099511627807),
+	.sid = UINT64_C(60031),
 	.name = "credit",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -281,7 +281,7 @@ static const struct cbl_ynode n9 = {
 };
 
 static const struct cbl_ynode n13 = {
-	.sid = UINT64_C(1099511627811),
+	.sid = UINT64_C(60035),
 	.name = "max-frame",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello_limits, max_frame),
@@ -293,7 +293,7 @@ static const struct cbl_ynode n13 = {
 };
 
 static const struct cbl_ynode n14 = {
-	.sid = UINT64_C(1099511627812),
+	.sid = UINT64_C(60036),
 	.name = "max-depth",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello_limits, max_depth),
@@ -304,7 +304,7 @@ static const struct cbl_ynode n14 = {
 };
 
 static const struct cbl_ynode n15 = {
-	.sid = UINT64_C(1099511627813),
+	.sid = UINT64_C(60037),
 	.name = "max-attrs",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello_limits, max_attrs),
@@ -315,7 +315,7 @@ static const struct cbl_ynode n15 = {
 };
 
 static const struct cbl_ynode n16 = {
-	.sid = UINT64_C(1099511627814),
+	.sid = UINT64_C(60038),
 	.name = "max-streams",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello_limits, max_streams),
@@ -326,7 +326,7 @@ static const struct cbl_ynode n16 = {
 };
 
 static const struct cbl_ynode n17 = {
-	.sid = UINT64_C(1099511627815),
+	.sid = UINT64_C(60039),
 	.name = "stream-window",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello_limits, stream_window),
@@ -341,7 +341,7 @@ static const struct cbl_ynode *const n12_c[] = {
 	&n13, &n14, &n15, &n16, &n17
 };
 static const struct cbl_ynode n12 = {
-	.sid = UINT64_C(1099511627810),
+	.sid = UINT64_C(60034),
 	.name = "limits",
 	.kind = CBL_YN_CONTAINER,
 	.off = offsetof(struct cblink_hello, limits),
@@ -355,7 +355,7 @@ static const struct cbl_ynode n12 = {
 };
 
 static const struct cbl_ynode n18 = {
-	.sid = UINT64_C(1099511627816),
+	.sid = UINT64_C(60040),
 	.name = "implementation",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello, implementation),
@@ -366,7 +366,7 @@ static const struct cbl_ynode n18 = {
 };
 
 static const struct cbl_ynode n19 = {
-	.sid = UINT64_C(1099511627817),
+	.sid = UINT64_C(60041),
 	.name = "content-id",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_hello, content_id),
@@ -380,7 +380,7 @@ static const struct cbl_ynode *const n11_c[] = {
 	&n12, &n18, &n19
 };
 static const struct cbl_ynode n11 = {
-	.sid = UINT64_C(1099511627809),
+	.sid = UINT64_C(60033),
 	.name = "hello",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -392,7 +392,7 @@ static const struct cbl_ynode n11 = {
 };
 
 static const struct cbl_ynode n21 = {
-	.sid = UINT64_C(1099511627819),
+	.sid = UINT64_C(60043),
 	.name = "code",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_close, code),
@@ -403,7 +403,7 @@ static const struct cbl_ynode n21 = {
 };
 
 static const struct cbl_ynode n22 = {
-	.sid = UINT64_C(1099511627820),
+	.sid = UINT64_C(60044),
 	.name = "message",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_close, message),
@@ -417,7 +417,7 @@ static const struct cbl_ynode *const n20_c[] = {
 	&n21, &n22
 };
 static const struct cbl_ynode n20 = {
-	.sid = UINT64_C(1099511627818),
+	.sid = UINT64_C(60042),
 	.name = "close",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -430,7 +430,7 @@ static const struct cbl_ynode n20 = {
 };
 
 static const struct cbl_ynode n24 = {
-	.sid = UINT64_C(1099511627825),
+	.sid = UINT64_C(60049),
 	.name = "target",
 	.kind = CBL_YN_LEAFLIST,
 	.off = offsetof(struct cblink_get, target),
@@ -444,7 +444,7 @@ static const struct cbl_ynode *const n23_c[] = {
 	&n24
 };
 static const struct cbl_ynode n23 = {
-	.sid = UINT64_C(1099511627824),
+	.sid = UINT64_C(60048),
 	.name = "get",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -457,7 +457,7 @@ static const struct cbl_ynode n23 = {
 };
 
 static const struct cbl_ynode n26 = {
-	.sid = UINT64_C(1099511627822),
+	.sid = UINT64_C(60046),
 	.name = "event-time",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -469,7 +469,7 @@ static const struct cbl_ynode n26 = {
 };
 
 static const struct cbl_ynode n27 = {
-	.sid = UINT64_C(1099511627823),
+	.sid = UINT64_C(60047),
 	.name = "event",
 	.kind = CBL_YN_ANYDATA,
 	.off = offsetof(struct cblink_notification, event),
@@ -482,7 +482,7 @@ static const struct cbl_ynode *const n25_c[] = {
 	&n26, &n27
 };
 static const struct cbl_ynode n25 = {
-	.sid = UINT64_C(1099511627821),
+	.sid = UINT64_C(60045),
 	.name = "notification",
 	.kind = CBL_YN_STRUCTURE,
 	.off = CBL_YOFF_NONE,
@@ -495,34 +495,34 @@ static const struct cbl_ynode n25 = {
 };
 
 static const uint64_t i0_d[] = {
-	UINT64_C(1099511627778), UINT64_C(1099511627779), UINT64_C(1099511627780), UINT64_C(1099511627781),
-	UINT64_C(1099511627782), UINT64_C(1099511627783), UINT64_C(1099511627784), UINT64_C(1099511627785),
-	UINT64_C(1099511627786), UINT64_C(1099511627787), UINT64_C(1099511627788), UINT64_C(1099511627789),
-	UINT64_C(1099511627790), UINT64_C(1099511627791), UINT64_C(1099511627792), UINT64_C(1099511627793),
-	UINT64_C(1099511627794), UINT64_C(1099511627795), UINT64_C(1099511627796), UINT64_C(1099511627797)
+	UINT64_C(60002), UINT64_C(60003), UINT64_C(60004), UINT64_C(60005),
+	UINT64_C(60006), UINT64_C(60007), UINT64_C(60008), UINT64_C(60009),
+	UINT64_C(60010), UINT64_C(60011), UINT64_C(60012), UINT64_C(60013),
+	UINT64_C(60014), UINT64_C(60015), UINT64_C(60016), UINT64_C(60017),
+	UINT64_C(60018), UINT64_C(60019), UINT64_C(60020), UINT64_C(60021)
 };
 static const struct cbl_yident idents[] = {
-	{ UINT64_C(1099511627777), "error-tag", &m8, 0x0, 20, i0_d },
-	{ UINT64_C(1099511627778), "in-use", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627779), "invalid-value", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627780), "too-big", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627781), "missing-attribute", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627782), "bad-attribute", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627783), "unknown-attribute", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627784), "missing-element", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627785), "bad-element", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627786), "unknown-element", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627787), "unknown-namespace", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627788), "access-denied", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627789), "lock-denied", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627790), "resource-denied", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627791), "rollback-failed", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627792), "data-exists", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627793), "data-missing", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627794), "operation-not-supported", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627795), "operation-failed", &m8, 0x0, 0, NULL },
-	{ UINT64_C(1099511627796), "partial-operation", &m8, 0x40, 0, NULL },
-	{ UINT64_C(1099511627797), "malformed-message", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60001), "error-tag", &m8, 0x0, 20, i0_d },
+	{ UINT64_C(60002), "in-use", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60003), "invalid-value", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60004), "too-big", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60005), "missing-attribute", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60006), "bad-attribute", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60007), "unknown-attribute", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60008), "missing-element", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60009), "bad-element", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60010), "unknown-element", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60011), "unknown-namespace", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60012), "access-denied", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60013), "lock-denied", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60014), "resource-denied", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60015), "rollback-failed", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60016), "data-exists", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60017), "data-missing", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60018), "operation-not-supported", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60019), "operation-failed", &m8, 0x0, 0, NULL },
+	{ UINT64_C(60020), "partial-operation", &m8, 0x40, 0, NULL },
+	{ UINT64_C(60021), "malformed-message", &m8, 0x0, 0, NULL },
 	{ 0, NULL, NULL, 0, 0, NULL },
 };
 
@@ -535,7 +535,7 @@ static const struct cbl_ymodule m8 = {
 	.revision = "2026-10-13",
 	.ns = "urn:cblink:yang:cblink",
 	.prefix = "cbl",
-	.sid = UINT64_C(1099511627776),
+	.sid = UINT64_C(60000),
 	.ntop = 6,
 	.top = m8_t,
 };

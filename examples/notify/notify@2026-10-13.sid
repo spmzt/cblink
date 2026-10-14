@@ -2,10 +2,10 @@
   "ietf-sid-file:sid-file": {
     "module-name": "notify",
     "module-revision": "2026-10-13",
-    "description": "cblink example (Arcana share/yang/SIDS.md: 2^40 + 500, 100).",
+    "description": "cblink example (60 500, 100: RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md)).",
     "assignment-range": [
       {
-        "entry-point": "1099511628276",
+        "entry-point": "60500",
         "size": "100"
       }
     ],
@@ -13,22 +13,22 @@
       {
         "namespace": "module",
         "identifier": "notify",
-        "sid": "1099511628276"
+        "sid": "60500"
       },
       {
         "namespace": "data",
         "identifier": "/notify:tick",
-        "sid": "1099511628277"
+        "sid": "60501"
       },
       {
         "namespace": "data",
         "identifier": "/notify:tick/msec",
-        "sid": "1099511628278"
+        "sid": "60502"
       },
       {
         "namespace": "data",
         "identifier": "/notify:tick/seq",
-        "sid": "1099511628279"
+        "sid": "60503"
       }
     ]
   }

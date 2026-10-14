@@ -7,7 +7,7 @@
 | Revision | 2026-10-13 |
 | Namespace | `urn:cblink:yang:cblink-ctrl` |
 | Prefix | `cblc` |
-| SID | 1099511627976 |
+| SID | 60200 |
 
 ## Tree diagram
 
@@ -67,50 +67,50 @@ module: cblink-ctrl
 
 | Node | Kind | Type | Config | Mandatory | Default | Units | SID |
 |---|---|---|---|---|---|---|---:|
-| `/cblink-ctrl:get-family` | rpc |  |  |  |  |  | 1099511627992 |
-| `/cblink-ctrl:get-family/input` | input |  |  |  |  |  | 1099511627993 |
-| `/cblink-ctrl:get-family/input/id` | leaf | `family-id` (uint16) |  |  |  |  | 1099511627994 |
-| `/cblink-ctrl:get-family/input/name` | leaf | `family-name` (string) |  |  |  |  | 1099511627995 |
-| `/cblink-ctrl:get-family/output` | output |  |  |  |  |  | 1099511627996 |
-| `/cblink-ctrl:get-family/output/id` | leaf | `family-id` (uint16) |  |  |  |  | 1099511628001 |
-| `/cblink-ctrl:get-family/output/name` | leaf | `family-name` (string) |  |  |  |  | 1099511628002 |
-| `/cblink-ctrl:get-family/output/version` | leaf | `uint32` |  |  |  |  | 1099511628007 |
-| `/cblink-ctrl:get-family/output/op` | list [cmd] |  |  |  |  |  | 1099511628003 |
-| `/cblink-ctrl:get-family/output/op/cmd` | leaf | `uint16` |  |  |  |  | 1099511628004 |
-| `/cblink-ctrl:get-family/output/op/name` | leaf | `string` |  |  |  |  | 1099511628006 |
-| `/cblink-ctrl:get-family/output/op/flags` | leaf | `op-flags` (bits) |  |  |  |  | 1099511628005 |
-| `/cblink-ctrl:get-family/output/group` | list [id] |  |  |  |  |  | 1099511627997 |
-| `/cblink-ctrl:get-family/output/group/id` | leaf | `uint32` |  |  |  |  | 1099511627999 |
-| `/cblink-ctrl:get-family/output/group/name` | leaf | `string` |  |  |  |  | 1099511628000 |
-| `/cblink-ctrl:get-family/output/group/flags` | leaf | `group-flags` (bits) |  |  |  |  | 1099511627998 |
-| `/cblink-ctrl:subscribe` | rpc |  |  |  |  |  | 1099511628013 |
-| `/cblink-ctrl:subscribe/input` | input |  |  |  |  |  | 1099511628014 |
-| `/cblink-ctrl:subscribe/input/family-id` | leaf | `family-id` (uint16) |  | yes |  |  | 1099511628015 |
-| `/cblink-ctrl:subscribe/input/group-id` | leaf | `uint32` |  | yes |  |  | 1099511628016 |
-| `/cblink-ctrl:subscribe/output` | output |  |  |  |  |  | 1099511628017 |
-| `/cblink-ctrl:unsubscribe` | rpc |  |  |  |  |  | 1099511628018 |
-| `/cblink-ctrl:unsubscribe/input` | input |  |  |  |  |  | 1099511628019 |
-| `/cblink-ctrl:unsubscribe/input/family-id` | leaf | `family-id` (uint16) |  | yes |  |  | 1099511628020 |
-| `/cblink-ctrl:unsubscribe/input/group-id` | leaf | `uint32` |  | yes |  |  | 1099511628021 |
-| `/cblink-ctrl:unsubscribe/output` | output |  |  |  |  |  | 1099511628022 |
-| `/cblink-ctrl:ping` | rpc |  |  |  |  |  | 1099511628008 |
-| `/cblink-ctrl:ping/input` | input |  |  |  |  |  | 1099511628009 |
-| `/cblink-ctrl:ping/input/cookie` | leaf | `binary` |  |  |  |  | 1099511628010 |
-| `/cblink-ctrl:ping/output` | output |  |  |  |  |  | 1099511628011 |
-| `/cblink-ctrl:ping/output/cookie` | leaf | `binary` |  |  |  |  | 1099511628012 |
-| `/cblink-ctrl:family-added` | notification |  |  |  |  |  | 1099511627977 |
-| `/cblink-ctrl:family-added/id` | leaf | `family-id` (uint16) |  |  |  |  | 1099511627982 |
-| `/cblink-ctrl:family-added/name` | leaf | `family-name` (string) |  |  |  |  | 1099511627983 |
-| `/cblink-ctrl:family-added/version` | leaf | `uint32` |  |  |  |  | 1099511627988 |
-| `/cblink-ctrl:family-added/op` | list [cmd] |  |  |  |  |  | 1099511627984 |
-| `/cblink-ctrl:family-added/op/cmd` | leaf | `uint16` |  |  |  |  | 1099511627985 |
-| `/cblink-ctrl:family-added/op/name` | leaf | `string` |  |  |  |  | 1099511627987 |
-| `/cblink-ctrl:family-added/op/flags` | leaf | `op-flags` (bits) |  |  |  |  | 1099511627986 |
-| `/cblink-ctrl:family-added/group` | list [id] |  |  |  |  |  | 1099511627978 |
-| `/cblink-ctrl:family-added/group/id` | leaf | `uint32` |  |  |  |  | 1099511627980 |
-| `/cblink-ctrl:family-added/group/name` | leaf | `string` |  |  |  |  | 1099511627981 |
-| `/cblink-ctrl:family-added/group/flags` | leaf | `group-flags` (bits) |  |  |  |  | 1099511627979 |
-| `/cblink-ctrl:family-removed` | notification |  |  |  |  |  | 1099511627989 |
-| `/cblink-ctrl:family-removed/id` | leaf | `family-id` (uint16) |  |  |  |  | 1099511627990 |
-| `/cblink-ctrl:family-removed/name` | leaf | `family-name` (string) |  |  |  |  | 1099511627991 |
+| `/cblink-ctrl:get-family` | rpc |  |  |  |  |  | 60216 |
+| `/cblink-ctrl:get-family/input` | input |  |  |  |  |  | 60217 |
+| `/cblink-ctrl:get-family/input/id` | leaf | `family-id` (uint16) |  |  |  |  | 60218 |
+| `/cblink-ctrl:get-family/input/name` | leaf | `family-name` (string) |  |  |  |  | 60219 |
+| `/cblink-ctrl:get-family/output` | output |  |  |  |  |  | 60220 |
+| `/cblink-ctrl:get-family/output/id` | leaf | `family-id` (uint16) |  |  |  |  | 60225 |
+| `/cblink-ctrl:get-family/output/name` | leaf | `family-name` (string) |  |  |  |  | 60226 |
+| `/cblink-ctrl:get-family/output/version` | leaf | `uint32` |  |  |  |  | 60231 |
+| `/cblink-ctrl:get-family/output/op` | list [cmd] |  |  |  |  |  | 60227 |
+| `/cblink-ctrl:get-family/output/op/cmd` | leaf | `uint16` |  |  |  |  | 60228 |
+| `/cblink-ctrl:get-family/output/op/name` | leaf | `string` |  |  |  |  | 60230 |
+| `/cblink-ctrl:get-family/output/op/flags` | leaf | `op-flags` (bits) |  |  |  |  | 60229 |
+| `/cblink-ctrl:get-family/output/group` | list [id] |  |  |  |  |  | 60221 |
+| `/cblink-ctrl:get-family/output/group/id` | leaf | `uint32` |  |  |  |  | 60223 |
+| `/cblink-ctrl:get-family/output/group/name` | leaf | `string` |  |  |  |  | 60224 |
+| `/cblink-ctrl:get-family/output/group/flags` | leaf | `group-flags` (bits) |  |  |  |  | 60222 |
+| `/cblink-ctrl:subscribe` | rpc |  |  |  |  |  | 60237 |
+| `/cblink-ctrl:subscribe/input` | input |  |  |  |  |  | 60238 |
+| `/cblink-ctrl:subscribe/input/family-id` | leaf | `family-id` (uint16) |  | yes |  |  | 60239 |
+| `/cblink-ctrl:subscribe/input/group-id` | leaf | `uint32` |  | yes |  |  | 60240 |
+| `/cblink-ctrl:subscribe/output` | output |  |  |  |  |  | 60241 |
+| `/cblink-ctrl:unsubscribe` | rpc |  |  |  |  |  | 60242 |
+| `/cblink-ctrl:unsubscribe/input` | input |  |  |  |  |  | 60243 |
+| `/cblink-ctrl:unsubscribe/input/family-id` | leaf | `family-id` (uint16) |  | yes |  |  | 60244 |
+| `/cblink-ctrl:unsubscribe/input/group-id` | leaf | `uint32` |  | yes |  |  | 60245 |
+| `/cblink-ctrl:unsubscribe/output` | output |  |  |  |  |  | 60246 |
+| `/cblink-ctrl:ping` | rpc |  |  |  |  |  | 60232 |
+| `/cblink-ctrl:ping/input` | input |  |  |  |  |  | 60233 |
+| `/cblink-ctrl:ping/input/cookie` | leaf | `binary` |  |  |  |  | 60234 |
+| `/cblink-ctrl:ping/output` | output |  |  |  |  |  | 60235 |
+| `/cblink-ctrl:ping/output/cookie` | leaf | `binary` |  |  |  |  | 60236 |
+| `/cblink-ctrl:family-added` | notification |  |  |  |  |  | 60201 |
+| `/cblink-ctrl:family-added/id` | leaf | `family-id` (uint16) |  |  |  |  | 60206 |
+| `/cblink-ctrl:family-added/name` | leaf | `family-name` (string) |  |  |  |  | 60207 |
+| `/cblink-ctrl:family-added/version` | leaf | `uint32` |  |  |  |  | 60212 |
+| `/cblink-ctrl:family-added/op` | list [cmd] |  |  |  |  |  | 60208 |
+| `/cblink-ctrl:family-added/op/cmd` | leaf | `uint16` |  |  |  |  | 60209 |
+| `/cblink-ctrl:family-added/op/name` | leaf | `string` |  |  |  |  | 60211 |
+| `/cblink-ctrl:family-added/op/flags` | leaf | `op-flags` (bits) |  |  |  |  | 60210 |
+| `/cblink-ctrl:family-added/group` | list [id] |  |  |  |  |  | 60202 |
+| `/cblink-ctrl:family-added/group/id` | leaf | `uint32` |  |  |  |  | 60204 |
+| `/cblink-ctrl:family-added/group/name` | leaf | `string` |  |  |  |  | 60205 |
+| `/cblink-ctrl:family-added/group/flags` | leaf | `group-flags` (bits) |  |  |  |  | 60203 |
+| `/cblink-ctrl:family-removed` | notification |  |  |  |  |  | 60213 |
+| `/cblink-ctrl:family-removed/id` | leaf | `family-id` (uint16) |  |  |  |  | 60214 |
+| `/cblink-ctrl:family-removed/name` | leaf | `family-name` (string) |  |  |  |  | 60215 |
 

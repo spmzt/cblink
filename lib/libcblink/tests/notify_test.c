@@ -305,7 +305,7 @@ ATF_TC_BODY(many_subscribers, tc)
 
 /*
  * ctrl "notify": families coming and going, cblink-ctrl's family-added
- * (2^40 + 201) and family-removed; the name is in the content.
+ * (60 000 + 201) and family-removed; the name is in the content.
  */
 static void
 ctrl_cb(cbl_conn *conn __unused, cbl_msg *msg, void *arg)
@@ -346,7 +346,7 @@ ATF_TC_BODY(ctrl_notify, tc)
 	drive(c, &r.n, 1, 3000);
 	ATF_REQUIRE_EQ(1, r.n);
 	ATF_REQUIRE_EQ(6, r.kind);		/* family-added */
-	ATF_REQUIRE_EQ(UINT64_C(1099511627776) + 201, r.sid);
+	ATF_REQUIRE_EQ(UINT64_C(60000) + 201, r.sid);
 	ATF_REQUIRE_STREQ("latecomer", r.name);
 	ATF_REQUIRE_EQ(0, cbl_family_unregister(fam));
 	drive(c, &r.n, 2, 3000);

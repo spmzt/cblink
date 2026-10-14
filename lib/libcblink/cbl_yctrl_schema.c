@@ -159,7 +159,7 @@ static const struct cbl_ytype t8 = {
 };
 
 static const struct cbl_ynode n2 = {
-	.sid = UINT64_C(1099511627994),
+	.sid = UINT64_C(60218),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_input, id),
@@ -170,7 +170,7 @@ static const struct cbl_ynode n2 = {
 };
 
 static const struct cbl_ynode n3 = {
-	.sid = UINT64_C(1099511627995),
+	.sid = UINT64_C(60219),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_input, name),
@@ -184,10 +184,10 @@ static const struct cbl_ynode *const n1_c[] = {
 	&n2, &n3
 };
 static const struct cbl_ynode n1 = {
-	.sid = UINT64_C(1099511627993),
+	.sid = UINT64_C(60217),
 	.name = "input",
 	.kind = CBL_YN_INPUT,
-	.base = UINT64_C(1099511627992),
+	.base = UINT64_C(60216),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_get_family_input),
@@ -202,7 +202,7 @@ static const uint16_t n4_p[] = {
 	1, 0, 0, 0, 2, 3, 4, 0, 0, 0, 5
 };
 static const struct cbl_ynode n6 = {
-	.sid = UINT64_C(1099511627998),
+	.sid = UINT64_C(60222),
 	.name = "flags",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output_group, flags),
@@ -213,7 +213,7 @@ static const struct cbl_ynode n6 = {
 };
 
 static const struct cbl_ynode n7 = {
-	.sid = UINT64_C(1099511627999),
+	.sid = UINT64_C(60223),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x4,
@@ -225,7 +225,7 @@ static const struct cbl_ynode n7 = {
 };
 
 static const struct cbl_ynode n8 = {
-	.sid = UINT64_C(1099511628000),
+	.sid = UINT64_C(60224),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output_group, name),
@@ -240,7 +240,7 @@ static const struct cbl_ynode *const n5_c[] = {
 };
 static const uint32_t n5_k[] = { 1 };
 static const struct cbl_ynode n5 = {
-	.sid = UINT64_C(1099511627997),
+	.sid = UINT64_C(60221),
 	.name = "group",
 	.kind = CBL_YN_LIST,
 	.flags = 0x10,
@@ -257,7 +257,7 @@ static const struct cbl_ynode n5 = {
 };
 
 static const struct cbl_ynode n9 = {
-	.sid = UINT64_C(1099511628001),
+	.sid = UINT64_C(60225),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output, id),
@@ -268,7 +268,7 @@ static const struct cbl_ynode n9 = {
 };
 
 static const struct cbl_ynode n10 = {
-	.sid = UINT64_C(1099511628002),
+	.sid = UINT64_C(60226),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output, name),
@@ -279,7 +279,7 @@ static const struct cbl_ynode n10 = {
 };
 
 static const struct cbl_ynode n12 = {
-	.sid = UINT64_C(1099511628004),
+	.sid = UINT64_C(60228),
 	.name = "cmd",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x4,
@@ -291,7 +291,7 @@ static const struct cbl_ynode n12 = {
 };
 
 static const struct cbl_ynode n13 = {
-	.sid = UINT64_C(1099511628005),
+	.sid = UINT64_C(60229),
 	.name = "flags",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output_op, flags),
@@ -302,7 +302,7 @@ static const struct cbl_ynode n13 = {
 };
 
 static const struct cbl_ynode n14 = {
-	.sid = UINT64_C(1099511628006),
+	.sid = UINT64_C(60230),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output_op, name),
@@ -317,7 +317,7 @@ static const struct cbl_ynode *const n11_c[] = {
 };
 static const uint32_t n11_k[] = { 0 };
 static const struct cbl_ynode n11 = {
-	.sid = UINT64_C(1099511628003),
+	.sid = UINT64_C(60227),
 	.name = "op",
 	.kind = CBL_YN_LIST,
 	.flags = 0x10,
@@ -334,7 +334,7 @@ static const struct cbl_ynode n11 = {
 };
 
 static const struct cbl_ynode n15 = {
-	.sid = UINT64_C(1099511628007),
+	.sid = UINT64_C(60231),
 	.name = "version",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_get_family_output, version),
@@ -348,10 +348,10 @@ static const struct cbl_ynode *const n4_c[] = {
 	&n5, &n9, &n10, &n11, &n15
 };
 static const struct cbl_ynode n4 = {
-	.sid = UINT64_C(1099511627996),
+	.sid = UINT64_C(60220),
 	.name = "output",
 	.kind = CBL_YN_OUTPUT,
-	.base = UINT64_C(1099511627992),
+	.base = UINT64_C(60216),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_get_family_output),
@@ -367,7 +367,7 @@ static const struct cbl_ynode *const n0_c[] = {
 	&n1, &n4
 };
 static const struct cbl_ynode n0 = {
-	.sid = UINT64_C(1099511627992),
+	.sid = UINT64_C(60216),
 	.name = "get-family",
 	.kind = CBL_YN_RPC,
 	.off = CBL_YOFF_NONE,
@@ -378,7 +378,7 @@ static const struct cbl_ynode n0 = {
 };
 
 static const struct cbl_ynode n18 = {
-	.sid = UINT64_C(1099511628015),
+	.sid = UINT64_C(60239),
 	.name = "family-id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -390,7 +390,7 @@ static const struct cbl_ynode n18 = {
 };
 
 static const struct cbl_ynode n19 = {
-	.sid = UINT64_C(1099511628016),
+	.sid = UINT64_C(60240),
 	.name = "group-id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -405,10 +405,10 @@ static const struct cbl_ynode *const n17_c[] = {
 	&n18, &n19
 };
 static const struct cbl_ynode n17 = {
-	.sid = UINT64_C(1099511628014),
+	.sid = UINT64_C(60238),
 	.name = "input",
 	.kind = CBL_YN_INPUT,
-	.base = UINT64_C(1099511628013),
+	.base = UINT64_C(60237),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_subscribe_input),
@@ -420,10 +420,10 @@ static const struct cbl_ynode n17 = {
 };
 
 static const struct cbl_ynode n20 = {
-	.sid = UINT64_C(1099511628017),
+	.sid = UINT64_C(60241),
 	.name = "output",
 	.kind = CBL_YN_OUTPUT,
-	.base = UINT64_C(1099511628013),
+	.base = UINT64_C(60237),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_subscribe_output),
@@ -435,7 +435,7 @@ static const struct cbl_ynode *const n16_c[] = {
 	&n17, &n20
 };
 static const struct cbl_ynode n16 = {
-	.sid = UINT64_C(1099511628013),
+	.sid = UINT64_C(60237),
 	.name = "subscribe",
 	.kind = CBL_YN_RPC,
 	.off = CBL_YOFF_NONE,
@@ -446,7 +446,7 @@ static const struct cbl_ynode n16 = {
 };
 
 static const struct cbl_ynode n23 = {
-	.sid = UINT64_C(1099511628020),
+	.sid = UINT64_C(60244),
 	.name = "family-id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -458,7 +458,7 @@ static const struct cbl_ynode n23 = {
 };
 
 static const struct cbl_ynode n24 = {
-	.sid = UINT64_C(1099511628021),
+	.sid = UINT64_C(60245),
 	.name = "group-id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x2,
@@ -473,10 +473,10 @@ static const struct cbl_ynode *const n22_c[] = {
 	&n23, &n24
 };
 static const struct cbl_ynode n22 = {
-	.sid = UINT64_C(1099511628019),
+	.sid = UINT64_C(60243),
 	.name = "input",
 	.kind = CBL_YN_INPUT,
-	.base = UINT64_C(1099511628018),
+	.base = UINT64_C(60242),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_unsubscribe_input),
@@ -488,10 +488,10 @@ static const struct cbl_ynode n22 = {
 };
 
 static const struct cbl_ynode n25 = {
-	.sid = UINT64_C(1099511628022),
+	.sid = UINT64_C(60246),
 	.name = "output",
 	.kind = CBL_YN_OUTPUT,
-	.base = UINT64_C(1099511628018),
+	.base = UINT64_C(60242),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_unsubscribe_output),
@@ -503,7 +503,7 @@ static const struct cbl_ynode *const n21_c[] = {
 	&n22, &n25
 };
 static const struct cbl_ynode n21 = {
-	.sid = UINT64_C(1099511628018),
+	.sid = UINT64_C(60242),
 	.name = "unsubscribe",
 	.kind = CBL_YN_RPC,
 	.off = CBL_YOFF_NONE,
@@ -514,7 +514,7 @@ static const struct cbl_ynode n21 = {
 };
 
 static const struct cbl_ynode n28 = {
-	.sid = UINT64_C(1099511628010),
+	.sid = UINT64_C(60234),
 	.name = "cookie",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_ping_input, cookie),
@@ -528,10 +528,10 @@ static const struct cbl_ynode *const n27_c[] = {
 	&n28
 };
 static const struct cbl_ynode n27 = {
-	.sid = UINT64_C(1099511628009),
+	.sid = UINT64_C(60233),
 	.name = "input",
 	.kind = CBL_YN_INPUT,
-	.base = UINT64_C(1099511628008),
+	.base = UINT64_C(60232),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_ping_input),
@@ -543,7 +543,7 @@ static const struct cbl_ynode n27 = {
 };
 
 static const struct cbl_ynode n30 = {
-	.sid = UINT64_C(1099511628012),
+	.sid = UINT64_C(60236),
 	.name = "cookie",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_ping_output, cookie),
@@ -557,10 +557,10 @@ static const struct cbl_ynode *const n29_c[] = {
 	&n30
 };
 static const struct cbl_ynode n29 = {
-	.sid = UINT64_C(1099511628011),
+	.sid = UINT64_C(60235),
 	.name = "output",
 	.kind = CBL_YN_OUTPUT,
-	.base = UINT64_C(1099511628008),
+	.base = UINT64_C(60232),
 	.off = CBL_YOFF_NONE,
 	.hoff = CBL_YOFF_NONE,
 	.size = sizeof(struct cblink_ctrl_ping_output),
@@ -575,7 +575,7 @@ static const struct cbl_ynode *const n26_c[] = {
 	&n27, &n29
 };
 static const struct cbl_ynode n26 = {
-	.sid = UINT64_C(1099511628008),
+	.sid = UINT64_C(60232),
 	.name = "ping",
 	.kind = CBL_YN_RPC,
 	.off = CBL_YOFF_NONE,
@@ -589,7 +589,7 @@ static const uint16_t n31_p[] = {
 	1, 0, 0, 0, 2, 3, 4, 0, 0, 0, 5
 };
 static const struct cbl_ynode n33 = {
-	.sid = UINT64_C(1099511627979),
+	.sid = UINT64_C(60203),
 	.name = "flags",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added_group, flags),
@@ -600,7 +600,7 @@ static const struct cbl_ynode n33 = {
 };
 
 static const struct cbl_ynode n34 = {
-	.sid = UINT64_C(1099511627980),
+	.sid = UINT64_C(60204),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x4,
@@ -612,7 +612,7 @@ static const struct cbl_ynode n34 = {
 };
 
 static const struct cbl_ynode n35 = {
-	.sid = UINT64_C(1099511627981),
+	.sid = UINT64_C(60205),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added_group, name),
@@ -627,7 +627,7 @@ static const struct cbl_ynode *const n32_c[] = {
 };
 static const uint32_t n32_k[] = { 1 };
 static const struct cbl_ynode n32 = {
-	.sid = UINT64_C(1099511627978),
+	.sid = UINT64_C(60202),
 	.name = "group",
 	.kind = CBL_YN_LIST,
 	.flags = 0x10,
@@ -644,7 +644,7 @@ static const struct cbl_ynode n32 = {
 };
 
 static const struct cbl_ynode n36 = {
-	.sid = UINT64_C(1099511627982),
+	.sid = UINT64_C(60206),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added, id),
@@ -655,7 +655,7 @@ static const struct cbl_ynode n36 = {
 };
 
 static const struct cbl_ynode n37 = {
-	.sid = UINT64_C(1099511627983),
+	.sid = UINT64_C(60207),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added, name),
@@ -666,7 +666,7 @@ static const struct cbl_ynode n37 = {
 };
 
 static const struct cbl_ynode n39 = {
-	.sid = UINT64_C(1099511627985),
+	.sid = UINT64_C(60209),
 	.name = "cmd",
 	.kind = CBL_YN_LEAF,
 	.flags = 0x4,
@@ -678,7 +678,7 @@ static const struct cbl_ynode n39 = {
 };
 
 static const struct cbl_ynode n40 = {
-	.sid = UINT64_C(1099511627986),
+	.sid = UINT64_C(60210),
 	.name = "flags",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added_op, flags),
@@ -689,7 +689,7 @@ static const struct cbl_ynode n40 = {
 };
 
 static const struct cbl_ynode n41 = {
-	.sid = UINT64_C(1099511627987),
+	.sid = UINT64_C(60211),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added_op, name),
@@ -704,7 +704,7 @@ static const struct cbl_ynode *const n38_c[] = {
 };
 static const uint32_t n38_k[] = { 0 };
 static const struct cbl_ynode n38 = {
-	.sid = UINT64_C(1099511627984),
+	.sid = UINT64_C(60208),
 	.name = "op",
 	.kind = CBL_YN_LIST,
 	.flags = 0x10,
@@ -721,7 +721,7 @@ static const struct cbl_ynode n38 = {
 };
 
 static const struct cbl_ynode n42 = {
-	.sid = UINT64_C(1099511627988),
+	.sid = UINT64_C(60212),
 	.name = "version",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_added, version),
@@ -735,7 +735,7 @@ static const struct cbl_ynode *const n31_c[] = {
 	&n32, &n36, &n37, &n38, &n42
 };
 static const struct cbl_ynode n31 = {
-	.sid = UINT64_C(1099511627977),
+	.sid = UINT64_C(60201),
 	.name = "family-added",
 	.kind = CBL_YN_NOTIF,
 	.off = CBL_YOFF_NONE,
@@ -749,7 +749,7 @@ static const struct cbl_ynode n31 = {
 };
 
 static const struct cbl_ynode n44 = {
-	.sid = UINT64_C(1099511627990),
+	.sid = UINT64_C(60214),
 	.name = "id",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_removed, id),
@@ -760,7 +760,7 @@ static const struct cbl_ynode n44 = {
 };
 
 static const struct cbl_ynode n45 = {
-	.sid = UINT64_C(1099511627991),
+	.sid = UINT64_C(60215),
 	.name = "name",
 	.kind = CBL_YN_LEAF,
 	.off = offsetof(struct cblink_ctrl_family_removed, name),
@@ -774,7 +774,7 @@ static const struct cbl_ynode *const n43_c[] = {
 	&n44, &n45
 };
 static const struct cbl_ynode n43 = {
-	.sid = UINT64_C(1099511627989),
+	.sid = UINT64_C(60213),
 	.name = "family-removed",
 	.kind = CBL_YN_NOTIF,
 	.off = CBL_YOFF_NONE,
@@ -799,7 +799,7 @@ static const struct cbl_ymodule m8 = {
 	.revision = "2026-10-13",
 	.ns = "urn:cblink:yang:cblink-ctrl",
 	.prefix = "cblc",
-	.sid = UINT64_C(1099511627976),
+	.sid = UINT64_C(60200),
 	.ntop = 6,
 	.top = m8_t,
 };

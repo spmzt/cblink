@@ -4,7 +4,7 @@
     "module-revision": "2026-10-13",
     "sid-file-version": 1,
     "sid-file-status": "unpublished",
-    "description": "SIDs of cblink, assigned by hand from Arcana's provisional block (2^40, until IANA assigns a mega-range): numbers are forever, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
+    "description": "SIDs of cblink, assigned by hand from RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md): not globally unique, so for no operational deployment; numbers are forever within it, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
     "dependency-revision": [
       {
         "module-name": "ietf-yang-types",
@@ -17,7 +17,7 @@
     ],
     "assignment-range": [
       {
-        "entry-point": "1099511627776",
+        "entry-point": "60000",
         "size": "100"
       }
     ],
@@ -25,252 +25,252 @@
       {
         "namespace": "module",
         "identifier": "cblink",
-        "sid": "1099511627776"
+        "sid": "60000"
       },
       {
         "namespace": "identity",
         "identifier": "error-tag",
-        "sid": "1099511627777"
+        "sid": "60001"
       },
       {
         "namespace": "identity",
         "identifier": "in-use",
-        "sid": "1099511627778"
+        "sid": "60002"
       },
       {
         "namespace": "identity",
         "identifier": "invalid-value",
-        "sid": "1099511627779"
+        "sid": "60003"
       },
       {
         "namespace": "identity",
         "identifier": "too-big",
-        "sid": "1099511627780"
+        "sid": "60004"
       },
       {
         "namespace": "identity",
         "identifier": "missing-attribute",
-        "sid": "1099511627781"
+        "sid": "60005"
       },
       {
         "namespace": "identity",
         "identifier": "bad-attribute",
-        "sid": "1099511627782"
+        "sid": "60006"
       },
       {
         "namespace": "identity",
         "identifier": "unknown-attribute",
-        "sid": "1099511627783"
+        "sid": "60007"
       },
       {
         "namespace": "identity",
         "identifier": "missing-element",
-        "sid": "1099511627784"
+        "sid": "60008"
       },
       {
         "namespace": "identity",
         "identifier": "bad-element",
-        "sid": "1099511627785"
+        "sid": "60009"
       },
       {
         "namespace": "identity",
         "identifier": "unknown-element",
-        "sid": "1099511627786"
+        "sid": "60010"
       },
       {
         "namespace": "identity",
         "identifier": "unknown-namespace",
-        "sid": "1099511627787"
+        "sid": "60011"
       },
       {
         "namespace": "identity",
         "identifier": "access-denied",
-        "sid": "1099511627788"
+        "sid": "60012"
       },
       {
         "namespace": "identity",
         "identifier": "lock-denied",
-        "sid": "1099511627789"
+        "sid": "60013"
       },
       {
         "namespace": "identity",
         "identifier": "resource-denied",
-        "sid": "1099511627790"
+        "sid": "60014"
       },
       {
         "namespace": "identity",
         "identifier": "rollback-failed",
-        "sid": "1099511627791"
+        "sid": "60015"
       },
       {
         "namespace": "identity",
         "identifier": "data-exists",
-        "sid": "1099511627792"
+        "sid": "60016"
       },
       {
         "namespace": "identity",
         "identifier": "data-missing",
-        "sid": "1099511627793"
+        "sid": "60017"
       },
       {
         "namespace": "identity",
         "identifier": "operation-not-supported",
-        "sid": "1099511627794"
+        "sid": "60018"
       },
       {
         "namespace": "identity",
         "identifier": "operation-failed",
-        "sid": "1099511627795"
+        "sid": "60019"
       },
       {
         "namespace": "identity",
         "identifier": "partial-operation",
-        "sid": "1099511627796"
+        "sid": "60020"
       },
       {
         "namespace": "identity",
         "identifier": "malformed-message",
-        "sid": "1099511627797"
+        "sid": "60021"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error",
-        "sid": "1099511627798"
+        "sid": "60022"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-type",
-        "sid": "1099511627799"
+        "sid": "60023"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-tag",
-        "sid": "1099511627800"
+        "sid": "60024"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-app-tag",
-        "sid": "1099511627801"
+        "sid": "60025"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-path",
-        "sid": "1099511627802"
+        "sid": "60026"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-message",
-        "sid": "1099511627803"
+        "sid": "60027"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/error-info",
-        "sid": "1099511627804"
+        "sid": "60028"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/errno",
-        "sid": "1099511627805"
+        "sid": "60029"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:error/cookie",
-        "sid": "1099511627806"
+        "sid": "60030"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:credit",
-        "sid": "1099511627807"
+        "sid": "60031"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:credit/increment",
-        "sid": "1099511627808"
+        "sid": "60032"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello",
-        "sid": "1099511627809"
+        "sid": "60033"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits",
-        "sid": "1099511627810"
+        "sid": "60034"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits/max-frame",
-        "sid": "1099511627811"
+        "sid": "60035"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits/max-depth",
-        "sid": "1099511627812"
+        "sid": "60036"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits/max-attrs",
-        "sid": "1099511627813"
+        "sid": "60037"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits/max-streams",
-        "sid": "1099511627814"
+        "sid": "60038"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/limits/stream-window",
-        "sid": "1099511627815"
+        "sid": "60039"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/implementation",
-        "sid": "1099511627816"
+        "sid": "60040"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:hello/content-id",
-        "sid": "1099511627817"
+        "sid": "60041"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:close",
-        "sid": "1099511627818"
+        "sid": "60042"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:close/code",
-        "sid": "1099511627819"
+        "sid": "60043"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:close/message",
-        "sid": "1099511627820"
+        "sid": "60044"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:notification",
-        "sid": "1099511627821"
+        "sid": "60045"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:notification/event-time",
-        "sid": "1099511627822"
+        "sid": "60046"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:notification/event",
-        "sid": "1099511627823"
+        "sid": "60047"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:get",
-        "sid": "1099511627824"
+        "sid": "60048"
       },
       {
         "namespace": "data",
         "identifier": "/cblink:get/target",
-        "sid": "1099511627825"
+        "sid": "60049"
       }
     ]
   }

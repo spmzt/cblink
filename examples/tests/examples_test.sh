@@ -119,7 +119,7 @@ kv_body()
 	atf_check -o match:'^touch: ttl 300$' cat out
 	atf_check -o match:'^clear al: 1 removed, 1 left$' cat out
 	# {SID of changed: {+1 key: "beta", +2 what: deleted (1)}}
-	atf_check -o match:'^changed: a1 1b .* a2 01 64 62 65 74 61 02 01$' \
+	atf_check -o match:'^changed: a1 19 ea c5 a2 01 64 62 65 74 61 02 01$' \
 	    cat out
 	atf_check -o match:'^notified: changed beta deleted$' cat out
 }

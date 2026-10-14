@@ -31,10 +31,10 @@ decode_hex(cbl_ctx *ctx, const char *hex)
 
 /* docs/WIRE-FORMAT.md section 6.3: {cblink:error: {...}}. */
 #define	ERR_FRAME \
-	"CB 4C 02 18 00 00 00 41 00 11 00 01 00 00 00 20" \
+	"CB 4C 02 18 00 00 00 35 00 11 00 01 00 00 00 20" \
 	"00 00 00 01 00 00 00 00" \
-	"A1 1B 00 00 01 00 00 00 00 16" \
-	"A5 01 03 02 1B 00 00 01 00 00 00 00 11 04 81 01" \
+	"A1 19 EA 76" \
+	"A5 01 03 02 19 EA 71 04 81 01" \
 	"05 6B 6E 6F 20 73 75 63 68 20 6B 65 79 07 02"
 
 ATF_TC_WITHOUT_HEAD(wire_error_frame);
@@ -59,14 +59,14 @@ ATF_TC_BODY(wire_error_frame, tc)
 	ATF_REQUIRE(!got[0].index);
 	ATF_REQUIRE_EQ(-1, cbl_msg_err_miss_type(msg));
 	/* The cblink:error structure, at its SID. */
-	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, UINT64_C(1099511627776) + 22,
+	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, UINT64_C(60000) + 22,
 	    &(const void *){ 0 }, &(size_t){ 0 }));
 	cbl_msg_free(msg);
 	cbl_ctx_free(ctx);
 }
 
 /*
- * Section 7.3: get-family (2^40 + 216) by name, and the output the
+ * Section 7.3: get-family (60 000 + 216) by name, and the output the
  * library's server sends for family "kv".
  */
 ATF_TC_WITHOUT_HEAD(wire_getfamily);
@@ -83,7 +83,7 @@ ATF_TC_BODY(wire_getfamily, tc)
 		'e', 't',
 		0x0f, 0x01,
 	};
-	uint64_t gf = UINT64_C(1099511627776) + 216;
+	uint64_t gf = UINT64_C(60000) + 216;
 	cbl_ctx *ctx = test_ctx();
 	cbl_msg *msg;
 
@@ -91,18 +91,18 @@ ATF_TC_BODY(wire_getfamily, tc)
 	cbl_msg_set_seq(msg, 7);
 	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, gf, in, sizeof(in)));
 	require_frame(msg,
-	    "CB 4C 02 18 00 00 00 27 00 00 00 01 00 00 00 01"
+	    "CB 4C 02 18 00 00 00 21 00 00 00 01 00 00 00 01"
 	    "00 00 00 07 00 00 00 00"
-	    "A1 1B 00 00 01 00 00 00 00 D8 A1 03 62 6B 76");
+	    "A1 19 EB 38 A1 03 62 6B 76");
 	cbl_msg_free(msg);
 
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 0, 1, 0, &msg));
 	cbl_msg_set_seq(msg, 7);
 	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(msg, gf, out, sizeof(out)));
 	require_frame(msg,
-	    "CB 4C 02 18 00 00 00 48 00 00 00 01 00 00 00 00"
+	    "CB 4C 02 18 00 00 00 42 00 00 00 01 00 00 00 00"
 	    "00 00 00 07 00 00 00 00"
-	    "A1 1B 00 00 01 00 00 00 00 D8"
+	    "A1 19 EB 38"
 	    "A5 05 81 A3 01 40 02 02 03 67 63 68 61 6E 67 65 73"
 	    "09 02 0A 62 6B 76"
 	    "0B 81 A3 01 01 02 41 01 03 63 67 65 74 0F 01");
@@ -155,15 +155,15 @@ ATF_TC_WITHOUT_HEAD(wire_stream_frames);
 ATF_TC_BODY(wire_stream_frames, tc)
 {
 	static const char *frames[] = {
-		"CB 4C 02 18 00 00 00 30 00 11 00 03 00 01 00 01"
+		"CB 4C 02 18 00 00 00 2A 00 11 00 03 00 01 00 01"
 		"00 00 00 08 00 00 00 01"
-		"A2 01 65 75 73 65 72 2F 1B 00 00 01 00 00 00 00 1F A1 01 1A 00 01 00 00",
-		"CB 4C 02 18 00 00 00 27 00 11 00 03 00 01 00 00"
-		"00 00 00 08 00 00 00 01 A1 1B 00 00 01 00 00 00 00 1F A1 01 19 80 00",
+		"A2 01 65 75 73 65 72 2F 19 EA 7F A1 01 1A 00 01 00 00",
+		"CB 4C 02 18 00 00 00 21 00 11 00 03 00 01 00 00"
+		"00 00 00 08 00 00 00 01 A1 19 EA 7F A1 01 19 80 00",
 		"CB 4C 02 18 00 00 00 21 00 11 00 03 00 02 00 00"
 		"00 00 00 00 00 00 00 01 A1 01 66 75 73 65 72 2F 61",
-		"CB 4C 02 18 00 00 00 26 00 11 00 03 00 20 00 00"
-		"00 00 00 00 00 00 00 01 A1 1B 00 00 01 00 00 00 00 1F A1 01 18 21",
+		"CB 4C 02 18 00 00 00 20 00 11 00 03 00 20 00 00"
+		"00 00 00 00 00 00 00 01 A1 19 EA 7F A1 01 18 21",
 		"CB 4C 02 18 00 00 00 18 00 11 00 03 00 04 00 00"
 		"00 00 00 00 00 00 00 01",
 	};

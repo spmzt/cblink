@@ -269,11 +269,11 @@ any other item, its value YANG-CBOR (RFC 9254):
 
 | Structure | SID (provisional) | Fields | Used in |
 |-----------|-------------------|--------|---------|
-| `error`   | 2⁴⁰ + 22 | `error-type`, `error-tag` (an identity), `error-app-tag`, `error-path` (an instance-identifier), `error-message` (≤ 1024 characters), `error-info`, `errno`, `cookie` (≤ 256 B) | `ERROR`, ack (warning, cookie), `S_RESET`; and the next notification after some were missed, with `errno` `ENOBUFS` |
-| `credit`  | 2⁴⁰ + 31 | `increment` (≤ 2³¹−1) | `S_OPEN`, its accept, `S_CREDIT` |
-| `close`   | 2⁴⁰ + 42 | `code`, `message` | `S_CLOSE` |
-| `hello`   | 2⁴⁰ + 33 | `limits`, `implementation`, `content-id` | the control family's `hello` |
-| `notification` | 2⁴⁰ + 45 | `event-time`, `event` | `NOTIFY` of YANG notifications |
+| `error`   | 60 000 + 22 | `error-type`, `error-tag` (an identity), `error-app-tag`, `error-path` (an instance-identifier), `error-message` (≤ 1024 characters), `error-info`, `errno`, `cookie` (≤ 256 B) | `ERROR`, ack (warning, cookie), `S_RESET`; and the next notification after some were missed, with `errno` `ENOBUFS` |
+| `credit`  | 60 000 + 31 | `increment` (≤ 2³¹−1) | `S_OPEN`, its accept, `S_CREDIT` |
+| `close`   | 60 000 + 42 | `code`, `message` | `S_CLOSE` |
+| `hello`   | 60 000 + 33 | `limits`, `implementation`, `content-id` | the control family's `hello` |
+| `notification` | 60 000 + 45 | `event-time`, `event` | `NOTIFY` of YANG notifications |
 
 The SIDs are the module's `.sid` file's (`share/yang/cblink@2026-10-13.sid`);
 see `share/yang/SIDS.md` in Arcana for the block they are taken from.
@@ -331,13 +331,13 @@ The request was a `kv` (family 17) `get` (cmd 1) with seq 1. It failed with
 `ENOENT`, the message `"no such key"`, and path `[1]`:
 
 ```
-CB 4C 02 18  00 00 00 41  00 11 00 01  00 00 00 20  magic,v2,hdrlen=24 len=65 fam=17 cmd=1 flags=ERROR
+CB 4C 02 18  00 00 00 35  00 11 00 01  00 00 00 20  magic,v2,hdrlen=24 len=53 fam=17 cmd=1 flags=ERROR
 00 00 00 01  00 00 00 00                            seq=1 stream=0
 A1                                                  map(1)
-   1B 00 00 01 00 00 00 00 16                       2^40+22 (cblink:error):
+   19 EA 76                                         60 022 (cblink:error):
    A5                                                 map(5), keys deltas from it
       01 03                                           +1 error-type: application (3)
-      02 1B 00 00 01 00 00 00 00 11                   +2 error-tag: 2^40+17 (data-missing)
+      02 19 EA 71                                     +2 error-tag: 60 017 (data-missing)
       04 81 01                                        +4 error-path: [1]
       05 6B 6E 6F 20 73 75 63 68 20 6B 65 79          +5 error-message: "no such key"
       07 02                                           +7 errno: 2 (ENOENT)
@@ -366,7 +366,7 @@ A1                                                  map(1)
 ### 7.2 Control family (`family = 0`)
 
 The control family is the YANG module `cblink-ctrl`
-(`share/yang/cblink-ctrl@2026-10-13.yang`, its SIDs from 2⁴⁰ + 200 in
+(`share/yang/cblink-ctrl@2026-10-13.yang`, its SIDs from 60 200 in
 `cblink-ctrl@2026-10-13.sid`; reference: [ctrl.md](ctrl.md)). Each command
 is one of its rpcs: the request's body is `{SID(rpc): input}`, the reply's
 `{SID(rpc): output}`, the input's and output's children keyed by deltas
@@ -401,12 +401,12 @@ goes both ways. Without it, a sender assumes the defaults in section 11.
 ### 7.3 Example: resolving family `"kv"`
 
 Request: `ctrl` (0), `get-family` (1), flags `REQUEST`, seq 7, body
-`{2^40 + 216 (get-family): {+3 name: "kv"}}`:
+`{60 216 (get-family): {+3 name: "kv"}}`:
 
 ```
-CB 4C 02 18  00 00 00 27  00 00 00 01  00 00 00 01   len=39 fam=0 cmd=1 flags=REQUEST
+CB 4C 02 18  00 00 00 21  00 00 00 01  00 00 00 01   len=33 fam=0 cmd=1 flags=REQUEST
 00 00 00 07  00 00 00 00                             seq=7 stream=0
-A1 1B 00 00 01 00 00 00 00 D8                        {2^40 + 216 (get-family):
+A1 19 EB 38                                          {60 216 (get-family):
    A1 03 62 6B 76                                      {+3 name: "kv"}}
 ```
 
@@ -414,9 +414,9 @@ Reply: flags `0`, seq 7, the output: `kv` is family 2, version 1, with
 command 1 `get` (do) and group 2 `changes`:
 
 ```
-CB 4C 02 18  00 00 00 48  00 00 00 01  00 00 00 00   len=72 fam=0 cmd=1 flags=0
+CB 4C 02 18  00 00 00 42  00 00 00 01  00 00 00 00   len=66 fam=0 cmd=1 flags=0
 00 00 00 07  00 00 00 00                             seq=7 stream=0
-A1 1B 00 00 01 00 00 00 00 D8                        {2^40 + 216 (get-family):
+A1 19 EB 38                                          {60 216 (get-family):
    A5                                                  map(5), deltas from 216
       05 81 A3 01 40 02 02 03 67 63 68 61 6E 67 65 73  +5 group: [{+1 flags: h'', +2 id: 2, +3 name: "changes"}]
       09 02                                            +9 id: 2
@@ -570,22 +570,22 @@ open one.
 initiator), opener window 65536, acceptor window 32768:
 
 ```
-CB 4C 02 18  00 00 00 30  00 11 00 03  00 01 00 01   len=48 fam=17 cmd=3 flags=REQUEST|S_OPEN
+CB 4C 02 18  00 00 00 2A  00 11 00 03  00 01 00 01   len=42 fam=17 cmd=3 flags=REQUEST|S_OPEN
 00 00 00 08  00 00 00 01                             seq=8 stream=1
 A2 01 65 75 73 65 72 2F                              {1: "user/",
-   1B 00 00 01 00 00 00 00 1F  A1 01 1A 00 01 00 00         cblink:credit: {increment: 65536}}
+   19 EA 7F  A1 01 1A 00 01 00 00                     cblink:credit: {increment: 65536}}
 
-CB 4C 02 18  00 00 00 27  00 11 00 03  00 01 00 00   len=39 flags=S_OPEN (accept)
+CB 4C 02 18  00 00 00 21  00 11 00 03  00 01 00 00   len=33 flags=S_OPEN (accept)
 00 00 00 08  00 00 00 01                             seq=8 stream=1
-A1 1B 00 00 01 00 00 00 00 1F A1 01 19 80 00                   {cblink:credit: {increment: 32768}}
+A1 19 EA 7F A1 01 19 80 00                           {cblink:credit: {increment: 32768}}
 
 CB 4C 02 18  00 00 00 21  00 11 00 03  00 02 00 00   len=33 flags=S_DATA
 00 00 00 00  00 00 00 01                             seq=0 stream=1
 A1 01 66 75 73 65 72 2F 61                           {1: "user/a"}     costs 33 credit
 
-CB 4C 02 18  00 00 00 26  00 11 00 03  00 20 00 00   len=38 flags=S_CREDIT
+CB 4C 02 18  00 00 00 20  00 11 00 03  00 20 00 00   len=32 flags=S_CREDIT
 00 00 00 00  00 00 00 01                             seq=0 stream=1
-A1 1B 00 00 01 00 00 00 00 1F A1 01 18 21                      {cblink:credit: {increment: 33}}
+A1 19 EA 7F A1 01 18 21                              {cblink:credit: {increment: 33}}
 
 CB 4C 02 18  00 00 00 18  00 11 00 03  00 04 00 00   len=24 flags=S_HCLOSE
 00 00 00 00  00 00 00 01                             stream=1, empty body

@@ -8,12 +8,10 @@ beforeinstall: .PHONY
 	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 0755 ${DESTDIR}${TESTSDIR}
 .endif
 
-ATF_TESTS_C=	attr_test \
-		family_test \
+ATF_TESTS_C=	family_test \
 		frame_test \
 		malformed_test \
 		notify_test \
-		policy_test \
 		proxy_test \
 		sctp_raw_test \
 		sid_test \

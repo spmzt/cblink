@@ -18,10 +18,8 @@ SRCS=		cbl_arena.c \
 		cbl_loop.c \
 		cbl_msg.c \
 		cbl_notify.c \
-		cbl_parse.c \
 		cbl_pattern.c \
 		cbl_peer.c \
-		cbl_policy.c \
 		cbl_proxy.c \
 		cbl_schema.c \
 		cbl_sctp.c \

@@ -376,7 +376,7 @@ cbl_fw_extract(cbl_msg *msg)
 	/* missing-element: what is missing is the path's last. */
 	if (e.has_error_tag && e.error_tag == fw_tag("missing-element") &&
 	    msg->err_npath > 0 && msg->err_pathv[msg->err_npath - 1] <=
-	    CBL_ATTR_MAX)
+	    INT32_MAX)
 		msg->err_miss = (int)msg->err_pathv[--msg->err_npath];
 	if (e.cookie.p != NULL && e.cookie.len <= CBL_COOKIE_MAX) {
 		msg->err_cookiep = e.cookie.p;

@@ -30,7 +30,6 @@ extern "C" {
 
 typedef struct cbl_ctx		cbl_ctx;
 typedef struct cbl_msg		cbl_msg;
-typedef struct cbl_attr		cbl_attr;
 typedef struct cbl_loop		cbl_loop;
 typedef struct cbl_listener	cbl_listener;
 typedef struct cbl_conn		cbl_conn;
@@ -66,11 +65,6 @@ typedef struct cbl_tls		cbl_tls;
 #define	CBL_F_S_CREDIT		0x00200000u
 #define	CBL_F_S_ANY		0x003F0000u
 
-/* Attribute keys. */
-#define	CBL_ATTR_MIN		1
-#define	CBL_ATTR_MAX		65535
-#define	CBL_ELEM		0	/* "type" of an array element */
-
 /*
  * Version 2 has no framework keys: errors, credit and closes are the
  * cblink module's structures, at their SIDs (docs/WIRE-FORMAT.md 6).
@@ -96,29 +90,6 @@ enum cbl_limit {
 	CBL_LIM__COUNT
 };
 
-/*
- * Decoder flags of a context.  CBL_CTX_YANG_TAGS accepts the CBOR tags
- * of YANG-CBOR (RFC 9254): 4 (decimal64), 43 to 46 (bits, enumeration,
- * identityref and instance-identifier in a union) and 47 (an absolute
- * SID); every other tag is still refused.
- */
-#define	CBL_CTX_YANG_TAGS	0x00000001u
-
-/* Kinds of decoded values and of policy entries. */
-enum cbl_kind {
-	CBL_K_ANY,
-	CBL_K_UINT,
-	CBL_K_INT,
-	CBL_K_BOOL,
-	CBL_K_FLAG,
-	CBL_K_TEXT,
-	CBL_K_BYTES,
-	CBL_K_FLOAT,
-	CBL_K_NEST,
-	CBL_K_NULL,
-	CBL_K_ARRAY,
-};
-
 struct cbl_bytes {
 	const void	*p;
 	size_t		 len;
@@ -139,40 +110,22 @@ int		 cbl_ctx_set_limit(cbl_ctx *ctx, enum cbl_limit lim,
 		    uint64_t v);
 int		 cbl_ctx_get_limit(cbl_ctx *ctx, enum cbl_limit lim,
 		    uint64_t *vp);
-int		 cbl_ctx_set_flags(cbl_ctx *ctx, uint32_t flags);
-int		 cbl_ctx_get_flags(cbl_ctx *ctx, uint32_t *flagsp);
 
 /* Messages: building. */
 int		 cbl_msg_new(cbl_ctx *ctx, uint16_t family, uint16_t cmd,
 		    uint32_t flags, cbl_msg **msgp);
 void		 cbl_msg_free(cbl_msg *msg);
 int		 cbl_msg_ref(cbl_msg *msg);
-void		*cbl_msg_alloc(cbl_msg *msg, size_t len);
-char		*cbl_msg_strdup(cbl_msg *msg, const char *s);
 const char	*cbl_msg_errstr(const cbl_msg *msg);
 int		 cbl_msg_error(const cbl_msg *msg);
 int		 cbl_msg_set_seq(cbl_msg *msg, uint32_t seq);
 int		 cbl_msg_set_stream(cbl_msg *msg, uint32_t stream);
 int		 cbl_msg_set_flags(cbl_msg *msg, uint32_t flags);
 
-int		 cbl_put_uint(cbl_msg *msg, uint16_t type, uint64_t v);
-int		 cbl_put_int(cbl_msg *msg, uint16_t type, int64_t v);
-int		 cbl_put_bool(cbl_msg *msg, uint16_t type, bool v);
-int		 cbl_put_flag(cbl_msg *msg, uint16_t type);
-int		 cbl_put_str(cbl_msg *msg, uint16_t type, const char *s);
-int		 cbl_put_strn(cbl_msg *msg, uint16_t type, const char *s,
-		    size_t len);
-int		 cbl_put_bytes(cbl_msg *msg, uint16_t type, const void *p,
-		    size_t len);
-int		 cbl_put_double(cbl_msg *msg, uint16_t type, double v);
-int		 cbl_put_null(cbl_msg *msg, uint16_t type);
-int		 cbl_put_attr(cbl_msg *msg, uint16_t type, const cbl_attr *a);
-int		 cbl_nest_start(cbl_msg *msg, uint16_t type);
-int		 cbl_nest_end(cbl_msg *msg);
-int		 cbl_array_start(cbl_msg *msg, uint16_t type);
-int		 cbl_array_end(cbl_msg *msg);
-
-/* Extended error (extended ack) attributes on an outgoing ERROR/ack. */
+/*
+ * An outgoing ERROR's or ack's error and cookie: the cblink:error
+ * structure, written as the message is encoded.
+ */
 int		 cbl_msg_put_error(cbl_msg *msg, int code, const char *text,
 		    const struct cbl_path_elem *path, size_t pathlen,
 		    int miss_type);
@@ -191,25 +144,6 @@ uint32_t	 cbl_msg_flags(const cbl_msg *msg);
 uint32_t	 cbl_msg_seq(const cbl_msg *msg);
 uint32_t	 cbl_msg_stream(const cbl_msg *msg);
 size_t		 cbl_msg_len(const cbl_msg *msg);
-
-const cbl_attr	*cbl_msg_body(const cbl_msg *msg);
-const cbl_attr	*cbl_msg_attr(const cbl_msg *msg, uint16_t type);
-const cbl_attr	*cbl_attr_get(const cbl_attr *nest, uint16_t type);
-const cbl_attr	*cbl_attr_first(const cbl_attr *container);
-const cbl_attr	*cbl_attr_next(const cbl_attr *a);
-const cbl_attr	*cbl_attr_index(const cbl_attr *array, size_t i);
-uint16_t	 cbl_attr_type(const cbl_attr *a);
-enum cbl_kind	 cbl_attr_kind(const cbl_attr *a);
-size_t		 cbl_attr_count(const cbl_attr *a);
-int		 cbl_attr_uint(const cbl_attr *a, uint64_t *vp);
-int		 cbl_attr_int(const cbl_attr *a, int64_t *vp);
-int		 cbl_attr_bool(const cbl_attr *a, bool *vp);
-int		 cbl_attr_double(const cbl_attr *a, double *vp);
-int		 cbl_attr_tag(const cbl_attr *a, uint64_t *tagp);
-int		 cbl_attr_bytes(const cbl_attr *a, const void **pp,
-		    size_t *lenp);
-int		 cbl_attr_str(cbl_msg *msg, const cbl_attr *a,
-		    const char **sp);
 
 /* Extended error accessors, valid on any received message. */
 int		 cbl_msg_err_code(const cbl_msg *msg);
@@ -341,119 +275,6 @@ int		 cbl_request_async(cbl_conn *conn, cbl_msg *req,
 		    cbl_reply_f *cb, void *arg);
 int		 cbl_conn_send(cbl_conn *conn, cbl_msg *msg);
 
-/* Declarative attribute policies (like nla_policy). */
-#define	CBL_PF_REQUIRED		0x01	/* missing: EINVAL + MISS_TYPE */
-#define	CBL_PF_MULTI		0x02	/* value is an array of "kind" */
-#define	CBL_PF_MASK		0x04	/* uint: no bits outside u.max */
-#define	CBL_PF_RANGE		0x08	/* u/i/len ranges are set */
-
-struct cbl_enum {
-	const uint64_t		*v;
-	uint32_t		 n;
-};
-
-struct cbl_policy_set;
-
-struct cbl_policy {
-	uint16_t			 type;
-	uint8_t				 kind;		/* enum cbl_kind */
-	uint8_t				 flags;		/* CBL_PF_* */
-	uint32_t			 min_count;	/* CBL_PF_MULTI */
-	uint32_t			 max_count;	/* 0: no limit */
-	union {
-		struct { uint64_t min, max; }	u;
-		struct { int64_t min, max; }	i;
-		struct { uint32_t min, max; }	len;
-	};
-	const struct cbl_policy_set	*nested;	/* CBL_K_NEST */
-	const struct cbl_enum		*values;	/* CBL_K_UINT */
-	int				(*validate)(const cbl_attr *,
-					    const void *);
-	const void			*arg;
-};
-
-struct cbl_policy_set {
-	const struct cbl_policy	*p;		/* sorted by type */
-	uint32_t		 n;
-};
-
-#define	CBL_POLICY_SET(_name, _arr)					\
-	static const struct cbl_policy_set _name = {			\
-		.p = (_arr), .n = sizeof(_arr) / sizeof((_arr)[0]) }
-
-/* Where and why validation failed. */
-struct cbl_verr {
-	const char		*msg;
-	struct cbl_path_elem	 path[CBL_PATH_MAX];
-	size_t			 pathlen;
-	int			 miss_type;	/* -1: none */
-};
-
-int		 cbl_validate(const cbl_attr *map,
-		    const struct cbl_policy_set *ps, struct cbl_verr *err);
-int		 cbl_policy_set_check(const struct cbl_policy_set *ps);
-
-/* Declarative parsers (like snl(3)). */
-typedef int	 cbl_parse_attr_f(cbl_msg *msg, const cbl_attr *a,
-		    const void *arg, void *target);
-typedef int	 cbl_parse_post_f(cbl_msg *msg, void *target);
-
-struct cbl_attr_parser {
-	uint16_t		 type;		/* sorted ascending */
-	uint32_t		 off;		/* offsetof(struct, field) */
-	cbl_parse_attr_f	*cb;
-	const void		*arg;
-};
-
-struct cbl_parser {
-	uint32_t			 out_size;
-	uint32_t			 np_size;
-	const struct cbl_attr_parser	*np;
-	cbl_parse_post_f		*post;
-};
-
-#define	CBL_DECLARE_PARSER(_name, _type, _np, _post)			\
-	static const struct cbl_parser _name = {			\
-		.out_size = sizeof(_type),				\
-		.np_size = sizeof(_np) / sizeof((_np)[0]),		\
-		.np = (_np),						\
-		.post = (_post) }
-
-struct cbl_array {
-	size_t		 n;
-	void		*v;
-};
-
-struct cbl_array_desc {
-	cbl_parse_attr_f	*cb;
-	const void		*arg;
-	uint32_t		 elem_size;
-};
-
-int		 cbl_parse(cbl_msg *msg, const struct cbl_parser *p,
-		    void *target);
-int		 cbl_parse_nest(cbl_msg *msg, const cbl_attr *nest,
-		    const struct cbl_parser *p, void *target);
-int		 cbl_parser_check(const struct cbl_parser *p);
-
-cbl_parse_attr_f cbl_get_u8;
-cbl_parse_attr_f cbl_get_u16;
-cbl_parse_attr_f cbl_get_u32;
-cbl_parse_attr_f cbl_get_u64;
-cbl_parse_attr_f cbl_get_s8;
-cbl_parse_attr_f cbl_get_s16;
-cbl_parse_attr_f cbl_get_s32;
-cbl_parse_attr_f cbl_get_s64;
-cbl_parse_attr_f cbl_get_bool;
-cbl_parse_attr_f cbl_get_flag;
-cbl_parse_attr_f cbl_get_double;
-cbl_parse_attr_f cbl_get_str;
-cbl_parse_attr_f cbl_get_bytes;
-cbl_parse_attr_f cbl_get_attr;
-cbl_parse_attr_f cbl_get_nested;
-cbl_parse_attr_f cbl_get_nested_ptr;
-cbl_parse_attr_f cbl_get_array;
-
 /* Families. */
 #define	CBL_OPF_DO		0x01
 #define	CBL_OPF_DUMP		0x02
@@ -479,7 +300,6 @@ struct cbl_op {
 	uint16_t			 cmd;
 	uint32_t			 flags;		/* CBL_OPF_* */
 	const char			*name;
-	const struct cbl_policy_set	*policy;
 	cbl_doit_f			*doit;
 	cbl_dumpit_f			*dumpit;
 	cbl_stream_open_f		*stream_open;

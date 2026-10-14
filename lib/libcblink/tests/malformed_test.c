@@ -291,7 +291,7 @@ yang_value(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
 
 	ATF_REQUIRE_EQ_MSG(0, decode_body(ctx, bodyhex, msgp), "body %s",
 	    bodyhex);
-	body = cbl_msg_body(*msgp);
+	body = (*msgp)->nodes;	/* its root: the body's map */
 	return (body != NULL && body->count > 0 ? &body->child[0] : NULL);
 }
 
@@ -311,14 +311,9 @@ ATF_TC_BODY(yang_tags, tc)
 	static const uint64_t tags[] = { 4, 43, 44, 45, 45, 46, 46, 47 };
 	cbl_ctx *ctx = test_ctx();
 	const cbl_attr *a;
-	uint32_t flags;
 	cbl_msg *msg;
 
 	/* Version 2 takes them as they are, no flag asked (D-1). */
-	ATF_REQUIRE_EQ(0, cbl_ctx_get_flags(ctx, &flags));
-	ATF_REQUIRE_EQ(0, flags);
-	ATF_REQUIRE_EQ(EINVAL, cbl_ctx_set_flags(ctx, 0x2));
-
 	for (size_t i = 0; i < nitems(accepted); i++) {
 		a = yang_value(ctx, accepted[i], &msg);
 		ATF_REQUIRE(a != NULL);

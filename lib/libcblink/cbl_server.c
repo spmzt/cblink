@@ -261,7 +261,6 @@ void
 cbl_server_dispatch(cbl_conn *conn, cbl_msg *msg)
 {
 	const struct cbl_op *op;
-	struct cbl_verr verr;
 	cbl_family *fam;
 	cbl_req *req;
 	uint32_t f = msg->hdr.flags;
@@ -308,16 +307,6 @@ cbl_server_dispatch(cbl_conn *conn, cbl_msg *msg)
 	if (atomic_load(&conn->inflight) >= conn->lim.v[CBL_LIM_MAX_INFLIGHT]) {
 		cbl_family_rele(fam);
 		reject(conn, msg, EAGAIN, "too many requests in flight");
-		return;
-	}
-	if ((error = cbl_validate(cbl_msg_body(msg), op->policy,
-	    &verr)) != 0) {
-		(void)send_error_ext(conn, &msg->hdr, error, verr.msg,
-		    verr.path, verr.pathlen, verr.miss_type, NULL, 0,
-		    (f & CBL_F_S_OPEN) != 0 ? CBL_F_S_OPEN :
-		    (f & CBL_F_DUMP) != 0 ? CBL_F_MULTI | CBL_F_DONE : 0, NULL);
-		cbl_family_rele(fam);
-		cbl_msg_free(msg);
 		return;
 	}
 	if ((req = calloc(1, sizeof(*req))) == NULL) {

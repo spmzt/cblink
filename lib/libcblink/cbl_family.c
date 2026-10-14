@@ -82,8 +82,6 @@ def_check(const struct cbl_family_def *def, bool builtin)
 		if ((op->flags & (CBL_OPF_DO | CBL_OPF_DUMP | CBL_OPF_STREAM |
 		    CBL_OPF_PUSH)) == 0)
 			return (EINVAL);
-		if (cbl_policy_set_check(op->policy) != 0)
-			return (EINVAL);
 	}
 	for (uint32_t i = 0; i < def->nmcgrps; i++) {
 		if (!name_valid(def->mcgrps[i].name, true))

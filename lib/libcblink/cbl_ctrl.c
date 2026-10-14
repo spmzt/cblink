@@ -374,16 +374,17 @@ hello_doit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 }
 
 static const struct cbl_op ctrl_ops[] = {
-	{ CBL_CTRL_CMD_GETFAMILY, CBL_OPF_DO | CBL_OPF_DUMP, "get-family",
-	    NULL, getfamily_doit, getfamily_dumpit, NULL },
-	{ CBL_CTRL_CMD_SUBSCRIBE, CBL_OPF_DO, "subscribe", NULL,
-	    subscribe_doit, NULL, NULL },
-	{ CBL_CTRL_CMD_UNSUBSCRIBE, CBL_OPF_DO, "unsubscribe", NULL,
-	    unsubscribe_doit, NULL, NULL },
-	{ CBL_CTRL_CMD_PING, CBL_OPF_DO, "ping", NULL, ping_doit, NULL,
-	    NULL },
-	{ CBL_CTRL_CMD_HELLO, CBL_OPF_DO, "hello", NULL, hello_doit, NULL,
-	    NULL },
+	{ .cmd = CBL_CTRL_CMD_GETFAMILY, .flags = CBL_OPF_DO | CBL_OPF_DUMP,
+	    .name = "get-family", .doit = getfamily_doit,
+	    .dumpit = getfamily_dumpit },
+	{ .cmd = CBL_CTRL_CMD_SUBSCRIBE, .flags = CBL_OPF_DO,
+	    .name = "subscribe", .doit = subscribe_doit },
+	{ .cmd = CBL_CTRL_CMD_UNSUBSCRIBE, .flags = CBL_OPF_DO,
+	    .name = "unsubscribe", .doit = unsubscribe_doit },
+	{ .cmd = CBL_CTRL_CMD_PING, .flags = CBL_OPF_DO, .name = "ping",
+	    .doit = ping_doit },
+	{ .cmd = CBL_CTRL_CMD_HELLO, .flags = CBL_OPF_DO, .name = "hello",
+	    .doit = hello_doit },
 };
 
 static const struct cbl_mcgrp ctrl_groups[] = {

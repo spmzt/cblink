@@ -28,6 +28,26 @@
 
 struct cbl_ynode;
 
+typedef struct cbl_attr		cbl_attr;
+
+/* What the decoder took a value for (struct cbl_attr's kind). */
+enum cbl_kind {
+	CBL_K_ANY,
+	CBL_K_UINT,
+	CBL_K_INT,
+	CBL_K_BOOL,
+	CBL_K_FLAG,
+	CBL_K_TEXT,
+	CBL_K_BYTES,
+	CBL_K_FLOAT,
+	CBL_K_NEST,
+	CBL_K_NULL,
+	CBL_K_ARRAY,
+};
+
+const cbl_attr	*cbl_msg_body(const cbl_msg *msg);
+const cbl_attr	*cbl_map_lookup(const cbl_attr *map, int64_t key);
+
 #define	CBL_DEPTH_HARD_MAX	64
 
 /* Per-message arena: a chain of linear buffers, like snl(3). */
@@ -72,7 +92,6 @@ int	cbl_peer_from_x509(struct cbl_peer *peer, struct x509_st *x);
  */
 struct cbl_limits {
 	uint64_t	v[CBL_LIM__COUNT];
-	uint32_t	flags;		/* CBL_CTX_* */
 };
 
 void	cbl_limits_default(struct cbl_limits *lim);
@@ -280,7 +299,7 @@ struct cbl_attr {
 	uint8_t		 kind;		/* enum cbl_kind */
 	uint8_t		 nflags;
 	uint8_t		 inmap;		/* 1: child of a map */
-	uint8_t		 tag;		/* CBOR tag, 0: none (CBL_CTX_YANG_TAGS) */
+	uint8_t		 tag;		/* YANG-CBOR's tag, 0: none */
 	uint32_t	 count;		/* containers: number of children */
 	uint32_t	 off;		/* received: its bytes in the body */
 	uint32_t	 len;
@@ -380,7 +399,6 @@ int	 cbl_fw_credit(cbl_msg *msg, uint32_t increment);
 int	 cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text);
 void	 cbl_fw_extract(cbl_msg *msg);
 uint64_t cbl_fw_get_credit(cbl_msg *msg, bool *found);
-const cbl_attr *cbl_map_lookup(const cbl_attr *map, int64_t key);
 
 bool	cbl_utf8_valid(const unsigned char *p, size_t len);
 

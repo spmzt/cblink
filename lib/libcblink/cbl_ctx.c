@@ -39,7 +39,6 @@ cbl_limits_default(struct cbl_limits *lim)
 
 	for (int i = 0; i < CBL_LIM__COUNT; i++)
 		lim->v[i] = cbl_limit_tab[i].def;
-	lim->flags = 0;
 }
 
 int
@@ -146,34 +145,6 @@ cbl_ctx_get_limit(cbl_ctx *ctx, enum cbl_limit l, uint64_t *vp)
 		return (EINVAL);
 	pthread_mutex_lock(&ctx->mtx);
 	*vp = ctx->lim.v[l];
-	pthread_mutex_unlock(&ctx->mtx);
-	return (0);
-}
-
-int
-cbl_ctx_set_flags(cbl_ctx *ctx, uint32_t flags)
-{
-	int error = 0;
-
-	if (ctx == NULL || (flags & ~CBL_CTX_YANG_TAGS) != 0)
-		return (EINVAL);
-	pthread_mutex_lock(&ctx->mtx);
-	if (ctx->frozen)
-		error = EBUSY;
-	else
-		ctx->lim.flags = flags;
-	pthread_mutex_unlock(&ctx->mtx);
-	return (error);
-}
-
-int
-cbl_ctx_get_flags(cbl_ctx *ctx, uint32_t *flagsp)
-{
-
-	if (ctx == NULL || flagsp == NULL)
-		return (EINVAL);
-	pthread_mutex_lock(&ctx->mtx);
-	*flagsp = ctx->lim.flags;
 	pthread_mutex_unlock(&ctx->mtx);
 	return (0);
 }

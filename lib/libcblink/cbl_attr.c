@@ -4,20 +4,16 @@
  * Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
  */
 
-/* Read access to decoded messages. */
+/*
+ * Read access to decoded messages: the header, the body's items by SID
+ * (cbl_msg_sid_raw(), cbl_msg.c), what an error said.
+ */
 
 #include <errno.h>
 #include <string.h>
 
 #include "cbl_impl.h"
 #include "cbl_schema.h"
-
-static bool
-is_family_key(int64_t key)
-{
-
-	return (key >= CBL_ATTR_MIN && key <= CBL_ATTR_MAX);
-}
 
 uint16_t
 cbl_msg_family(const cbl_msg *msg)
@@ -92,184 +88,6 @@ cbl_map_lookup(const cbl_attr *map, int64_t key)
 			hi = mid;
 	}
 	return (NULL);
-}
-
-const cbl_attr *
-cbl_msg_attr(const cbl_msg *msg, uint16_t type)
-{
-
-	if (type == 0)
-		return (NULL);
-	return (cbl_map_lookup(cbl_msg_body(msg), type));
-}
-
-const cbl_attr *
-cbl_attr_get(const cbl_attr *nest, uint16_t type)
-{
-
-	if (type == 0)
-		return (NULL);
-	return (cbl_map_lookup(nest, type));
-}
-
-/* Iteration skips framework and out-of-range keys in maps. */
-static const cbl_attr *
-skip_hidden(const cbl_attr *a, const cbl_attr *end)
-{
-
-	for (; a < end; a++)
-		if (!a->inmap || is_family_key(a->key))
-			return (a);
-	return (NULL);
-}
-
-const cbl_attr *
-cbl_attr_first(const cbl_attr *c)
-{
-
-	if (c == NULL || (c->kind != CBL_K_NEST && c->kind != CBL_K_ARRAY) ||
-	    c->count == 0)
-		return (NULL);
-	return (skip_hidden(c->child, c->child + c->count));
-}
-
-const cbl_attr *
-cbl_attr_next(const cbl_attr *a)
-{
-	const cbl_attr *p;
-
-	if (a == NULL || (p = a->parent) == NULL)
-		return (NULL);
-	return (skip_hidden(a + 1, p->child + p->count));
-}
-
-const cbl_attr *
-cbl_attr_index(const cbl_attr *array, size_t i)
-{
-
-	if (array == NULL || array->kind != CBL_K_ARRAY || i >= array->count)
-		return (NULL);
-	return (&array->child[i]);
-}
-
-uint16_t
-cbl_attr_type(const cbl_attr *a)
-{
-
-	if (a == NULL || !a->inmap || !is_family_key(a->key))
-		return (0);
-	return ((uint16_t)a->key);
-}
-
-enum cbl_kind
-cbl_attr_kind(const cbl_attr *a)
-{
-
-	return (a != NULL ? (enum cbl_kind)a->kind : CBL_K_ANY);
-}
-
-size_t
-cbl_attr_count(const cbl_attr *a)
-{
-
-	if (a == NULL || (a->kind != CBL_K_NEST && a->kind != CBL_K_ARRAY))
-		return (0);
-	return (a->count);
-}
-
-int
-cbl_attr_uint(const cbl_attr *a, uint64_t *vp)
-{
-
-	if (a == NULL || vp == NULL)
-		return (EINVAL);
-	if (a->kind == CBL_K_INT)
-		return (ERANGE);
-	if (a->kind != CBL_K_UINT)
-		return (EINVAL);
-	*vp = a->v.u;
-	return (0);
-}
-
-int
-cbl_attr_int(const cbl_attr *a, int64_t *vp)
-{
-
-	if (a == NULL || vp == NULL)
-		return (EINVAL);
-	if (a->kind == CBL_K_UINT) {
-		if (a->v.u > INT64_MAX)
-			return (ERANGE);
-		*vp = (int64_t)a->v.u;
-		return (0);
-	}
-	if (a->kind != CBL_K_INT)
-		return (EINVAL);
-	if ((a->nflags & CBL_NF_NEGBIG) != 0)
-		return (ERANGE);
-	*vp = a->v.i;
-	return (0);
-}
-
-int
-cbl_attr_bool(const cbl_attr *a, bool *vp)
-{
-
-	if (a == NULL || vp == NULL || a->kind != CBL_K_BOOL)
-		return (EINVAL);
-	*vp = a->v.b;
-	return (0);
-}
-
-/* The CBOR tag on a value; ENOENT when it has none. */
-int
-cbl_attr_tag(const cbl_attr *a, uint64_t *tagp)
-{
-
-	if (a == NULL || tagp == NULL)
-		return (EINVAL);
-	if (a->tag == 0)
-		return (ENOENT);
-	*tagp = a->tag;
-	return (0);
-}
-
-int
-cbl_attr_double(const cbl_attr *a, double *vp)
-{
-
-	if (a == NULL || vp == NULL || a->kind != CBL_K_FLOAT)
-		return (EINVAL);
-	*vp = a->v.d;
-	return (0);
-}
-
-int
-cbl_attr_bytes(const cbl_attr *a, const void **pp, size_t *lenp)
-{
-
-	if (a == NULL || pp == NULL || lenp == NULL ||
-	    (a->kind != CBL_K_BYTES && a->kind != CBL_K_TEXT))
-		return (EINVAL);
-	*pp = a->v.s.p;
-	*lenp = a->v.s.len;
-	return (0);
-}
-
-int
-cbl_attr_str(cbl_msg *msg, const cbl_attr *a, const char **sp)
-{
-	char *s;
-
-	if (msg == NULL || a == NULL || sp == NULL || a->kind != CBL_K_TEXT)
-		return (EINVAL);
-	if (memchr(a->v.s.p, '\0', a->v.s.len) != NULL)
-		return (EINVAL);
-	if ((s = cbl_arena_alloc(&msg->arena, a->v.s.len + 1)) == NULL)
-		return (ENOMEM);
-	memcpy(s, a->v.s.p, a->v.s.len);
-	*sp = s;
-	return (0);
 }
 
 int

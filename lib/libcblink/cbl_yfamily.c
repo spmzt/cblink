@@ -564,12 +564,14 @@ y_getsid_dump(cbl_req *req, const cbl_msg *msg __unused,
 }
 
 static const struct cbl_op yops[] = {
-	{ CBL_YCMD_GET, CBL_OPF_DO | CBL_OPF_DUMP, "get", NULL, y_get,
-	    y_get_dump, NULL },
-	{ CBL_YCMD_EDIT, CBL_OPF_DO, "edit", NULL, y_edit, NULL, NULL },
-	{ CBL_YCMD_RPC, CBL_OPF_DO, "rpc", NULL, y_rpc, NULL, NULL },
-	{ CBL_YCMD_GET_SID, CBL_OPF_DUMP, "get-sid", NULL, NULL,
-	    y_getsid_dump, NULL },
+	{ .cmd = CBL_YCMD_GET, .flags = CBL_OPF_DO | CBL_OPF_DUMP,
+	    .name = "get", .doit = y_get, .dumpit = y_get_dump },
+	{ .cmd = CBL_YCMD_EDIT, .flags = CBL_OPF_DO, .name = "edit",
+	    .doit = y_edit },
+	{ .cmd = CBL_YCMD_RPC, .flags = CBL_OPF_DO, .name = "rpc",
+	    .doit = y_rpc },
+	{ .cmd = CBL_YCMD_GET_SID, .flags = CBL_OPF_DUMP, .name = "get-sid",
+	    .dumpit = y_getsid_dump },
 };
 
 static const struct cbl_mcgrp ygroups[] = {

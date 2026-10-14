@@ -60,8 +60,14 @@ are from that SID, not the `input` or `output` node's.
 | `union` | as the member that matches, with the tags above where members could be told apart no other way |
 | anydata, anyxml | as a container, its keys deltas from its own SID |
 
-Tag 47, an absolute SID as a value, is taken too, never on a key; no
-other tag is. Lengths are definite; the encoder writes integers and keys
+Tag 47, an absolute SID as a value, is taken too, never on a key. Tag
+109 is draft-ietf-core-yang-metadata's: a node's annotations (RFC
+7952), `[metadata, value]` in place of its value, the metadata a map
+keyed by each annotation's delta from the node's own SID (an entry's:
+its list's). IANA has not assigned 109; cblink holds it as provisional.
+The instance tree writes and reads it (`cbl_dnode_meta_set()`); the
+structs have no place for an annotation, and their decoder passes it
+over, as a reader may. No other tag is. Lengths are definite; the encoder writes integers and keys
 in their shortest form. The decoder checks the CBOR (its shape, kinds, tags, UTF-8, no key twice,
 the limits) before a program sees it; the codec decodes a value into its
 struct and, with `CBL_YD_STRICT`, refuses a key the node has no child

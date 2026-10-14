@@ -26,6 +26,8 @@
  * that is the validator's.
  */
 
+#include <sys/param.h>
+
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -33,11 +35,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cbl_data.h"
+#include "cbl_dimpl.h"
 #include "cbl_impl.h"
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
 
 #define	YDEPTH_MAX	CBL_DEPTH_HARD_MAX
+/*
+ * draft-ietf-core-yang-metadata's tag of an annotated value, [metadata,
+ * value]: provisional, IANA has not assigned it.
+ */
+#define	YTAG_META	109
 
 /*
  * What one arena may hold, by default: a struct is allocated for as
@@ -1167,6 +1176,26 @@ ident_named(struct yrd *r, uint64_t *sid)
 }
 
 /* Child n's value into struct p. */
+/*
+ * An annotated value's metadata passed over: the structs have no place
+ * for it, and a reader may drop it (draft-ietf-core-yang-metadata).
+ */
+static int
+unmeta(struct yrd *r, int depth)
+{
+	uint64_t k;
+	int error;
+
+	if (!tag(r, YTAG_META))
+		return (0);
+	if ((error = head(r, 4, &k, "an annotated value")) != 0)
+		return (error);
+	if (k != 2)
+		return (fail(r, EINVAL, "an annotated value of %ju items, not "
+		    "2", (uintmax_t)k));
+	return (skip(r, depth));
+}
+
 static int
 dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 {
@@ -1175,6 +1204,10 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 	void *q;
 	int error;
 
+	/* A list's or leaf-list's entries are annotated, not it. */
+	if (n->kind != CBL_YN_LIST && n->kind != CBL_YN_LEAFLIST &&
+	    (error = unmeta(r, depth)) != 0)
+		return (error);
 	switch (n->kind) {
 	case CBL_YN_CONTAINER:
 		if ((q = ralloc(r, n->size)) == NULL)
@@ -1196,6 +1229,8 @@ dec_child(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 		a->v = q;
 		r->leafmod = n->module;
 		for (uint64_t i = 0; i < k; i++) {
+			if ((error = unmeta(r, depth)) != 0)
+				return (error);
 			error = n->kind == CBL_YN_LIST ? dec_map(r, n,
 			    WAT(q, i * n->size), depth + 1) : dec_value(r,
 			    n->type, WAT(q, i * n->type->csize), false);
@@ -1286,7 +1321,7 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
 		return (EINVAL);
 	/* Zeroed as said: what the value leaves out is not there. */
 	memset(p, 0, n->size);
-	if ((error = dec_map(&r, n, p, 0)) != 0)
+	if ((error = unmeta(&r, 0)) != 0 || (error = dec_map(&r, n, p, 0)) != 0)
 		return (error);
 	if (r.p != r.end)
 		return (fail(&r, EINVAL, "bytes after the value"));
@@ -1386,4 +1421,399 @@ cbl_yiid_read(const struct cbl_yschema *s, const struct cbl_bytes *v,
 	*vals = out;
 	*nvals = j;
 	return (0);
+}
+
+/*
+ * The instance tree's YANG-CBOR (cbl_data.h): what the structs' is, from
+ * the nodes, with their annotations, written and read as
+ * draft-ietf-core-yang-metadata has them: tag 109 of [metadata, value],
+ * the metadata a map keyed by each annotation's delta from the node's own
+ * SID (an entry's: its list's), its value as a leaf of its type would be.
+ */
+
+static int	enc_tmap(struct cbl_ybuf *, const cbl_dnode *, int);
+
+static int
+enc_meta(struct cbl_ybuf *b, const cbl_dnode *x)
+{
+	const struct cbl_dmeta *m;
+	uint64_t k = 0;
+	int error;
+
+	for (m = x->meta; m != NULL; m = m->next)
+		k++;
+	if ((error = put_head(b, 6, YTAG_META)) != 0 ||
+	    (error = put_head(b, 4, 2)) != 0 ||
+	    (error = put_head(b, 5, k)) != 0)
+		return (error);
+	for (m = x->meta; m != NULL; m = m->next)
+		if ((error = put_int(b, (int64_t)(m->an->sid -
+		    x->sn->sid))) != 0 ||
+		    (error = enc_value(b, m->an->type, m->value, false)) != 0)
+			return (error);
+	return (0);
+}
+
+/* x's instance: its value, in its annotations if it has them. */
+static int
+enc_tnode(struct cbl_ybuf *b, const cbl_dnode *x, int depth)
+{
+	const struct cbl_bytes *by;
+	int error;
+
+	if (x->meta != NULL && (error = enc_meta(b, x)) != 0)
+		return (error);
+	switch (x->sn->kind) {
+	case CBL_YN_LEAF:
+	case CBL_YN_LEAFLIST:
+		return (enc_value(b, x->sn->type, x->value, false));
+	case CBL_YN_ANYDATA:
+	case CBL_YN_ANYXML:
+		by = x->value;
+		return (put(b, by->p, by->len));
+	default:
+		return (enc_tmap(b, x, depth + 1));
+	}
+}
+
+/* x's children, keyed by their deltas from it; the root's by SID. */
+static int
+enc_tmap(struct cbl_ybuf *b, const cbl_dnode *x, int depth)
+{
+	const struct cbl_ynode *const *k;
+	uint64_t base;
+	uint32_t nk, n = 0;
+	int error;
+
+	if (depth > YDEPTH_MAX)
+		return (ELOOP);
+	if (x->sn == NULL) {
+		k = x->tree->tops;
+		nk = x->tree->ntops;
+		base = 0;
+	} else {
+		k = x->sn->child;
+		nk = x->sn->nchild;
+		base = cbl_ynode_base(x->sn);
+	}
+	for (uint32_t i = 0; x->head != NULL && i < nk; i++)
+		n += x->head[i] != NULL;
+	if ((error = put_head(b, 5, n)) != 0)
+		return (error);
+	for (uint32_t i = 0; x->head != NULL && i < nk; i++) {
+		const cbl_dnode *c = x->head[i], *y;
+		uint64_t cnt = 0;
+
+		if (c == NULL)
+			continue;
+		if ((error = put_int(b, (int64_t)(k[i]->sid - base))) != 0)
+			return (error);
+		if (k[i]->kind != CBL_YN_LIST && k[i]->kind != CBL_YN_LEAFLIST) {
+			if ((error = enc_tnode(b, c, depth)) != 0)
+				return (error);
+			continue;
+		}
+		for (y = c; y != NULL; y = y->next) {
+			cnt++;
+			if (y == x->tail[i])
+				break;
+		}
+		if ((error = put_head(b, 4, cnt)) != 0)
+			return (error);
+		for (y = c; cnt > 0; y = y->next, cnt--)
+			if ((error = enc_tnode(b, y, depth)) != 0)
+				return (error);
+	}
+	return (0);
+}
+
+int
+cbl_d_encode(const cbl_dnode *n, struct cbl_ybuf *b)
+{
+
+	if (n == NULL || b == NULL)
+		return (EINVAL);
+	return (n->sn == NULL ? enc_tmap(b, n, 0) : enc_tnode(b, n, 0));
+}
+
+/* An annotation read, to be put on its node once it is made. */
+struct ymeta {
+	const struct cbl_yannot	*an;
+	void			*v;
+};
+
+/* A value's annotations, if it is in them; of node sn's. */
+static int
+dec_meta(struct yrd *r, const struct cbl_ynode *sn, struct ymeta **mv,
+    size_t *nm, int depth)
+{
+	const struct cbl_yannot *an;
+	uint64_t k, u;
+	int64_t delta;
+	int error;
+
+	*mv = NULL;
+	*nm = 0;
+	if (!tag(r, YTAG_META))
+		return (0);
+	if ((error = head(r, 4, &k, "an annotated value")) != 0)
+		return (error);
+	if (k != 2)
+		return (fail(r, EINVAL, "%s: an annotated value of %ju items, "
+		    "not 2", sn->name, (uintmax_t)k));
+	if ((error = head(r, 5, &k, "a map of annotations")) != 0 ||
+	    (error = count(r, k, 2)) != 0)
+		return (error);
+	if (k > 0 && (*mv = ralloc(r, (size_t)k * sizeof(**mv))) == NULL)
+		return (fail(r, ENOMEM, NOMEM));
+	for (uint64_t i = 0; i < k; i++) {
+		void *v;
+
+		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
+		    &delta)) != 0)
+			return (error);
+		an = cbl_yschema_annot(sn->module->schema, sn->sid +
+		    (uint64_t)delta);
+		if (an == NULL) {
+			if (r->flags & CBL_YD_STRICT)
+				return (fail(r, ENOENT, "%s: no annotation at "
+				    "delta %jd", sn->name, (intmax_t)delta));
+			if ((error = skip(r, depth)) != 0)
+				return (error);
+			continue;
+		}
+		if ((v = ralloc(r, an->type->csize > 0 ? an->type->csize :
+		    1)) == NULL)
+			return (fail(r, ENOMEM, NOMEM));
+		r->leafmod = an->module;
+		if ((error = dec_value(r, an->type, v, false)) != 0)
+			return (error);
+		(*mv)[*nm].an = an;
+		(*mv)[(*nm)++].v = v;
+	}
+	return (0);
+}
+
+static int
+put_meta(struct yrd *r, cbl_dnode *x, const struct ymeta *mv, size_t nm)
+{
+	int error;
+
+	for (size_t i = 0; i < nm; i++)
+		if ((error = cbl_dnode_meta_set(x, mv[i].an, mv[i].v)) != 0)
+			return (fail(r, error, "%s: annotation %s",
+			    x->sn->name, mv[i].an->name));
+	return (0);
+}
+
+static int	dec_tmap(struct yrd *, cbl_dnode *, int);
+
+static int
+made(struct yrd *r, int error, const struct cbl_ynode *sn)
+{
+
+	if (error == 0)
+		return (0);
+	return (fail(r, error, "%s: %s", sn->name, error == EEXIST ?
+	    "there already, or twice" : error == ENOMEM ? NOMEM :
+	    "not where its schema has it"));
+}
+
+/* An entry of list sn: its keys read first, wherever they are. */
+static int
+dec_entry(struct yrd *r, cbl_dnode *parent, const struct cbl_ynode *sn,
+    int depth, cbl_dnode **out)
+{
+	const void *keys[UINT8_MAX];
+	const uint8_t *start = r->p;
+	struct ymeta *mv;
+	uint64_t k, u;
+	int64_t delta;
+	size_t nm;
+	int error;
+
+	if (sn->nkeys > nitems(keys))
+		return (fail(r, EINVAL, "%s: too many keys", sn->name));
+	memset(keys, 0, sizeof(keys));
+	if ((error = head(r, 5, &k, "a map")) != 0 ||
+	    (error = count(r, k, 2)) != 0)
+		return (error);
+	for (uint64_t i = 0; i < k; i++) {
+		const struct cbl_ynode *c;
+		uint16_t j = 0;
+		void *v;
+
+		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
+		    &delta)) != 0)
+			return (error);
+		c = cbl_ynode_child(sn, delta);
+		for (; c != NULL && j < sn->nkeys; j++)
+			if (sn->child[sn->keys[j]] == c)
+				break;
+		if (c == NULL || j == sn->nkeys) {
+			if ((error = skip(r, depth)) != 0)
+				return (error);
+			continue;
+		}
+		if ((error = dec_meta(r, c, &mv, &nm, depth)) != 0)
+			return (error);
+		if ((v = ralloc(r, c->type->csize > 0 ? c->type->csize :
+		    1)) == NULL)
+			return (fail(r, ENOMEM, NOMEM));
+		r->leafmod = c->module;
+		if ((error = dec_value(r, c->type, v, false)) != 0)
+			return (error);
+		keys[j] = v;
+	}
+	for (uint16_t j = 0; j < sn->nkeys; j++)
+		if (keys[j] == NULL)
+			return (fail(r, EINVAL, "%s: an entry without its key "
+			    "%s", sn->name, sn->child[sn->keys[j]]->name));
+	if ((error = made(r, cbl_dnode_add_entry(parent, sn, keys, out),
+	    sn)) != 0)
+		return (error);
+	r->p = start;
+	return (dec_tmap(r, *out, depth + 1));
+}
+
+/* One instance of sn, in its annotations or not, made a child of parent. */
+static int
+dec_tnode(struct yrd *r, cbl_dnode *parent, const struct cbl_ynode *sn,
+    int depth, cbl_dnode **out)
+{
+	struct cbl_bytes by;
+	struct ymeta *mv;
+	cbl_dnode *x = NULL;
+	size_t nm;
+	void *v;
+	int error;
+
+	if ((error = dec_meta(r, sn, &mv, &nm, depth)) != 0)
+		return (error);
+	switch (sn->kind) {
+	case CBL_YN_LEAF:
+	case CBL_YN_LEAFLIST:
+		if ((v = ralloc(r, sn->type->csize > 0 ? sn->type->csize :
+		    1)) == NULL)
+			return (fail(r, ENOMEM, NOMEM));
+		r->leafmod = sn->module;
+		if ((error = dec_value(r, sn->type, v, false)) != 0 ||
+		    (error = made(r, cbl_dnode_add(parent, sn, v, &x), sn)) !=
+		    0)
+			return (error);
+		break;
+	case CBL_YN_ANYDATA:
+	case CBL_YN_ANYXML:
+		if ((error = raw(r, &by)) != 0 ||
+		    (error = made(r, cbl_dnode_add(parent, sn, &by, &x), sn)) !=
+		    0)
+			return (error);
+		break;
+	case CBL_YN_LIST:
+		if ((error = dec_entry(r, parent, sn, depth, &x)) != 0)
+			return (error);
+		break;
+	default:
+		if ((error = made(r, cbl_dnode_add(parent, sn, NULL, &x),
+		    sn)) != 0 || (error = dec_tmap(r, x, depth + 1)) != 0)
+			return (error);
+		break;
+	}
+	if (out != NULL)
+		*out = x;
+	return (put_meta(r, x, mv, nm));
+}
+
+/* x's children, keyed by deltas from it (by SID at the root). */
+static int
+dec_tmap(struct yrd *r, cbl_dnode *x, int depth)
+{
+	const struct cbl_ynode *c;
+	struct ymeta *mv;
+	uint64_t k, u, n;
+	int64_t delta;
+	size_t nm;
+	int error;
+
+	if (depth > YDEPTH_MAX)
+		return (fail(r, ELOOP, "nested too deep"));
+	if ((error = head(r, 5, &k, "a map")) != 0 ||
+	    (error = count(r, k, 2)) != 0)
+		return (error);
+	for (uint64_t i = 0; i < k; i++) {
+		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
+		    &delta)) != 0)
+			return (error);
+		if (x->sn != NULL)
+			c = cbl_ynode_child(x->sn, delta);
+		else {
+			c = delta >= 0 ? cbl_yschema_node(x->tree->schema,
+			    (uint64_t)delta) : NULL;
+			for (u = 0; c != NULL && u < x->tree->ntops &&
+			    x->tree->tops[u] != c; u++)
+				;
+			if (c != NULL && u == x->tree->ntops)
+				c = NULL;
+		}
+		if (c == NULL) {
+			if (r->flags & CBL_YD_STRICT)
+				return (fail(r, ENOENT, "%s: no child at %s "
+				    "%jd", x->sn != NULL ? x->sn->name :
+				    "the top", x->sn != NULL ? "delta" : "SID",
+				    (intmax_t)delta));
+			if ((error = skip(r, depth)) != 0)
+				return (error);
+			continue;
+		}
+		/* An entry's key, made with it: its annotations only. */
+		if ((c->flags & CBL_YNF_KEY) != 0 && x->sn != NULL &&
+		    x->sn->kind == CBL_YN_LIST) {
+			if ((error = dec_meta(r, c, &mv, &nm, depth)) != 0 ||
+			    (error = skip(r, depth)) != 0 ||
+			    (error = put_meta(r, cbl_dnode_child(x, c), mv,
+			    nm)) != 0)
+				return (error);
+			continue;
+		}
+		if (c->kind != CBL_YN_LIST && c->kind != CBL_YN_LEAFLIST) {
+			if ((error = dec_tnode(r, x, c, depth, NULL)) != 0)
+				return (error);
+			continue;
+		}
+		if ((error = head(r, 4, &n, "an array")) != 0 ||
+		    (error = count(r, n, 1)) != 0)
+			return (error);
+		for (uint64_t j = 0; j < n; j++)
+			if ((error = dec_tnode(r, x, c, depth, NULL)) != 0)
+				return (error);
+	}
+	return (0);
+}
+
+int
+cbl_d_decode(cbl_dnode *parent, const struct cbl_ynode *sn, const void *data,
+    size_t len, int flags, char *why, size_t whylen, cbl_dnode **out)
+{
+	struct yrd r = { data, (const uint8_t *)data + len, data, NULL, flags,
+	    why, whylen, NULL };
+	cbl_dnode *x = NULL;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (parent == NULL || data == NULL || (sn == NULL &&
+	    parent->sn != NULL))
+		return (EINVAL);
+	if ((r.a = cbl_yarena_new()) == NULL)
+		return (ENOMEM);
+	error = sn == NULL ? dec_tmap(&r, parent, 0) : dec_tnode(&r, parent,
+	    sn, 0, &x);
+	if (error == 0 && r.p != r.end)
+		error = fail(&r, EINVAL, "bytes after the value");
+	cbl_yarena_free(r.a);
+	if (error != 0 && x != NULL)
+		(void)cbl_dnode_remove(x);
+	if (error == 0 && out != NULL)
+		*out = x;
+	return (error);
 }

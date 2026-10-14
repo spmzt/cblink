@@ -148,6 +148,8 @@ CBLINK_1.0 {
 	cbl_yderived_from;
 	cbl_ynode_child;
 	cbl_yschema_ident;
+	cbl_yschema_annot;
+	cbl_ymodule_annot;
 	cbl_yschema_node;
 	cbl_ybuf_free;
 	cbl_ydecode;
@@ -207,6 +209,11 @@ CBLINK_1.0 {
 	cbl_dtree_to_module;
 	cbl_dnode_decode;
 	cbl_dnode_encode;
+	cbl_dtree_decode;
+	cbl_dtree_encode;
+	cbl_dnode_meta_set;
+	cbl_dnode_meta;
+	cbl_dnode_meta_next;
 	cbl_dnode_set_op;
 	cbl_dnode_op;
 	cbl_dnode_set_where;

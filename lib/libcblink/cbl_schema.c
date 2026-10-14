@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "cbl_schema.h"
 
@@ -77,6 +78,37 @@ cbl_yschema_ident(const struct cbl_yschema *s, uint64_t sid)
 		else
 			hi = mid;
 	}
+	return (NULL);
+}
+
+const struct cbl_yannot *
+cbl_yschema_annot(const struct cbl_yschema *s, uint64_t sid)
+{
+	uint32_t lo = 0, hi;
+
+	if (s == NULL)
+		return (NULL);
+	hi = s->nannot;
+	while (lo < hi) {
+		uint32_t mid = lo + (hi - lo) / 2;
+
+		if (s->annot[mid]->sid == sid)
+			return (s->annot[mid]);
+		if (s->annot[mid]->sid < sid)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return (NULL);
+}
+
+const struct cbl_yannot *
+cbl_ymodule_annot(const struct cbl_ymodule *m, const char *name)
+{
+
+	for (uint32_t i = 0; m != NULL && name != NULL && i < m->nannot; i++)
+		if (strcmp(m->annot[i].name, name) == 0)
+			return (&m->annot[i]);
 	return (NULL);
 }
 

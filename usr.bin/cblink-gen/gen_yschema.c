@@ -284,7 +284,11 @@ c_type(struct buf *b, const struct sntype *t, const char *cn)
 		buf_puts(b, "int64_t");
 		break;
 	case ST_ENUMERATION:
-		buf_printf(b, "enum %s", cn);
+		/* An annotation's has no C name: an int holds it. */
+		if (cn != NULL)
+			buf_printf(b, "enum %s", cn);
+		else
+			buf_puts(b, "int");
 		break;
 	case ST_IDENTITYREF:
 	case ST_UINT64:
@@ -1249,6 +1253,81 @@ structure_emit(struct ys *y, const struct smodule *m, size_t mn,
 	return (nn);
 }
 
+/* An annotation of a module's, and where the tables have it. */
+struct annref {
+	const struct sext	*e;
+	uint64_t		 sid;
+	size_t			 mn, i;
+};
+
+static int
+annot_by_name(const void *a, const void *b)
+{
+
+	return (strcmp((*(const struct sext *const *)a)->arg,
+	    (*(const struct sext *const *)b)->arg));
+}
+
+static int
+annot_by_sid(const void *a, const void *b)
+{
+	const struct annref *x = a, *y = b;
+
+	return ((x->sid > y->sid) - (x->sid < y->sid));
+}
+
+/*
+ * Module m's annotations (md:annotation), m%zu_a by name; each added to
+ * all, for the schema's list by SID.  How many.
+ */
+static size_t
+annots_emit(struct ys *y, const struct smodule *m, size_t mn,
+    struct buf *tops, struct annref **all, size_t *nall)
+{
+	const struct sext **v = NULL;
+	size_t n = 0;
+
+	for (size_t i = 0; i < m->nexts; i++)
+		if (sext_is_annotation(&m->exts[i], m)) {
+			v = xreallocarray(v, n + 1, sizeof(*v));
+			v[n++] = &m->exts[i];
+		}
+	if (n == 0)
+		return (0);
+	qsort(v, n, sizeof(*v), annot_by_name);
+	buf_printf(tops, "static const struct cbl_yannot m%zu_a[] = {\n", mn);
+	for (size_t i = 0; i < n; i++) {
+		const struct sntype *real = v[i]->type;
+		char *where;
+
+		while (real->base == ST_LEAFREF && real->real != NULL)
+			real = real->real;
+		if (v[i]->sid == 0)
+			diag_add(y->d, 0, 0, "annotation %s:%s: no SID: its "
+			    "module's .sid file (-s) gives it one", m->name,
+			    v[i]->arg);
+		if (real->base == ST_UNION || real->base == ST_LEAFREF) {
+			diag_add(y->d, 0, 0, "annotation %s:%s: a union or "
+			    "leafref type, which an annotation's value cannot "
+			    "be held as", m->name, v[i]->arg);
+			continue;
+		}
+		where = xasprintf("annotation %s:%s", m->name, v[i]->arg);
+		buf_printf(tops, "\t{ .module = &m%zu, .name = ", mn);
+		cstr(tops, v[i]->arg);
+		buf_printf(tops, ", .sid = UINT64_C(%" PRIu64 "), .type = "
+		    "&t%zu },\n", v[i]->sid, type_ref(y, v[i]->type, where,
+		    NULL));
+		free(where);
+		y->mbytes += sizeof(struct cbl_yannot) + strlen(v[i]->arg) + 1;
+		*all = xreallocarray(*all, *nall + 1, sizeof(**all));
+		(*all)[(*nall)++] = (struct annref){ v[i], v[i]->sid, mn, i };
+	}
+	buf_puts(tops, "};\n");
+	free(v);
+	return (n);
+}
+
 static int
 top_cmp(const void *a, const void *b)
 {
@@ -1273,7 +1352,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	struct ys y = { .d = d };
 	struct buf tops, head, sizes, nm, idents, bysid;
 	struct topn *top;
-	size_t ntop, total = 0, errs = d->n, i, mn, nident;
+	struct annref *annots = NULL;
+	size_t ntop, total = 0, errs = d->n, i, mn, nident, nannot, nall = 0;
 	struct kids k;
 
 	buf_init(&y.types);
@@ -1343,6 +1423,7 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 			}
 			buf_puts(&tops, "};\n");
 		}
+		nannot = annots_emit(&y, m, mn, &tops, &annots, &nall);
 		buf_printf(&tops, "static const struct cbl_ymodule m%zu = {\n"
 		    "\t.schema = &%s_schema,\n\t.name = ", mn, nm.p + 1);
 		cstr(&tops, m->name);
@@ -1353,6 +1434,9 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		buf_puts(&tops, ",\n\t.prefix = ");
 		cstr(&tops, m->prefix);
 		buf_printf(&tops, ",\n\t.sid = UINT64_C(%" PRIu64 "),\n", m->sid);
+		if (nannot > 0)
+			buf_printf(&tops, "\t.nannot = %zu,\n\t.annot = "
+			    "m%zu_a,\n", nannot, mn);
 		if (m->data != NULL) {
 			buf_puts(&tops, "\t.size = sizeof(struct ");
 			yc_mangle(&tops, m->name);
@@ -1460,6 +1544,19 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 		}
 	buf_printf(out, "};\n\nstatic const struct cbl_ynode *const nodes[] = {"
 	    "\n%s\n};\n", y.nall > 0 ? bysid.p : "\tNULL");
+	/* Every annotation by SID: a SID is one annotation's. */
+	qsort(annots, nall, sizeof(*annots), annot_by_sid);
+	buf_puts(out, "\nstatic const struct cbl_yannot *const annots[] = {\n");
+	for (i = 0; i < nall; i++) {
+		if (i > 0 && annots[i].sid == annots[i - 1].sid)
+			diag_add(d, 0, 0, "SID %" PRIu64 " is two annotations'",
+			    annots[i].sid);
+		buf_printf(out, "\t&m%zu_a[%zu],\n", annots[i].mn,
+		    annots[i].i);
+	}
+	if (nall == 0)
+		buf_puts(out, "\tNULL,\n");
+	buf_puts(out, "};\n");
 	buf_puts(out, "\nstatic const char *const xpaths[] = {\n");
 	for (i = 0; i < y.nxp; i++) {
 		buf_puts(out, "\t");
@@ -1472,8 +1569,8 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	    "const struct cbl_yschema %s_schema = {\n\t.nmod = %zu,\n"
 	    "\t.nxpath = %zu,\n\t.nident = %zu,\n\t.nnode = %zu,\n"
 	    "\t.mod = mods,\n\t.node = nodes,\n\t.xpath = xpaths,\n"
-	    "\t.ident = idents,\n};\n",
-	    nm.p + 1, nm.p + 1, mn, y.nxp, nident, y.nall);
+	    "\t.ident = idents,\n\t.nannot = %zu,\n\t.annot = annots,\n};\n",
+	    nm.p + 1, nm.p + 1, mn, y.nxp, nident, y.nall, nall);
 	if (y.codec.len > 0)
 		buf_printf(out, "\n%s", y.codec.p);
 
@@ -1499,6 +1596,7 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	buf_free(&idents);
 	buf_free(&bysid);
 	free(y.all);
+	free(annots);
 	free(y.bases.k);
 	free(y.bases.v);
 	free(y.basev);

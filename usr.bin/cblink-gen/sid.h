@@ -26,6 +26,8 @@ enum sid_ns {
 	SID_NS_IDENTITY,
 	SID_NS_FEATURE,
 	SID_NS_DATA,
+	/* RFC 7952's annotations: draft-ietf-core-yang-metadata's 4 */
+	SID_NS_ANNOTATION,
 };
 
 enum sid_status {

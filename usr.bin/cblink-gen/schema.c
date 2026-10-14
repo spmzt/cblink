@@ -102,6 +102,7 @@ exts_free(struct sext *e, size_t n)
 		free(e[i].arg);
 		snode_free(e[i].data);
 		swnode_free(e[i].written);
+		type_free(e[i].type);
 	}
 	free(e);
 }
@@ -305,6 +306,15 @@ sext_is_structure(const struct sext *e, const struct smodule *m)
 	return (!e->inherited && e->module == m && e->arg != NULL &&
 	    (strcmp(e->ext, "ietf-yang-structure-ext:structure") == 0 ||
 	    strcmp(e->ext, "ietf-restconf:yang-data") == 0));
+}
+
+bool
+sext_is_annotation(const struct sext *e, const struct smodule *m)
+{
+
+	return (!e->inherited && e->module == m && e->arg != NULL &&
+	    e->type != NULL &&
+	    strcmp(e->ext, "ietf-yang-metadata:annotation") == 0);
 }
 
 bool

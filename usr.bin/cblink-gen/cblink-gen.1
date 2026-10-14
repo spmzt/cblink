@@ -190,10 +190,18 @@ by a binary search otherwise; every node is also in one array by SID.
 .Xr cblink 3 Ns 's
 .Fn cbl_ynode_child ,
 .Fn cbl_yschema_node ,
-.Fn cbl_yschema_ident
+.Fn cbl_yschema_ident ,
+.Fn cbl_yschema_annot
 and
 .Fn cbl_yderived_from
 look them up.
+A module's annotations
+.Pq RFC 7952
+are in its tables with their values' types, numbered in the
+.Ql annotation
+namespace of a
+.Pa .sid
+file.
 Every node, structure and identityref base must have a SID: the
 modules'
 .Pa .sid

@@ -20,6 +20,13 @@
 
 #define	CBL_D_DEPTH_MAX	64
 
+/* A node's annotation (RFC 7952) and its value, the tree's copy. */
+struct cbl_dmeta {
+	const struct cbl_yannot	*an;
+	void			*value;
+	struct cbl_dmeta	*next;		/* by SID */
+};
+
 struct cbl_dnode {
 	const struct cbl_ynode	*sn;
 	cbl_dtree		*tree;
@@ -33,6 +40,7 @@ struct cbl_dnode {
 	uint8_t			 where;		/* and its CBL_DWHERE_*, or 0 */
 	void			**point;	/* before or after: its keys, or value */
 	void			*value;
+	struct cbl_dmeta	*meta;
 };
 
 /* A default, parsed once for the tree. */
@@ -114,6 +122,13 @@ const cbl_dnode *cbl_d_iid_node(const cbl_dtree *t,
 	    const struct cbl_bytes *v, cbl_yarena *a);
 /* n's value set to a copy of value, the one it had freed; and freed. */
 int	cbl_d_set_value(cbl_dnode *n, const void *value);
+void	cbl_d_meta_free(cbl_dnode *n);
+/* YANG-CBOR of the tree, in cbl_ycodec.c: parent the root and sn NULL,
+ * the top-level map. */
+int	cbl_d_decode(cbl_dnode *parent, const struct cbl_ynode *sn,
+	    const void *data, size_t len, int flags, char *why, size_t whylen,
+	    cbl_dnode **out);
+int	cbl_d_encode(const cbl_dnode *n, struct cbl_ybuf *b);
 void	cbl_d_free_value(cbl_dnode *n);
 
 #endif /* !_CBL_DIMPL_H_ */

@@ -340,12 +340,36 @@ void		 cbl_xval_free(struct cbl_xval *v);
 cbl_dtree	*cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
 
 /*
- * YANG-CBOR: sn's value (as cbl_ydecode() reads it) made a child of
- * parent; a node's value written, as cbl_yencode() writes it.
+ * Annotations (RFC 7952): a node's, by SID.  cbl_dnode_meta_set(): an's
+ * value on n replaced or added, the tree's copy; NULL takes it off.
+ * EINVAL: the root, an without a type.  cbl_dnode_meta(): its value, or
+ * NULL.  cbl_dnode_meta_next(): the annotation after prev (NULL: the
+ * first), and its value; NULL after the last.  An edit, a diff, a copy
+ * carries none.
+ */
+int		 cbl_dnode_meta_set(cbl_dnode *n, const struct cbl_yannot *an,
+		    const void *value);
+const void	*cbl_dnode_meta(const cbl_dnode *n,
+		    const struct cbl_yannot *an);
+const struct cbl_yannot *cbl_dnode_meta_next(const cbl_dnode *n,
+		    const struct cbl_yannot *prev, const void **value);
+
+/*
+ * YANG-CBOR: sn's value made a child of parent, as cbl_ydecode() reads
+ * it; a node's value written, as cbl_yencode() writes it; the whole tree,
+ * its top-level nodes keyed by their SIDs.  A node with annotations is
+ * written as draft-ietf-core-yang-metadata has it: tag 109 (provisional,
+ * unassigned) of [metadata, value], the metadata a map keyed by the
+ * annotations' deltas from the node's own SID, an entry's from its
+ * list's; read so too, an annotation unknown refused (CBL_YD_STRICT) or
+ * passed over.
  */
 int		 cbl_dnode_decode(cbl_dnode *parent,
 		    const struct cbl_ynode *sn, const void *data, size_t len,
 		    int flags, char *why, size_t whylen, cbl_dnode **out);
 int		 cbl_dnode_encode(const cbl_dnode *n, struct cbl_ybuf *b);
+int		 cbl_dtree_decode(cbl_dtree *t, const void *data, size_t len,
+		    int flags, char *why, size_t whylen);
+int		 cbl_dtree_encode(const cbl_dtree *t, struct cbl_ybuf *b);
 
 #endif /* !_CBL_DATA_H_ */

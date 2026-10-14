@@ -406,6 +406,50 @@ sid_cbor_body()
 	atf_check -o ignore $gen -m h,schema -b dv -o five -p . \
 	    -s dvbase.sid dvbase@2026-10-14.yang dvdev@2026-10-14.yang
 	atf_check -o match:'kept' -o not-match:'dropped' cat five/dv.h
+	# An annotation (RFC 7952) numbered in its own namespace,
+	# draft-ietf-core-yang-metadata's "annotation", by its bare name; the
+	# tables have it by SID.
+	cat > elm.sid <<-EOF
+	{
+	  "ietf-sid-file:sid-file": {
+	    "module-name": "example-last-modified",
+	    "module-revision": "2026-10-14",
+	    "assignment-range": [
+	      { "entry-point": "61610", "size": "2" }
+	    ],
+	    "item": [
+	      { "namespace": "module", "identifier": "example-last-modified",
+	        "sid": "61611" }
+	    ]
+	  }
+	}
+	EOF
+	atf_check -o match:'^elm.sid: 1 SIDs assigned' $gen -n -a -p "$y" \
+	    -s elm.sid "$y/example-last-modified@2026-10-14.yang"
+	atf_check -o match:'"namespace": "annotation"' \
+	    -o match:'"identifier": "last-modified"' -o match:'"sid": "61610"' \
+	    cat elm.sid
+	mkdir six
+	atf_check -o ignore $gen -m h,schema -b elm -o six -p "$y" \
+	    -s elm.sid "$y/example-last-modified@2026-10-14.yang"
+	atf_check -o match:'\.name = "last-modified", \.sid = UINT64_C\(61610\)' \
+	    cat six/elm_schema.c
+	# Without its SID: said, as a node's is.
+	cat > noann.sid <<-EOF
+	{
+	  "ietf-sid-file:sid-file": {
+	    "module-name": "example-last-modified",
+	    "module-revision": "2026-10-14",
+	    "item": [
+	      { "namespace": "module", "identifier": "example-last-modified",
+	        "sid": "61611" }
+	    ]
+	  }
+	}
+	EOF
+	atf_check -s exit:1 -e match:'annotation last-modified: no SID' \
+	    $gen -n -p "$y" -s noann.sid \
+	    "$y/example-last-modified@2026-10-14.yang"
 	# A .sid file with a status per item and a file status.
 	awk '{ print }
 	    /"sid-file-version": 1,/ {

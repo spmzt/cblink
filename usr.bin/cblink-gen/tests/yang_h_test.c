@@ -174,7 +174,7 @@ ATF_TC_BODY(tables, tc)
 	size_t nodes = 0;
 	regex_t re;
 
-	ATF_REQUIRE_EQ(7u, yangh_schema.nmod);
+	ATF_REQUIRE_EQ(11u, yangh_schema.nmod);
 	ATF_REQUIRE((sh = module("shapes")) != NULL);
 	ATF_REQUIRE((sys = module("ietf-system")) != NULL);
 	ATF_REQUIRE(module("ietf-sid-file") != NULL);

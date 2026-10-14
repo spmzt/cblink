@@ -348,6 +348,9 @@ const struct cbl_ynode *cbl_ynode_child(const struct cbl_ynode *, int64_t delta)
 uint64_t cbl_ynode_base(const struct cbl_ynode *);	/* what its children's deltas are from */
 const struct cbl_ynode *cbl_yschema_node(const struct cbl_yschema *, uint64_t sid);
 const struct cbl_yident *cbl_yschema_ident(const struct cbl_yschema *, uint64_t sid);
+/* RFC 7952's annotations: by SID, or a module's by name */
+const struct cbl_yannot *cbl_yschema_annot(const struct cbl_yschema *, uint64_t sid);
+const struct cbl_yannot *cbl_ymodule_annot(const struct cbl_ymodule *, const char *name);
 bool	cbl_yderived_from(const struct cbl_yschema *, uint64_t ident, uint64_t base, bool self);
 
 /* the codec: a node's struct as YANG-CBOR and back */
@@ -430,6 +433,15 @@ int	cbl_dtree_to_module(const cbl_dtree *, const struct cbl_ymodule *, void *p,
 int	cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *, const void *, size_t,
 	    int flags, char *why, size_t whylen, cbl_dnode **out);
 int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
+/* the whole tree, its top keyed by SIDs; read into an empty one */
+int	cbl_dtree_decode(cbl_dtree *, const void *, size_t, int flags, char *why,
+	    size_t whylen);
+int	cbl_dtree_encode(const cbl_dtree *, struct cbl_ybuf *);
+/* annotations (RFC 7952), in YANG-CBOR as draft-ietf-core-yang-metadata */
+int	cbl_dnode_meta_set(cbl_dnode *, const struct cbl_yannot *, const void *value);
+const void *cbl_dnode_meta(const cbl_dnode *, const struct cbl_yannot *);
+const struct cbl_yannot *cbl_dnode_meta_next(const cbl_dnode *,
+	    const struct cbl_yannot *prev, const void **value);
 /* edits (RFC 6241 section 7.2): all or nothing */
 #define	CBL_DOP_MERGE	1	/* and REPLACE, CREATE, DELETE, REMOVE; NONE, a default;
 				   INSERT and MOVE, YANG Patch's */

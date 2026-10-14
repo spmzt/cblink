@@ -262,6 +262,19 @@ struct cbl_yfeature {
 };
 
 struct cbl_yschema;
+struct cbl_ymodule;
+
+/*
+ * A metadata annotation (RFC 7952's md:annotation): its name, its SID
+ * (a .sid file's namespace "annotation", draft-ietf-core-yang-metadata)
+ * and its value's type.
+ */
+struct cbl_yannot {
+	const struct cbl_ymodule *module;
+	const char		*name;
+	uint64_t		 sid;
+	const struct cbl_ytype	*type;
+};
 
 struct cbl_ymodule {
 	const struct cbl_yschema *schema;	/* the tables it is in */
@@ -276,6 +289,8 @@ struct cbl_ymodule {
 	/* Its data at the top, rpcs, notifications, structures: by SID. */
 	const struct cbl_ynode	*const *top;
 	const struct cbl_yfeature *feature;	/* by name, as the module */
+	uint32_t		 nannot;
+	const struct cbl_yannot	*annot;		/* by name */
 };
 
 struct cbl_yschema {
@@ -292,6 +307,8 @@ struct cbl_yschema {
 	 * defined; by SID.
 	 */
 	const struct cbl_yident	*ident;
+	uint32_t		 nannot;
+	const struct cbl_yannot	*const *annot;	/* every module's, by SID */
 };
 
 /* The child of n a map key's delta names (RFC 9254), or NULL. */
@@ -311,6 +328,11 @@ const struct cbl_ynode *cbl_yschema_node(const struct cbl_yschema *s,
 /* The identity of a SID, or NULL. */
 const struct cbl_yident *cbl_yschema_ident(const struct cbl_yschema *s,
 		    uint64_t sid);
+/* The annotation of a SID; module m's named name.  NULL: none. */
+const struct cbl_yannot *cbl_yschema_annot(const struct cbl_yschema *s,
+		    uint64_t sid);
+const struct cbl_yannot *cbl_ymodule_annot(const struct cbl_ymodule *m,
+		    const char *name);
 /*
  * Whether identity x is derived from base (XPath derived-from()), or is
  * it with self (derived-from-or-self()).

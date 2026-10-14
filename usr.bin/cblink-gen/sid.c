@@ -34,6 +34,7 @@ sid_ns_name(enum sid_ns ns)
 	case SID_NS_IDENTITY:	return ("identity");
 	case SID_NS_FEATURE:	return ("feature");
 	case SID_NS_DATA:	return ("data");
+	case SID_NS_ANNOTATION:	return ("annotation");
 	}
 	return ("?");
 }
@@ -222,6 +223,8 @@ sid_read(const char *text, size_t len, struct diags *d)
 				item.ns = SID_NS_FEATURE;
 			else if (strcmp(ns, "data") == 0)
 				item.ns = SID_NS_DATA;
+			else if (strcmp(ns, "annotation") == 0)
+				item.ns = SID_NS_ANNOTATION;
 			else {
 				diag_add(d, 0, 0, "%s: namespace \"%s\"", id,
 				    ns);
@@ -369,6 +372,14 @@ sid_attach(struct schema *s, const struct sidfile *f, struct diags *d,
 			if ((found = a.found != NULL))
 				a.found->sid = it->sid;
 			break;
+		case SID_NS_ANNOTATION:
+			/* Its name, bare: the module is the file's. */
+			for (size_t j = 0; j < m->nexts && !found; j++)
+				if (sext_is_annotation(&m->exts[j], m) &&
+				    (found = strcmp(m->exts[j].arg,
+				    it->id) == 0))
+					m->exts[j].sid = it->sid;
+			break;
 		}
 		/* An obsolete item may name what the schema no longer has. */
 		if (!found && it->status != SID_ST_OBSOLETE && !absent_ok)
@@ -486,6 +497,11 @@ sid_verify(struct schema *s, const struct sidfile *f, struct diags *d)
 		    m->exts[i].sid == 0)
 			diag_add(d, 0, 0, "data /%s:%s: no SID", m->name,
 			    m->exts[i].arg);
+	for (i = 0; i < m->nexts; i++)
+		if (sext_is_annotation(&m->exts[i], m) &&
+		    m->exts[i].sid == 0)
+			diag_add(d, 0, 0, "annotation %s: no SID",
+			    m->exts[i].arg);
 	ms = (struct missing){ .m = m, .d = d };
 	walk_all(s, need_sid, &ms);
 	return (d->n > errs ? -1 : 0);
@@ -583,6 +599,11 @@ sid_assign(struct schema *s, struct sidfile *f, struct diags *d)
 		    m->exts[i].sid == 0)
 			collect_add(&c, SID_NS_DATA, xasprintf("/%s:%s",
 			    m->name, m->exts[i].arg));
+	for (i = 0; i < m->nexts; i++)
+		if (sext_is_annotation(&m->exts[i], m) &&
+		    m->exts[i].sid == 0)
+			collect_add(&c, SID_NS_ANNOTATION,
+			    xstrdup(m->exts[i].arg));
 	walk_all(s, collect_node, &c);
 	if (c.n == 0)
 		return (0);

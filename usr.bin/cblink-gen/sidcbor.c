@@ -377,7 +377,8 @@ sid_read_cbor(const char *data, size_t len, struct diags *d)
 						it->id = rd_text(&r);
 						break;
 					case S_ITEM_NS:
-						if (rd_uint(&r, SID_NS_DATA, &x))
+						if (rd_uint(&r,
+						    SID_NS_ANNOTATION, &x))
 							it->ns = (enum sid_ns)x;
 						break;
 					case S_ITEM_SID:

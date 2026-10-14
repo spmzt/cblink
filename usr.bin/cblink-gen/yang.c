@@ -853,6 +853,16 @@ conv_exts(struct conv *c, struct lysc_ext_instance *le, size_t *np)
 		if (strcmp(e[u].ext,
 		    "ietf-yang-structure-ext:augment-structure") == 0)
 			e[u].written = conv_augstruct(&le[u]);
+		/* md:annotation: its value's type, as libyang's metadata
+		 * plugin compiled it. */
+		if (strcmp(e[u].ext, "ietf-yang-metadata:annotation") == 0) {
+			const struct lysc_type *lt = NULL;
+
+			if (lyplg_ext_get_storage(&le[u], LY_STMT_TYPE,
+			    sizeof(lt), (const void **)&lt) == LY_SUCCESS &&
+			    lt != NULL)
+				e[u].type = conv_type(c, lt);
+		}
 	}
 	return (e);
 }

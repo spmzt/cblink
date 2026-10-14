@@ -653,6 +653,91 @@ indexed(const cbl_dnode *e)
 }
 
 /*
+ * Annotations.
+ */
+
+void
+cbl_d_meta_free(cbl_dnode *n)
+{
+	struct cbl_dmeta *m, *next;
+
+	for (m = n->meta; m != NULL; m = next) {
+		next = m->next;
+		cbl_d_vdel(m->an->type, m->value);
+		free(m);
+	}
+	n->meta = NULL;
+}
+
+int
+cbl_dnode_meta_set(cbl_dnode *n, const struct cbl_yannot *an,
+    const void *value)
+{
+	struct cbl_dmeta **pp, *m;
+	void *v = NULL;
+
+	if (n == NULL || an == NULL || an->type == NULL || n->sn == NULL)
+		return (EINVAL);
+	for (pp = &n->meta; *pp != NULL && (*pp)->an->sid < an->sid;
+	    pp = &(*pp)->next)
+		;
+	if (value != NULL && (v = cbl_d_vdup(an->type, value)) == NULL)
+		return (errno != 0 ? errno : ENOMEM);
+	if (*pp != NULL && (*pp)->an == an) {
+		m = *pp;
+		cbl_d_vdel(an->type, m->value);
+		if (v != NULL) {
+			m->value = v;
+			return (0);
+		}
+		*pp = m->next;
+		free(m);
+		return (0);
+	}
+	if (v == NULL)
+		return (0);
+	if ((m = malloc(sizeof(*m))) == NULL) {
+		cbl_d_vdel(an->type, v);
+		return (ENOMEM);
+	}
+	m->an = an;
+	m->value = v;
+	m->next = *pp;
+	*pp = m;
+	return (0);
+}
+
+const void *
+cbl_dnode_meta(const cbl_dnode *n, const struct cbl_yannot *an)
+{
+
+	for (const struct cbl_dmeta *m = n != NULL ? n->meta : NULL; m != NULL;
+	    m = m->next)
+		if (m->an == an)
+			return (m->value);
+	return (NULL);
+}
+
+const struct cbl_yannot *
+cbl_dnode_meta_next(const cbl_dnode *n, const struct cbl_yannot *prev,
+    const void **value)
+{
+	const struct cbl_dmeta *m = n != NULL ? n->meta : NULL;
+
+	if (prev != NULL) {
+		for (; m != NULL && m->an != prev; m = m->next)
+			;
+		if (m != NULL)
+			m = m->next;
+	}
+	if (m == NULL)
+		return (NULL);
+	if (value != NULL)
+		*value = m->value;
+	return (m->an);
+}
+
+/*
  * Making and taking away.
  */
 
@@ -669,6 +754,7 @@ free_node(cbl_dnode *n)
 		index_remove(n->tree, n);
 	cbl_d_free_value(n);
 	point_free(n);
+	cbl_d_meta_free(n);
 	free(n->head);
 	free(n->tail);
 	if (n != &n->tree->root)
@@ -1494,38 +1580,44 @@ cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *sn,
     const void *data, size_t len, int flags, char *why, size_t whylen,
     cbl_dnode **out)
 {
-	cbl_yarena *a;
-	void *p;
-	int error;
 
-	if (parent == NULL || sn == NULL || sn->size == 0)
+	if (parent == NULL || sn == NULL)
 		return (EINVAL);
-	if ((a = cbl_yarena_new()) == NULL)
-		return (ENOMEM);
-	if ((p = cbl_yarena_alloc(a, sn->size)) == NULL)
-		error = ENOMEM;
-	else if ((error = cbl_ydecode(sn, data, len, p, a, flags, why,
-	    whylen)) == 0)
-		error = from_struct(parent, sn, p, out, 0);
-	cbl_yarena_free(a);
-	return (error);
+	return (cbl_d_decode(parent, sn, data, len, flags, why, whylen, out));
 }
 
 int
 cbl_dnode_encode(const cbl_dnode *n, struct cbl_ybuf *b)
 {
-	cbl_yarena *a;
-	void *p;
+
+	if (n == NULL || n->sn == NULL)
+		return (EINVAL);
+	return (cbl_d_encode(n, b));
+}
+
+/* Into an empty tree; what was read taken out again on failure. */
+int
+cbl_dtree_decode(cbl_dtree *t, const void *data, size_t len, int flags,
+    char *why, size_t whylen)
+{
 	int error;
 
-	if (n == NULL || b == NULL || n->sn == NULL || n->sn->size == 0)
+	if (t == NULL)
 		return (EINVAL);
-	if ((a = cbl_yarena_new()) == NULL)
-		return (ENOMEM);
-	if ((p = cbl_yarena_alloc(a, n->sn->size)) == NULL)
-		error = ENOMEM;
-	else if ((error = to_struct(n, p, a, 0)) == 0)
-		error = cbl_yencode(n->sn, p, b);
-	cbl_yarena_free(a);
+	if (t->root.first != NULL)
+		return (EEXIST);
+	if ((error = cbl_d_decode(&t->root, NULL, data, len, flags, why,
+	    whylen, NULL)) != 0)
+		while (t->root.first != NULL)
+			(void)cbl_dnode_remove(t->root.first);
 	return (error);
+}
+
+int
+cbl_dtree_encode(const cbl_dtree *t, struct cbl_ybuf *b)
+{
+
+	if (t == NULL)
+		return (EINVAL);
+	return (cbl_d_encode(&t->root, b));
 }

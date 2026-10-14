@@ -39,7 +39,9 @@ struct sext {
 	bool		 inherited;
 	struct snode	*data;		/* the nodes it holds */
 	struct swnode	*written;	/* sx:augment-structure: as written */
-	uint64_t	 sid;		/* a structure's; 0: none */
+	uint64_t	 sid;		/* a structure's, an annotation's; 0:
+					   none */
+	struct sntype	*type;		/* md:annotation: its value's */
 };
 
 enum snode_kind {
@@ -315,6 +317,13 @@ bool		 smodule_emitted(const struct smodule *m);
  * alike, a SID for the structure, its nodes from /m:structure.
  */
 bool		 sext_is_structure(const struct sext *e,
+		    const struct smodule *m);
+/*
+ * Whether e is an annotation of m's own (md:annotation, RFC 7952),
+ * which a .sid file numbers in its namespace "annotation"
+ * (draft-ietf-core-yang-metadata).
+ */
+bool		 sext_is_annotation(const struct sext *e,
 		    const struct smodule *m);
 bool		 sntype_signed(enum sntype_base base);
 

@@ -1,0 +1,22 @@
+module foo {
+  yang-version 1.1;
+  namespace "urn:example:foo";
+  prefix foo;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of annotations: RFC 7952 section 5.2.3's leaf flag,
+     numbered as draft-ietf-core-yang-metadata's examples number it.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  leaf flag {
+    type boolean;
+  }
+}

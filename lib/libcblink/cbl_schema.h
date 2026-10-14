@@ -182,6 +182,15 @@ struct cbl_ychoice {
 	uint32_t		 off;		/* its enum member: case + 1, 0 none */
 };
 
+/*
+ * A list's unique statement (RFC 7950 section 7.8.3): for each leaf, the
+ * data nodes from a list entry down to it, NULL after the leaf.
+ */
+struct cbl_yunique {
+	uint16_t			 n;
+	const struct cbl_ynode *const *const *leaf;
+};
+
 struct cbl_ymodule;
 
 struct cbl_ynode {
@@ -217,6 +226,8 @@ struct cbl_ynode {
 	const struct cbl_ynode	*const *child;	/* by SID */
 	const uint16_t		*map;
 	const uint32_t		*keys;		/* list: indices in child */
+	uint16_t		 nunique;	/* list: unique statements */
+	const struct cbl_yunique *unique;
 	const struct cbl_ywhen	*when;
 	const struct cbl_ymust	*must;
 	const char		*const *dflt;	/* canonical */
@@ -362,6 +373,45 @@ bool		 cbl_ymember_present(const struct cbl_ynode *n,
 int		 cbl_ydecode_member(const struct cbl_ynode *n,
 		    const void *data, size_t len, void *parent, cbl_yarena *a,
 		    int flags, char *why, size_t whylen);
+
+/*
+ * The static validator (RFC 7950): what holds within the tree of node
+ * n's struct p, by the tables.  Each value against its type (ranges,
+ * lengths in characters, patterns, enums, bits, identities derived from
+ * the bases, a union's member); each node: mandatory leaves and choices,
+ * counts, keys there and each entry's own, unique, a configuration
+ * leaf-list's values each once, one case of a choice; with CBL_YV_EDIT,
+ * no config false node.  EINVAL and err says where and why, as the
+ * cblink:error structure would: the node, RFC 8040's error-tag, RFC
+ * 7950's error-app-tag, the message (a restriction's own, if it has
+ * one).  cbl_yvalidate_member() does a module's top-level node in the
+ * module's data struct.  when, must and the targets of leafrefs and
+ * instance-identifiers are the evaluator's.
+ */
+#define	CBL_YV_EDIT		0x0001
+
+struct cbl_yverr {
+	const struct cbl_ynode	*node;
+	const char		*tag;
+	const char		*apptag;	/* NULL: none */
+	char			 msg[160];
+};
+
+int		 cbl_yvalidate(const struct cbl_ynode *n, const void *p,
+		    int flags, struct cbl_yverr *err);
+int		 cbl_yvalidate_member(const struct cbl_ynode *n,
+		    const void *parent, int flags, struct cbl_yverr *err);
+
+/*
+ * Defaults (RFC 7950 sections 7.6.1, 7.7.2, 7.9.3): what node n's struct
+ * p has not set, set to the module's default: a leaf's, a leaf-list's
+ * values, a choice's default case and the defaults in it; in p and every
+ * struct below it that is there (an absent container stays absent).
+ * The tree must be writable, as cbl_ydecode() makes it; what is
+ * allocated is a's.  An instance-identifier's default is left unset.
+ */
+int		 cbl_ydefaults(const struct cbl_ynode *n, void *p,
+		    cbl_yarena *a);
 
 /*
  * A version 2 body: one map whose top-level keys are SIDs (RFC 9254

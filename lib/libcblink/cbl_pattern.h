@@ -48,6 +48,8 @@ int	 cbl_pattern_compile(const char *xsd, regex_t *re, char *why,
 	    size_t whylen, size_t *pos);
 
 /* Does the value match the compiled pattern, as a whole? */
+int	 cbl_pattern_compile_ere(const char *ere, regex_t *re);
+
 bool	 cbl_pattern_match(const regex_t *re, const char *value);
 
 void	 cbl_pattern_free(regex_t *re);

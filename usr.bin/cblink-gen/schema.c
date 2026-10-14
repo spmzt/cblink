@@ -116,6 +116,9 @@ snode_free(struct snode *n)
 		snode_free(n->child);
 		free(n->name);
 		free(n->keys);
+		for (size_t i = 0; i < n->nuniques; i++)
+			free(n->uniques[i].leaf);
+		free(n->uniques);
 		type_free(n->type);
 		free(n->wtype);
 		free(n->wpath);

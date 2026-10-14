@@ -67,10 +67,38 @@ the limits) before a program sees it; the codec decodes a value into its
 struct and, with `CBL_YD_STRICT`, refuses a key the node has no child
 for. What a decode may allocate is bounded (64 MiB unless set).
 
-## 4. Expressions and patterns
+## 4. Validation
+
+`cbl_yvalidate()` checks a tree, a node's struct as the codec or a
+program filled it, against what RFC 7950 says of it within the tree:
+
+| Rule | error-tag | error-app-tag |
+|------|-----------|---------------|
+| a value's range, length (in characters for a string), pattern (and `invert-match`), enum, bits, identity derived from every base, union member | `invalid-value` | the restriction's own, if any |
+| a mandatory leaf missing | `missing-element` | |
+| a mandatory choice with no case | `data-missing` | `missing-choice` |
+| a node of a case other than the one given | `bad-element` | |
+| fewer than `min-elements`, more than `max-elements` | `operation-failed` | `too-few-elements`, `too-many-elements` |
+| a list entry without its key, two entries of one key | `missing-element`, `data-exists` | |
+| two entries alike in a `unique` statement's leaves (where all of them are) | `operation-failed` | `data-not-unique` |
+| a configuration leaf-list's value twice | `data-exists` | |
+| a `config false` node in an edit | `invalid-value` | |
+
+The error's message is the restriction's `error-message` when it has
+one. A non-presence container that is absent is there in effect: a
+mandatory node below it is missing. The YANG family validates every
+EDIT and every rpc's input before a handler sees them, never what it
+reads back (RFC 8342 section 5.3).
+
+`cbl_ydefaults()` sets what a tree leaves unset to the module's
+defaults: a leaf's, a leaf-list's values, a choice's default case and
+the defaults in it, in every struct that is there (an absent container
+stays absent).
+
+## 5. Expressions and patterns
 
 `when`, `must` and a leafref's `path` are recorded in the schema tables
-as written, for the validator. They must lie within **XPath-lite**; the
+as written, for the evaluator (what they say needs more than one tree). They must lie within **XPath-lite**; the
 generator refuses one that does not, naming the node and what is outside:
 
 - the axes `child`, `parent`, `self` and `descendant-or-self`, with their
@@ -92,7 +120,7 @@ a complement inside a class, counts over `RE_DUP_MAX`. `\d`, `\p{L}`,
 `\p{Lu}`, `\p{Ll}` and `\p{Nd}` are FreeBSD's Unicode classes in
 `C.UTF-8`; `\p{N}` and `\w` are narrower than XSD's.
 
-## 5. The protocol
+## 6. The protocol
 
 The YANG family (family 1, WIRE-FORMAT.md section 7.6) serves a
 program's modules in CORECONF's shape: GET, EDIT (create, replace,
@@ -100,7 +128,7 @@ delete; all or nothing), RPC, NOTIFY, GET-SID. The control family (family
 0, section 7.2) is the module `cblink-ctrl`; errors, credit and closes
 are the module `cblink`'s structures (section 6).
 
-## 6. Left out
+## 7. Left out
 
 - **Validation of anyxml content**, and of anydata's against a schema.
 - **XPath 1.0** beyond XPath-lite, and XSD regular expressions beyond

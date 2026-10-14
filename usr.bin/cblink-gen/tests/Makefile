@@ -42,6 +42,18 @@ CFLAGS.yfamily_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
 LDADD.yfamily_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 # Built once for both.
 CFLAGS.yangh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+# yvalid_test: the static validator on the module rules.
+ATF_TESTS_C+=	yvalid_test
+SRCS.yvalid_test=	rules.h yvalid_test.c rules_schema.c
+CFLAGS.yvalid_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+LDADD.yvalid_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CLEANFILES+=	rules.h rules_schema.c
+rules.h: ${.CURDIR}/yang/rules@2026-10-13.yang \
+    ${.CURDIR}/yang/rules@2026-10-13.sid ${GEN}
+	${GEN} -m h,schema -b rules -o ${.OBJDIR} \
+	    -s ${.CURDIR}/yang/rules@2026-10-13.sid \
+	    ${.CURDIR}/yang/rules@2026-10-13.yang > /dev/null
+rules_schema.c: rules.h
 CLEANFILES+=	yangh.h yangh_schema.c ietf-system.sid
 yangh.h: ${YANGH_SRC} ${GEN}
 	cat ${.CURDIR}/yang/ietf-system@2014-08-06.sid > ${.OBJDIR}/ietf-system.sid
@@ -75,6 +87,7 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/shapes@2026-10-13.yang yang/shapes@2026-10-13.sid \
 		yang/clash@2026-10-13.yang \
 		yang/tree@2026-10-13.yang \
+		yang/rules@2026-10-13.yang yang/rules@2026-10-13.sid \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
 		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \

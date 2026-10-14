@@ -685,6 +685,63 @@ children_emit(struct ys *y, size_t nn, const struct snode *first,
 }
 
 /*
+ * A list's unique statements: for each leaf, its data nodes from the
+ * list entry down, choices and cases left out, as the structs nest.
+ */
+static void
+unique_emit(struct ys *y, size_t nn, const struct snode *list,
+    struct buf *init)
+{
+	struct buf set;
+
+	buf_init(&set);
+	for (size_t i = 0; i < list->nuniques; i++) {
+		const struct sunique *un = &list->uniques[i];
+		struct buf leaves;
+
+		buf_init(&leaves);
+		for (size_t j = 0; j < un->n; j++) {
+			const struct snode *chain[64];
+			size_t depth = 0;
+			struct buf path;
+
+			if (un->leaf[j] == NULL) {
+				diag_add(y->d, 0, 0, "%s: a unique leaf not "
+				    "found below the list", list->name);
+				continue;
+			}
+			for (const struct snode *x = un->leaf[j];
+			    x != NULL && x != list; x = x->parent)
+				if (x->kind != SN_CHOICE && x->kind != SN_CASE &&
+				    depth < sizeof(chain) / sizeof(chain[0]))
+					chain[depth++] = x;
+			buf_init(&path);
+			while (depth > 0)
+				buf_printf(&path, "&n%zu, ",
+				    node_ref(y, chain[--depth]));
+			buf_printf(&y->body, "static const struct cbl_ynode "
+			    "*const n%zu_u%zu_%zu[] = { %sNULL };\n", nn, i, j,
+			    path.p);
+			buf_printf(&leaves, "%sn%zu_u%zu_%zu", j > 0 ? ", " : "",
+			    nn, i, j);
+			buf_free(&path);
+			y->mbytes += sizeof(void *) * 2;
+		}
+		buf_printf(&y->body, "static const struct cbl_ynode *const "
+		    "*const n%zu_u%zu[] = { %s };\n", nn, i, leaves.p);
+		buf_printf(&set, "%s{ %zu, n%zu_u%zu }", i > 0 ? ", " : "",
+		    un->n, nn, i);
+		buf_free(&leaves);
+	}
+	buf_printf(&y->body, "static const struct cbl_yunique n%zu_q[] = { %s };"
+	    "\n", nn, set.p);
+	buf_printf(init, "\t.nunique = %zu,\n\t.unique = n%zu_q,\n",
+	    list->nuniques, nn);
+	y->mbytes += list->nuniques * sizeof(struct cbl_yunique);
+	buf_free(&set);
+}
+
+/*
  * How a node's children are found by delta (cbl_ynode_child()): the
  * leading ones within a span of a few times their number, dense when
  * their SIDs follow one another, else by a table of their places; the
@@ -933,6 +990,8 @@ node_ref(struct ys *y, const struct snode *n)
 	}
 	(void)children_emit(y, nn, n->child, n->kind == SN_LIST ? n : NULL,
 	    &init);
+	if (n->kind == SN_LIST && n->nuniques > 0)
+		unique_emit(y, nn, n, &init);
 	if (n->nwhen > 0) {
 		buf_init(&w);
 		buf_printf(&w, "n%zu_w", nn);

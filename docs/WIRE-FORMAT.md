@@ -469,10 +469,12 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   (`[SID, keys...]`) is for a later revision.
 - **EDIT** is CORECONF's iPATCH: a value creates or replaces the node, null
   deletes it. Only configuration (`config true`) is edited. The request
-  is all or nothing: every value is decoded before any change is made,
+  is all or nothing: every value is decoded and validated (YANG.md
+  section 4) before any change is made,
   and if one node's edit fails, those already made are undone (RFC 6241
   section 7.2, rollback-on-error).
-- **RPC** is CORECONF's POST. An rpc's input and output are keyed by the
+- **RPC** is CORECONF's POST, its input validated. An rpc's input and
+  output are keyed by the
   rpc's SID, and their children's deltas are from the rpc's SID, not the
   `input` or `output` node's (RFC 9254 section 3.2).
 - **NOTIFY** frames carry YANG notifications to the subscribers of group

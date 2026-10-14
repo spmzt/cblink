@@ -1,0 +1,220 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "rules",
+    "module-revision": "2026-10-13",
+    "sid-file-version": 1,
+    "assignment-range": [
+      {
+        "entry-point": "1099511827776",
+        "size": "1000"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "rules",
+        "sid": "1099511827776"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "crypto-alg",
+        "sid": "1099511827777"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "des",
+        "sid": "1099511827778"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "des3",
+        "sid": "1099511827779"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "hash",
+        "sid": "1099511827780"
+      },
+      {
+        "namespace": "identity",
+        "identifier": "sha1",
+        "sid": "1099511827781"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules",
+        "sid": "1099511827782"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/alg",
+        "sid": "1099511827783"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/beer",
+        "sid": "1099511827784"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/blob",
+        "sid": "1099511827785"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/chocolate",
+        "sid": "1099511827786"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/code",
+        "sid": "1099511827787"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/colour",
+        "sid": "1099511827788"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/either",
+        "sid": "1099511827789"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/flags",
+        "sid": "1099511827790"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/host-name",
+        "sid": "1099511827791"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/must-have",
+        "sid": "1099511827792"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/not-x",
+        "sid": "1099511827793"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/port",
+        "sid": "1099511827794"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/pretzel",
+        "sid": "1099511827795"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/ratio",
+        "sid": "1099511827796"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/server",
+        "sid": "1099511827797"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/server/addr",
+        "sid": "1099511827798"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/server/addr/ip",
+        "sid": "1099511827799"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/server/addr/port",
+        "sid": "1099511827800"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/server/name",
+        "sid": "1099511827801"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/small",
+        "sid": "1099511827802"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/status",
+        "sid": "1099511827803"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/tag",
+        "sid": "1099511827804"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults",
+        "sid": "1099511827805"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/colour",
+        "sid": "1099511827806"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/daily",
+        "sid": "1099511827807"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/dns",
+        "sid": "1099511827808"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/hash-alg",
+        "sid": "1099511827809"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/interval",
+        "sid": "1099511827810"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/key-data",
+        "sid": "1099511827811"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/level",
+        "sid": "1099511827812"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/mode",
+        "sid": "1099511827813"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/name",
+        "sid": "1099511827814"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/on",
+        "sid": "1099511827815"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/rules:rules/defaults/pick",
+        "sid": "1099511827816"
+      }
+    ]
+  }
+}

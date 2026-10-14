@@ -767,6 +767,21 @@ cbl_pattern_compile(const char *xsd, regex_t *re, char *why, size_t whylen,
 	return (0);
 }
 
+/* An ERE already translated (a schema table's), compiled as above. */
+int
+cbl_pattern_compile_ere(const char *ere, regex_t *re)
+{
+	locale_t loc, old;
+	int rc;
+
+	if ((loc = utf8_locale()) == NULL)
+		return (-1);
+	old = uselocale(loc);
+	rc = regcomp(re, ere, REG_EXTENDED | REG_NOSUB);
+	uselocale(old);
+	return (rc == 0 ? 0 : -1);
+}
+
 bool
 cbl_pattern_match(const regex_t *re, const char *value)
 {

@@ -373,6 +373,14 @@ void	*cbl_req_yarg(const cbl_req *);
 int	cbl_req_set_yerr(cbl_req *, const char *text, uint64_t sid);
 int	cbl_msg_put_yget(cbl_msg *, const uint64_t *sids, size_t n);
 
+/* the static validator; defaults */
+#define	CBL_YV_EDIT	0x0001	/* config false nodes refused */
+struct cbl_yverr { const struct cbl_ynode *node; const char *tag, *apptag; char msg[160]; };
+int	cbl_yvalidate(const struct cbl_ynode *, const void *p, int flags, struct cbl_yverr *);
+int	cbl_yvalidate_member(const struct cbl_ynode *, const void *parent, int flags,
+	    struct cbl_yverr *);
+int	cbl_ydefaults(const struct cbl_ynode *, void *p, cbl_yarena *);
+
 /* YANG notifications, to family 1's group "notify" */
 int	cbl_ynotify(cbl_ctx *, const struct cbl_ynode *, const void *p);
 struct cbl_ynotif { uint64_t sid; const char *event_time; const void *content; size_t len; };
@@ -383,11 +391,16 @@ int	cbl_msg_ynotif(const cbl_msg *, struct cbl_ynotif *, cbl_yarena *);
   UTF-8, and with `CBL_YD_STRICT` a key the node has no child for.
   What a decode allocates is the arena's, bounded by its limit, since a
   list entry may be one byte of input and a struct of many.
+- **Validating** is what RFC 7950 says within one tree (YANG.md section
+  4): `cbl_yvalidate()` gives the first violation with its node, error-tag,
+  error-app-tag and message. `cbl_ydefaults()` sets what is unset to the
+  module's defaults.
 - **The YANG family** serves the handlers of the tables given to
   `cbl_yserver_add()`, in CORECONF's shape (WIRE-FORMAT.md section 7.6):
   GET reads top-level data nodes through their `get` handlers, a dump a
   node a frame; EDIT creates, replaces or deletes them through their
-  `edit` handlers, all or nothing; RPC calls an rpc's handler; GET-SID
+  `edit` handlers, all or nothing, each value validated first; RPC calls
+  an rpc's handler with its input validated; GET-SID
   sends the `.sid` files the table carries. A handler names the node at
   fault with `cbl_req_set_yerr()`: the error's `error-path`, read with
   `cbl_msg_err_sid()`.

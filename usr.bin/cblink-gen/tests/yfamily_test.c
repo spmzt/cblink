@@ -317,6 +317,28 @@ ATF_TC_BODY(refusals, tc)
 	ATF_REQUIRE_EQ(EOPNOTSUPP, cbl_request(f.c, m, &r, 5000));
 	ATF_REQUIRE_EQ(n_state->sid, cbl_msg_err_sid(r));
 	cbl_msg_free(r);
+	/*
+	 * What the static validator refuses, the codec taking it: tuned,
+	 * a presence container, without its mandatory max.
+	 */
+	{
+		struct shapes_shapes_tuned t = { 0 };
+		struct shapes_shapes bad = { .tuned = &t };
+		struct shapes db = { .shapes = &bad };
+		const struct cbl_ynode *tn = NULL, *mx = NULL;
+
+		for (uint32_t i = 0; i < n_shapes->nchild; i++)
+			if (strcmp(n_shapes->child[i]->name, "tuned") == 0)
+				tn = n_shapes->child[i];
+		ATF_REQUIRE(tn != NULL && tn->nchild == 1);
+		mx = tn->child[0];
+		m = new_req(&f, CBL_YCMD_EDIT);
+		ATF_REQUIRE_EQ(0, cbl_msg_put_ymember(m, n_shapes, &db));
+		ATF_REQUIRE_EQ(EINVAL, cbl_request(f.c, m, &r, 5000));
+		ATF_REQUIRE_EQ_MSG(mx->sid, cbl_msg_err_sid(r), "%s",
+		    cbl_msg_err_str(r));
+		cbl_msg_free(r);
+	}
 	/* A value that is not the node's: nothing changed. */
 	m = new_req(&f, CBL_YCMD_EDIT);
 	ATF_REQUIRE_EQ(0, cbl_msg_put_sid_raw(m, n_shapes->sid, "\x01", 1));

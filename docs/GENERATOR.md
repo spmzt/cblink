@@ -103,7 +103,9 @@ validates YANG-CBOR by:
 
 - every node with its SID, its kind and flags, its type, its children
   sorted by SID, its keys, its choice and case, its `when` and `must`
-  expressions, its defaults and its limits; and where it is in the
+  expressions, its defaults and its limits, a list's `unique` statements
+  (each leaf by the data nodes from an entry down to it); and where it is
+  in the
   structs, with `offsetof()` and `sizeof()`, so that the two cannot
   differ. An rpc's or an action's input and output carry the rpc's or
   the action's SID as the base their children's deltas are from (RFC 9254
@@ -207,6 +209,8 @@ build time.
 - **yang_tree:** tree diagrams equal to `yanglint -f tree`.
 - **yfamily_test:** family 1 serving those tables over a connection: get,
   edit and its rollback, refusals, rpc, dump, notifications.
+- **yvalid_test:** the static validator, a rule a case, on RFC 7950's
+  examples; the defaults.
 - **ymod_regen:** the committed files of cblink's modules are up to date.
 - **determinism, cli, big_input, cblink_mk:** repeated runs give identical
   output, the command line, the size limit, and cblink.mk finding a

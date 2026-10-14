@@ -734,6 +734,9 @@ add_dflt(struct conv *c, struct snode *n, const struct lyd_value *v)
 	n->dflts[n->ndflts++] = xstrdup(lyd_value_get_canonical(c->ctx, v));
 }
 
+static struct snode *snode_below(struct snode *, const struct lysc_node *,
+    const struct lysc_node *);
+
 static struct snode *
 conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 {
@@ -848,14 +851,59 @@ conv_node(struct conv *c, const struct lysc_node *ln, struct snode *parent)
 				n->dflt_case = ch;
 	}
 	if (n->kind == SN_LIST) {
+		const struct lysc_node_list *l = (const void *)ln;
+		LY_ARRAY_COUNT_TYPE u, v;
+
 		for (struct snode *ch = n->child; ch != NULL; ch = ch->next)
 			if ((ch->flags & SNF_KEY) != 0) {
 				n->keys = xreallocarray(n->keys, n->nkeys + 1,
 				    sizeof(*n->keys));
 				n->keys[n->nkeys++] = ch;
 			}
+		n->nuniques = LY_ARRAY_COUNT(l->uniques);
+		n->uniques = xcalloc(n->nuniques + 1, sizeof(*n->uniques));
+		LY_ARRAY_FOR(l->uniques, u) {
+			struct sunique *un = &n->uniques[u];
+
+			un->n = LY_ARRAY_COUNT(l->uniques[u]);
+			un->leaf = xcalloc(un->n + 1, sizeof(*un->leaf));
+			LY_ARRAY_FOR(l->uniques[u], v)
+				un->leaf[v] = snode_below(n, ln,
+				    &l->uniques[u][v]->node);
+		}
 	}
 	return (n);
+}
+
+/*
+ * The node of n's tree that is ln's descendant d: down from n by the names
+ * (and modules) of d's ancestors below ln, choices and cases included.
+ */
+static struct snode *
+snode_below(struct snode *n, const struct lysc_node *ln,
+    const struct lysc_node *d)
+{
+	const struct lysc_node *chain[64];
+	size_t depth = 0;
+	struct snode *at = n, *ch;
+
+	for (const struct lysc_node *x = d; x != NULL && x != ln;
+	    x = x->parent) {
+		if (depth == sizeof(chain) / sizeof(chain[0]))
+			return (NULL);
+		chain[depth++] = x;
+	}
+	while (depth > 0) {
+		const struct lysc_node *x = chain[--depth];
+
+		for (ch = at->child; ch != NULL; ch = ch->next)
+			if (strcmp(ch->name, x->name) == 0 &&
+			    strcmp(ch->module->name, x->module->name) == 0)
+				break;
+		if ((at = ch) == NULL)
+			return (NULL);
+	}
+	return (at);
 }
 
 static struct snode *

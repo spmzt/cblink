@@ -32,6 +32,7 @@ SRCS=		cbl_arena.c \
 		cbl_ycodec.c \
 		cbl_yctrl_schema.c \
 		cbl_yfamily.c \
+		cbl_yvalid.c \
 		cbl_ymod_schema.c
 
 VERSION_DEF=	${.CURDIR}/Versions.def

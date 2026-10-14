@@ -54,7 +54,8 @@ The suite has about 155 test cases.
 | `yang_frontend` | Modules compiled through libyang, features and deviations, extensions, the profile's refusals (XPath outside XPath-lite, patterns outside the translator) named. |
 | `sid_cbor` | `.sid` files numbered with `-a`, in JSON and YANG-CBOR and back, `ietf-sid-file`'s own SIDs, the server table's copy of a file. |
 | `yang_h`, `yang_h_test` | The structs and tables of every shape and type compile at `WARNS=6`; lookups by delta and SID, identities, the codec's kinds (decimal64, bits, identityref, instance-identifier, unions with tags 43 to 46), an rpc's deltas from its SID, the arena's limit, the `cblink` structures in a message, and a round trip of every struct. |
-| `yfamily_test` | Family 1 serving those tables over a connection: GET and EDIT, an edit undone when another fails, refusals with the node at fault, RPC, a dump, a notification heard. |
+| `yfamily_test` | Family 1 serving those tables over a connection: GET and EDIT, an edit undone when another fails, refusals with the node at fault (the validator's among them), RPC, a dump, a notification heard. |
+| `yvalid_test` | The static validator on a module of RFC 7950's examples, a rule a case: ranges, lengths in characters, patterns and their app-tags, enums, bits, identities, unions, mandatory leaves and choices, counts, keys, `unique`, `config false` in edits; and the defaults of every kind. |
 | `yang_tree` | Tree diagrams equal to `yanglint -f tree`. |
 | `ymod_regen` | The structs and tables of cblink's own modules, and `docs/ctrl.md`, committed in `lib/libcblink` and `docs`, match what the generator produces now. |
 | `determinism`, `cli`, `big_input`, `cblink_mk` | Repeated runs give identical output; options and exit codes; the size limit; cblink.mk finds a module given relative, with `../`, or absolute. |

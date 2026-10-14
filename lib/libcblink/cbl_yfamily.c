@@ -13,10 +13,12 @@
  *		datastore.  The reply {SID: value, ...}; a dump, one
  *		MULTI frame a node.  A node not there is left out.
  *	EDIT	{SID: value or null, ...}, as iPATCH: a value creates or
- *		replaces the node, null deletes it.  All or nothing: an
- *		edit that fails undoes those before it.
- *	RPC	{SID(rpc): input or null}; the reply {SID(rpc): output},
- *		null when the rpc has none.
+ *		replaces the node, null deletes it.  All or nothing: each
+ *		value decoded and validated (cbl_yvalidate(), config
+ *		only) before any change, and an edit that fails undoes
+ *		those before it.
+ *	RPC	{SID(rpc): input or null}, validated; the reply
+ *		{SID(rpc): output}, null when the rpc has none.
  *	NOTIFY	to group "notify": {cblink:notification: {event-time,
  *		event: {delta: content}}}, the delta from event's SID
  *		(RFC 9254: anydata's keys are as a container's).
@@ -143,6 +145,39 @@ yfailed(cbl_req *req, int error, uint64_t sid, const char *what)
 
 	return (ysay(req, error, sid, NULL, req->err_msg == NULL ? what :
 	    NULL));
+}
+
+/*
+ * The static validator's verdict on what a request brings: the node at
+ * fault, the tag, the app-tag and the message, as the error says them.
+ */
+static int
+yverdict(cbl_req *req, int error, const struct cbl_yverr *ve)
+{
+
+	if (error == 0)
+		return (0);
+	(void)cbl_req_set_err(req, ve->msg, NULL, 0, -1);
+	req->err_ysid = ve->node != NULL ? ve->node->sid : 0;
+	req->err_ytag = ve->tag;
+	return (error);
+}
+
+static int
+yvalid(cbl_req *req, const struct cbl_ynode *n, const void *p, int flags)
+{
+	struct cbl_yverr ve;
+
+	return (yverdict(req, cbl_yvalidate(n, p, flags, &ve), &ve));
+}
+
+static int
+yvalid_member(cbl_req *req, const struct cbl_ynode *n, const void *parent)
+{
+	struct cbl_yverr ve;
+
+	return (yverdict(req, cbl_yvalidate_member(n, parent, CBL_YV_EDIT,
+	    &ve), &ve));
 }
 
 /*
@@ -418,11 +453,18 @@ y_edit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		}
 		raw = msg->buf + msg->hdr.hdrlen + at->off;
 		/* null: deleted, after it nothing. */
-		if (!(at->len == 1 && raw[0] == 0xf6) &&
-		    (error = cbl_ydecode_member(e[n].f.n, raw, at->len,
-		    e[n].after, a, CBL_YD_STRICT, why, sizeof(why))) != 0) {
-			error = ysay(req, error, sid, "bad-element", why);
-			break;
+		if (!(at->len == 1 && raw[0] == 0xf6)) {
+			if ((error = cbl_ydecode_member(e[n].f.n, raw, at->len,
+			    e[n].after, a, CBL_YD_STRICT, why,
+			    sizeof(why))) != 0) {
+				error = ysay(req, error, sid, "bad-element",
+				    why);
+				break;
+			}
+			/* Configuration, valid as RFC 7950 has it. */
+			if ((error = yvalid_member(req, e[n].f.n,
+			    e[n].after)) != 0)
+				break;
 		}
 		req->yarg = e[n].f.arg;
 		if (e[n].f.h->get != NULL && (error = e[n].f.h->get(req,
@@ -508,6 +550,11 @@ y_rpc(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	    sizeof(why))) != 0) {
 		cbl_yarena_free(a);
 		return (ysay(req, error, sid, "bad-element", why));
+	}
+	/* An rpc's input, valid as RFC 7950 has it. */
+	if ((error = yvalid(req, in, pin, 0)) != 0) {
+		cbl_yarena_free(a);
+		return (error);
 	}
 	req->yarg = f.arg;
 	if ((error = f.h->rpc(req, pin, pout, a)) != 0) {

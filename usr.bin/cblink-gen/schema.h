@@ -170,6 +170,12 @@ struct smust {
  * node's actions, then its notifications; an rpc's or action's are its
  * input and its output, always both.
  */
+/* A list's unique statement: the leaves, descendants of the list. */
+struct sunique {
+	struct snode	**leaf;
+	size_t		 n;
+};
+
 struct snode {
 	enum snode_kind	 kind;
 	char		*name;
@@ -185,6 +191,8 @@ struct snode {
 	uint32_t	 max;		/* list, leaf-list: max-elements */
 	struct snode	**keys;		/* list: its key leaves, in order */
 	size_t		 nkeys;
+	struct sunique	*uniques;	/* list: its unique statements */
+	size_t		 nuniques;
 	char		*units;		/* leaf, leaf-list */
 	char		**dflts;	/* leaf (one), leaf-list: canonical */
 	size_t		 ndflts;

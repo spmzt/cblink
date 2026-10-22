@@ -1,0 +1,275 @@
+module cblink-ctrl {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:cblink-ctrl";
+  prefix cblc;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "The control family of cblink's wire version 2: family 0, 'ctrl',
+     present on every endpoint.  It resolves family names to ids, lists
+     families, manages multicast subscriptions and answers pings.
+
+     Each command is an rpc of this module: its request body is
+     {SID(rpc): input}, its reply {SID(rpc): output}, as family 1's RPC
+     (cblink docs/WIRE-FORMAT.md section 7.6), the command number
+     choosing the rpc.  A request without the rpc's item has an empty
+     input.  The commands' numbers are the wire's:
+
+       1  get-family    do (by id or name), dump (every family)
+       2  subscribe     do
+       3  unsubscribe   do
+       4  ping          do
+       5  hello         do: the cblink module's hello structure, both ways
+       6  family-added  notification, group 'notify'
+       7  family-removed notification, group 'notify'
+
+     The notifications are sent as family 1's are: the cblink module's
+     notification structure as the body.";
+
+  revision 2026-10-13 {
+    description
+      "Initial revision: version 1's control.yaml in YANG.";
+    reference
+      "cblink docs/WIRE-FORMAT.md section 7.2; Arcana
+       docs/PLAN-SDN-YANG.md step 1.7.6.";
+  }
+
+  typedef family-id {
+    type uint16;
+    description
+      "A family's id on the endpoint that assigned it: 0 the control
+       family, 1 the YANG family, the others dynamic.";
+  }
+
+  typedef family-name {
+    type string {
+      length "1..63";
+      pattern '[a-z][a-z0-9_.\-]*';
+    }
+    description
+      "A family's name.  'ctrl' and names beginning with 'cblink.' are
+       the library's.";
+  }
+
+  typedef op-flags {
+    type bits {
+      bit do {
+        position 0;
+        description
+          "The command takes do requests.";
+      }
+      bit dump {
+        position 1;
+        description
+          "The command takes dump requests.";
+      }
+      bit stream {
+        position 2;
+        description
+          "The command opens a bidirectional stream.";
+      }
+      bit push {
+        position 3;
+        description
+          "The command opens a server-to-client stream.";
+      }
+      bit auth {
+        position 4;
+        description
+          "The command needs an authenticated peer.";
+      }
+    }
+    description
+      "What a command does: the CBL_OPF_* values.";
+  }
+
+  typedef group-flags {
+    type bits {
+      bit auth {
+        position 4;
+        description
+          "Subscribing needs an authenticated peer.";
+      }
+    }
+    description
+      "A multicast group's flags: the CBL_MCF_* values.";
+  }
+
+  grouping family-info {
+    description
+      "What a family is: its id, name, version, commands and groups.";
+    leaf id {
+      type family-id;
+      description
+        "The family's id.";
+    }
+    leaf name {
+      type family-name;
+      description
+        "The family's name.";
+    }
+    leaf version {
+      type uint32;
+      description
+        "The family's version.";
+    }
+    list op {
+      key "cmd";
+      description
+        "The family's commands.";
+      leaf cmd {
+        type uint16 {
+          range "1..max";
+        }
+        description
+          "The command's number.";
+      }
+      leaf name {
+        type string {
+          length "0..63";
+        }
+        description
+          "The command's name.";
+      }
+      leaf flags {
+        type op-flags;
+        description
+          "What the command does.";
+      }
+    }
+    list group {
+      key "id";
+      description
+        "The family's multicast groups.";
+      leaf id {
+        type uint32 {
+          range "1..max";
+        }
+        description
+          "The group's id on this endpoint.";
+      }
+      leaf name {
+        type string {
+          length "0..63";
+        }
+        description
+          "The group's name.";
+      }
+      leaf flags {
+        type group-flags;
+        description
+          "The group's flags.";
+      }
+    }
+  }
+
+  rpc get-family {
+    description
+      "One family, by id or by name (do); every family, one a reply
+       frame (dump, no input).";
+    input {
+      leaf id {
+        type family-id;
+        description
+          "The family's id.";
+      }
+      leaf name {
+        type family-name;
+        description
+          "The family's name; it wins over id.";
+      }
+    }
+    output {
+      uses family-info;
+    }
+  }
+
+  rpc subscribe {
+    description
+      "Join a multicast group of a family.";
+    input {
+      leaf family-id {
+        type family-id;
+        mandatory true;
+        description
+          "The family.";
+      }
+      leaf group-id {
+        type uint32 {
+          range "1..max";
+        }
+        mandatory true;
+        description
+          "The group.";
+      }
+    }
+  }
+
+  rpc unsubscribe {
+    description
+      "Leave a multicast group of a family.";
+    input {
+      leaf family-id {
+        type family-id;
+        mandatory true;
+        description
+          "The family.";
+      }
+      leaf group-id {
+        type uint32 {
+          range "1..max";
+        }
+        mandatory true;
+        description
+          "The group.";
+      }
+    }
+  }
+
+  rpc ping {
+    description
+      "Liveness: the reply echoes the cookie.";
+    input {
+      leaf cookie {
+        type binary {
+          length "0..64";
+        }
+        description
+          "Opaque data to echo.";
+      }
+    }
+    output {
+      leaf cookie {
+        type binary {
+          length "0..64";
+        }
+        description
+          "The cookie sent.";
+      }
+    }
+  }
+
+  notification family-added {
+    description
+      "A family was registered.";
+    uses family-info;
+  }
+
+  notification family-removed {
+    description
+      "A family was unregistered.";
+    leaf id {
+      type family-id;
+      description
+        "Its id.";
+    }
+    leaf name {
+      type family-name;
+      description
+        "Its name.";
+    }
+  }
+}

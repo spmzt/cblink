@@ -26,6 +26,28 @@
 
 #include "cblink.h"
 
+struct cbl_ynode;
+
+typedef struct cbl_attr		cbl_attr;
+
+/* What the decoder took a value for (struct cbl_attr's kind). */
+enum cbl_kind {
+	CBL_K_ANY,
+	CBL_K_UINT,
+	CBL_K_INT,
+	CBL_K_BOOL,
+	CBL_K_FLAG,
+	CBL_K_TEXT,
+	CBL_K_BYTES,
+	CBL_K_FLOAT,
+	CBL_K_NEST,
+	CBL_K_NULL,
+	CBL_K_ARRAY,
+};
+
+const cbl_attr	*cbl_msg_body(const cbl_msg *msg);
+const cbl_attr	*cbl_map_lookup(const cbl_attr *map, int64_t key);
+
 #define	CBL_DEPTH_HARD_MAX	64
 
 /* Per-message arena: a chain of linear buffers, like snl(3). */
@@ -64,7 +86,10 @@ int	cbl_tls_prepare(cbl_tls *tls, enum cbl_tls_kind kind, char *err,
 	    size_t errlen);
 int	cbl_peer_from_x509(struct cbl_peer *peer, struct x509_st *x);
 
-/* Effective limits, copied into objects so hot paths take no locks. */
+/*
+ * Effective limits and decoder flags, copied into objects so hot paths
+ * take no locks.
+ */
 struct cbl_limits {
 	uint64_t	v[CBL_LIM__COUNT];
 };
@@ -158,6 +183,14 @@ struct cbl_ctx {
 	uint32_t		 next_fam;
 	uint32_t		 next_group;
 	cbl_family		*ctrl;
+
+	/* Family 1, "cblink.yang", and the servers it serves (famlock). */
+	cbl_family		*yfam;
+	struct cbl_yserved {
+		const struct cbl_yserver *srv;
+		void		*arg;
+	}			*ysrv;
+	size_t			 nysrv;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);
@@ -168,6 +201,27 @@ cbl_family *cbl_family_next(cbl_ctx *ctx, uint32_t from);
 void	cbl_family_free_all(cbl_ctx *ctx);
 int	cbl_ctx_add_builtin(cbl_ctx *ctx, const struct cbl_family_def *def,
 	    void *arg);
+int	cbl_ctx_add_fixed(cbl_ctx *ctx, const struct cbl_family_def *def,
+	    uint16_t id, void *arg, cbl_family **famp);
+void	cbl_yfamily_free(cbl_ctx *ctx);
+int	cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
+	    const struct cbl_ynode *n, const void *p);
+
+/* The control family's commands (cbl_ctrl.c, cblink-ctrl.yang). */
+enum {
+	CBL_CTRL_CMD_GETFAMILY = 1,
+	CBL_CTRL_CMD_SUBSCRIBE = 2,
+	CBL_CTRL_CMD_UNSUBSCRIBE = 3,
+	CBL_CTRL_CMD_PING = 4,
+	CBL_CTRL_CMD_HELLO = 5,
+	CBL_CTRL_CMD_NEWFAMILY = 6,
+	CBL_CTRL_CMD_DELFAMILY = 7,
+};
+
+int	cbl_ctrl_msg(cbl_conn *conn, uint16_t cmd, const char *rpc,
+	    const void *in, uint32_t flags, cbl_msg **msgp);
+int	cbl_ctrl_sub_msg(cbl_conn *conn, bool subscribe, uint16_t family,
+	    uint32_t group, cbl_msg **msgp);
 void	cbl_ctrl_notify_family(cbl_ctx *ctx, cbl_family *fam, bool added);
 int	cbl_sub_change(cbl_req *req, uint16_t family, uint32_t group,
 	    bool subscribe);
@@ -198,6 +252,10 @@ struct cbl_req {
 	bool			 has_cookie;
 	struct cbl_dump_state	 dump;
 	TAILQ_ENTRY(cbl_req)	 dump_link;
+	/* Family 1's (cbl_yfamily.c): the node at fault, its tag, arg. */
+	uint64_t		 err_ysid;
+	const char		*err_ytag;
+	void			*yarg;
 };
 
 /* Peer identity. */
@@ -241,7 +299,10 @@ struct cbl_attr {
 	uint8_t		 kind;		/* enum cbl_kind */
 	uint8_t		 nflags;
 	uint8_t		 inmap;		/* 1: child of a map */
+	uint8_t		 tag;		/* YANG-CBOR's tag, 0: none */
 	uint32_t	 count;		/* containers: number of children */
+	uint32_t	 off;		/* received: its bytes in the body */
+	uint32_t	 len;
 	cbl_attr	*child;		/* containers: first child */
 	const cbl_attr	*parent;	/* NULL for the body root */
 	union {
@@ -291,12 +352,31 @@ struct cbl_msg {
 	uint32_t		 nnodes;
 	cbl_attr		 empty;		/* root for an empty body */
 
-	/* Framework attributes of a received message. */
+	/* Version 2's framework of a received message (cbl_fw.c). */
 	int			 err_code;
 	const char		*err_str;
-	const cbl_attr		*err_path;
+	uint64_t		*err_pathv;
+	size_t			 err_npath;
+	uint64_t		 err_ysid;	/* error-path a SID alone */
 	int			 err_miss;
-	const cbl_attr		*err_cookie;
+	const void		*err_cookiep;
+	size_t			 err_cookielen;
+	bool			 has_err_cookie;
+	struct cbl_yarena	*ya;	/* what is decoded of the body */
+
+	/* And of one being built: its error, written at encode. */
+	struct cbl_fwout {
+		bool		 has;
+		int		 code;
+		const char	*text;
+		uint64_t	*path;
+		size_t		 npath;
+		int		 miss;
+		const void	*cookie;
+		size_t		 cookielen;
+		uint64_t	 ysid;	/* error-path: a SID, not path */
+		const char	*ytag;	/* error-tag, not the errno's */
+	}			 fwout;
 
 	struct cbl_arena	 arena;
 };
@@ -305,12 +385,20 @@ int	cbl_msg_alloc_empty(const struct cbl_limits *lim, cbl_msg **msgp);
 int	cbl_msg_decode_body(cbl_msg *msg);
 int	cbl_msg_from_frame(const struct cbl_limits *lim, unsigned char *buf,
 	    size_t len, cbl_msg **msgp);
-int	cbl_msg_put_fw_uint(cbl_msg *msg, int key, uint64_t v);
-int	cbl_msg_put_fw_str(cbl_msg *msg, int key, const char *s);
-int	cbl_msg_put_fw_bytes(cbl_msg *msg, int key, const void *p,
-	    size_t len);
 int	cbl_msg_fail(cbl_msg *msg, int error, const char *why);
-const cbl_attr *cbl_map_lookup(const cbl_attr *map, int64_t key);
+
+/* Version 2's framework: the cblink module's structures (cbl_fw.c). */
+bool	 cbl_fw_sid(uint64_t sid);
+const struct cbl_ynode *cbl_fw_node(const char *name);
+int	 cbl_fw_error(cbl_msg *msg, int code, const char *text,
+	    const struct cbl_path_elem *path, size_t pathlen, int miss_type);
+int	 cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len);
+void	 cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag);
+int	 cbl_fw_flush(cbl_msg *msg);
+int	 cbl_fw_credit(cbl_msg *msg, uint32_t increment);
+int	 cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text);
+void	 cbl_fw_extract(cbl_msg *msg);
+uint64_t cbl_fw_get_credit(cbl_msg *msg, bool *found);
 
 bool	cbl_utf8_valid(const unsigned char *p, size_t len);
 

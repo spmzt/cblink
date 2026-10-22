@@ -100,7 +100,7 @@ jobs:
           usesh: true
           envs: "MODE FUZZ_TIME"
           prepare: |
-            pkg install -y libcbor
+            pkg install -y libcbor libyang3
             # Without sctp(4) the SCTP tests are skipped.
             kldload -n sctp
           run: |

@@ -9,6 +9,7 @@
 #include <errno.h>
 
 #include "cbl_test.h"
+#include "cbl_impl.h"	/* the decoder's tree, as the library reads it */
 
 static int
 decode_body(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
@@ -48,10 +49,14 @@ ATF_TC_BODY(bad_header, tc)
 	buf[1] = 'G';
 	ATF_REQUIRE_EQ(EPROTO, cbl_frame_decode(ctx, buf, len, NULL, &msg));
 	buf[1] = 0x4C;
-	buf[2] = 2;
+	/* Version 1, cblink's first, and one to come. */
+	buf[2] = 1;
 	ATF_REQUIRE_EQ(EPROTONOSUPPORT,
 	    cbl_frame_decode(ctx, buf, len, NULL, &msg));
-	buf[2] = 1;
+	buf[2] = CBL_PROTO_VERSION + 1;
+	ATF_REQUIRE_EQ(EPROTONOSUPPORT,
+	    cbl_frame_decode(ctx, buf, len, NULL, &msg));
+	buf[2] = CBL_PROTO_VERSION;
 	static const uint8_t bad_hdrlen[] = { 0, 20, 23, 25, 26, 68, 255 };
 	for (size_t i = 0; i < nitems(bad_hdrlen); i++) {
 		buf[3] = bad_hdrlen[i];
@@ -218,14 +223,16 @@ ATF_TC_BODY(too_many_attrs, tc)
 }
 
 /* Section 5.4: unknown attributes are ignored, framework keys hidden. */
+/*
+ * Top-level keys: SIDs from 1 to 2^63 - 1 are items; 0, negative keys
+ * and keys beyond are taken and never found.
+ */
 ATF_TC_WITHOUT_HEAD(unknown_attrs_ignored);
 ATF_TC_BODY(unknown_attrs_ignored, tc)
 {
 	cbl_ctx *ctx = test_ctx();
-	const cbl_attr *a;
 	cbl_msg *msg;
-	int64_t i;
-	int n = 0;
+	uint64_t v;
 
 	/*
 	 * {-1 - 2^64: 0, -100: 0, -50: 0, 0: 0, 1: 1, 7: 7,
@@ -235,16 +242,16 @@ ATF_TC_BODY(unknown_attrs_ignored, tc)
 	    "A9 3B FF FF FF FF FF FF FF FF 00 38 63 00 38 31 00 00 00"
 	    "01 01 07 07 1A 00 01 11 70 00 1B FF FF FF FF FF FF FF FF 00"
 	    "02 3B FF FF FF FF FF FF FF FF", &msg));
-	for (a = cbl_attr_first(cbl_msg_body(msg)); a != NULL;
-	    a = cbl_attr_next(a)) {
-		ATF_REQUIRE(cbl_attr_type(a) >= 1);
-		n++;
-	}
-	ATF_REQUIRE_EQ(3, n);
-	ATF_REQUIRE(cbl_msg_attr(msg, 1) != NULL);
-	ATF_REQUIRE(cbl_msg_attr(msg, 7) != NULL);
-	ATF_REQUIRE_EQ(CBL_K_INT, cbl_attr_kind(cbl_msg_attr(msg, 2)));
-	ATF_REQUIRE_EQ(ERANGE, cbl_attr_int(cbl_msg_attr(msg, 2), &i));
+	ATF_REQUIRE(t_get_uint(msg, 1, &v) && v == 1);
+	ATF_REQUIRE(t_get_uint(msg, 7, &v) && v == 7);
+	ATF_REQUIRE(t_get_uint(msg, 70000, &v) && v == 0);
+	/* 2: a negative integer beyond int64_t, as it was sent. */
+	ATF_REQUIRE_EQ(0, cbl_msg_sid_raw(msg, 2, &(const void *){ 0 },
+	    &(size_t){ 0 }));
+	ATF_REQUIRE_EQ(EINVAL, cbl_msg_sid_raw(msg, UINT64_MAX,
+	    &(const void *){ 0 }, &(size_t){ 0 }));
+	ATF_REQUIRE_EQ(EINVAL, cbl_msg_sid_raw(msg, 0, &(const void *){ 0 },
+	    &(size_t){ 0 }));
 	/* Not an ERROR frame: no error code even with a -1 key. */
 	ATF_REQUIRE_EQ(0, cbl_msg_err_code(msg));
 	cbl_msg_free(msg);
@@ -276,6 +283,83 @@ ATF_TC_BODY(error_frame_sanity, tc)
 }
 
 /* Deterministic random mutation of a valid frame; must never crash. */
+/* The body's first value, as the decoder took it, its tag kept. */
+static const cbl_attr *
+yang_value(cbl_ctx *ctx, const char *bodyhex, cbl_msg **msgp)
+{
+	const cbl_attr *body;
+
+	ATF_REQUIRE_EQ_MSG(0, decode_body(ctx, bodyhex, msgp), "body %s",
+	    bodyhex);
+	body = (*msgp)->nodes;	/* its root: the body's map */
+	return (body != NULL && body->count > 0 ? &body->child[0] : NULL);
+}
+
+ATF_TC_WITHOUT_HEAD(yang_tags);
+ATF_TC_BODY(yang_tags, tc)
+{
+	static const char *const accepted[] = {
+		"A1 01 C4 82 21 19 0C 5D",	/* 4: decimal64 31.65 */
+		"A1 01 D8 2B 64 72 65 61 64",	/* 43: bits, by name */
+		"A1 01 D8 2C 63 75 70 30",	/* 44: enumeration */
+		"A1 01 D8 2D 19 07 14",		/* 45: identityref SID */
+		"A1 01 D8 2D 61 78",		/* 45: identityref name */
+		"A1 01 D8 2E 19 05 DE",		/* 46: instance-id SID */
+		"A1 01 D8 2E 82 19 05 DE 63 65 6D 30",	/* with a key */
+		"A1 01 D8 2F 19 05 DC",		/* 47: absolute SID */
+	};
+	static const uint64_t tags[] = { 4, 43, 44, 45, 45, 46, 46, 47 };
+	cbl_ctx *ctx = test_ctx();
+	const cbl_attr *a;
+	cbl_msg *msg;
+
+	/* Version 2 takes them as they are, no flag asked (D-1). */
+	for (size_t i = 0; i < nitems(accepted); i++) {
+		a = yang_value(ctx, accepted[i], &msg);
+		ATF_REQUIRE(a != NULL);
+		ATF_CHECK_EQ_MSG(tags[i], a->tag, "%s", accepted[i]);
+		cbl_msg_free(msg);
+	}
+	/* An untagged value says so; a nested one keeps its tag. */
+	a = yang_value(ctx, "A2 01 01 02 82 D8 2F 01 02", &msg);
+	ATF_CHECK_EQ(0, a[0].tag);
+	ATF_CHECK_EQ(0, a[1].tag);
+	ATF_REQUIRE_EQ(2, a[1].count);
+	ATF_CHECK_EQ(47, a[1].child[0].tag);
+	ATF_CHECK_EQ(0, a[1].child[1].tag);
+	cbl_msg_free(msg);
+
+	/* Bits in a union are their names (RFC 9254 section 6.7). */
+	require_body_error(ctx, "A1 01 D8 2B 42 05 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2B 82 01 02", EPROTO);
+	/* Every other tag is still refused. */
+	require_body_error(ctx, "A1 01 C0 61 78", EPROTO);	/* 0 */
+	require_body_error(ctx, "A1 01 C1 01", EPROTO);		/* 1 */
+	require_body_error(ctx, "A1 01 C2 41 01", EPROTO);	/* 2: bignum */
+	require_body_error(ctx, "A1 01 C5 82 01 01", EPROTO);	/* 5 */
+	require_body_error(ctx, "A1 01 D8 2A 01", EPROTO);	/* 42 */
+	require_body_error(ctx, "A1 01 D8 30 01", EPROTO);	/* 48 */
+	require_body_error(ctx, "A1 01 D9 01 2F 01", EPROTO);	/* 303 */
+	require_body_error(ctx, "A1 01 D9 D9 F7 01", EPROTO);	/* 55799 */
+	require_body_error(ctx, "A1 01 DB 00 00 00 01 00 00 00 2F 01",
+	    EPROTO);					/* 2^32 + 47 */
+	/* Not on the body, a key, or twice; nor on the wrong kind. */
+	require_body_error(ctx, "D8 2F A1 01 01", EPROTO);
+	require_body_error(ctx, "A1 D8 2F 01 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F D8 2F 01", EPROTO);
+	require_body_error(ctx, "A1 01 C4 83 21 01 01", EPROTO);
+	require_body_error(ctx, "A1 01 C4 19 0C 5D", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2C 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F 61 78", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2F 20", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2D A0", EPROTO);
+	require_body_error(ctx, "A1 01 D8 2B F6", EPROTO);
+	/* A tag with nothing after it. */
+	require_body_error(ctx, "A1 01 D8 2F", EBADMSG);
+	require_body_error(ctx, "A1 01 01 D8 2F", EBADMSG);
+	cbl_ctx_free(ctx);
+}
+
 ATF_TC_WITHOUT_HEAD(mutations);
 ATF_TC_BODY(mutations, tc)
 {
@@ -296,10 +380,10 @@ ATF_TC_BODY(mutations, tc)
 			    (unsigned char)(seed >> 16);
 		}
 		if (cbl_frame_decode(ctx, buf, len, NULL, &msg) == 0) {
-			/* Walk whatever decoded. */
-			for (const cbl_attr *a = cbl_attr_first(
-			    cbl_msg_body(msg)); a != NULL; a = cbl_attr_next(a))
-				(void)cbl_attr_count(a);
+			/* Look up what decoded. */
+			for (uint64_t sid = 1; sid <= 4; sid++)
+				(void)cbl_msg_sid_raw(msg, sid,
+				    &(const void *){ 0 }, &(size_t){ 0 });
 			cbl_msg_free(msg);
 		}
 	}
@@ -318,6 +402,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, too_many_attrs);
 	ATF_TP_ADD_TC(tp, unknown_attrs_ignored);
 	ATF_TP_ADD_TC(tp, error_frame_sanity);
+	ATF_TP_ADD_TC(tp, yang_tags);
 	ATF_TP_ADD_TC(tp, mutations);
 	return (atf_no_error());
 }

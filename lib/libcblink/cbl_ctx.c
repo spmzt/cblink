@@ -84,7 +84,7 @@ cbl_ctx_new(cbl_ctx **ctxp)
 	pthread_mutex_init(&ctx->submtx, NULL);
 	RB_INIT(&ctx->groups);
 	RB_INIT(&ctx->fams);
-	ctx->next_fam = 1;
+	ctx->next_fam = 2;	/* 0 and 1 are built in: ctrl, cblink.yang */
 	ctx->next_group = CBL_CTRL_GROUP_NOTIFY + 1;
 	cbl_limits_default(&ctx->lim);
 	if ((error = cbl_ctrl_register(ctx)) != 0) {
@@ -109,6 +109,7 @@ cbl_ctx_free(cbl_ctx *ctx)
 	if (atomic_load(&ctx->nobjs) != 0)
 		return (EBUSY);
 	cbl_family_free_all(ctx);
+	cbl_yfamily_free(ctx);
 	cbl_tls_free(ctx->tls);
 	pthread_mutex_destroy(&ctx->submtx);
 	pthread_cond_destroy(&ctx->famcv);

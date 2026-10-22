@@ -5,7 +5,10 @@
  */
 
 /*
- * cbl-stream: streams and flow control, built from stream.yaml.
+ * cbl-stream: streams and flow control.  Its family, "stream", is its
+ * own: two commands that open a stream, every body the "line" structure
+ * of the YANG module stream@2026-10-13.yang, put and read with what
+ * cblink-gen writes for it (stream_line_put(), stream_line_parse()).
  *
  *	cbl-stream -l [-p] [-c cert -k key -a ca] uri	serve
  *	cbl-stream [-p] [...] uri count n	the numbers 1..n, as fast as
@@ -26,8 +29,38 @@
 #include <unistd.h>
 
 #include <cblink.h>
+#include <cbl_schema.h>
 
 #include "stream.h"
+
+#define	STREAM_COUNT	1	/* server to client */
+#define	STREAM_UPPER	2	/* both ways */
+
+/* A line as the stream's next message; EAGAIN: no credit for it. */
+static int
+send_line(cbl_stream *s, const struct stream_line *l)
+{
+	cbl_msg *msg;
+	int error;
+
+	if ((error = cbl_stream_msg_new(s, &msg)) != 0)
+		return (error);
+	if ((error = stream_line_put(msg, l)) != 0) {
+		cbl_msg_free(msg);
+		return (error);
+	}
+	return (cbl_stream_send(s, msg));
+}
+
+/* A message's line, checked against the module (version 1's policy). */
+static int
+read_line(const cbl_msg *msg, struct stream_line *l, cbl_yarena **ap)
+{
+
+	if ((*ap = cbl_yarena_new()) == NULL)
+		return (ENOMEM);
+	return (stream_line_parse(msg, l, *ap, CBL_YD_STRICT, NULL, 0));
+}
 
 /* Server: "count" sends while it has credit, then waits to be writable. */
 struct counting {
@@ -42,7 +75,7 @@ count_pump(cbl_stream *s, struct counting *c)
 
 	while (c->next <= c->last) {
 		l.number = c->next;
-		if ((error = stream_count_server_send(s, &l)) == EAGAIN)
+		if ((error = send_line(s, &l)) == EAGAIN)
 			return;		/* on_writable will call again */
 		if (error != 0) {
 			(void)cbl_stream_reset(s, error);
@@ -68,23 +101,32 @@ count_closed(cbl_stream *s __unused, int code __unused,
 	free(arg);
 }
 
-static const struct stream_count_server_cbs count_cbs = {
+static const struct cbl_stream_cbs count_cbs = {
 	.on_writable = count_writable,
 	.on_close = count_closed,
 };
 
-int
-stream_count_stream_open(cbl_req *req __unused,
-    const struct stream_count_req *rq, cbl_stream *s, void *arg __unused)
+static int
+count_open(cbl_req *req __unused, const cbl_msg *msg, cbl_stream *s,
+    void *arg __unused)
 {
+	struct stream_line rq;
 	struct counting *c;
+	cbl_yarena *a;
 	int error;
 
-	if ((c = calloc(1, sizeof(*c))) == NULL)
+	if ((error = read_line(msg, &rq, &a)) != 0 || !rq.has_count) {
+		cbl_yarena_free(a);
+		return (error != 0 ? error : EINVAL);
+	}
+	if ((c = calloc(1, sizeof(*c))) == NULL) {
+		cbl_yarena_free(a);
 		return (ENOMEM);
+	}
 	c->next = 1;
-	c->last = rq->count;
-	if ((error = stream_count_accept(s, &count_cbs, c)) != 0) {
+	c->last = rq.count;
+	cbl_yarena_free(a);
+	if ((error = cbl_stream_accept(s, NULL, 0, &count_cbs, c)) != 0) {
 		free(c);
 		return (error);
 	}
@@ -94,14 +136,19 @@ stream_count_stream_open(cbl_req *req __unused,
 
 /* Server: "upper" answers each line; it ends when the client does. */
 static void
-upper_data(cbl_stream *s, const struct stream_line *data,
-    void *arg __unused)
+upper_data(cbl_stream *s, cbl_msg *data, void *arg __unused)
 {
-	struct stream_line out = { 0 };
+	struct stream_line in, out = { 0 };
+	cbl_yarena *a;
 	char *u;
 
-	if (data->text == NULL || (u = strdup(data->text)) == NULL)
+	if (read_line(data, &in, &a) != 0 || in.text == NULL ||
+	    (u = strdup(in.text)) == NULL) {
+		cbl_yarena_free(a);
+		(void)cbl_stream_reset(s, EINVAL);
 		return;
+	}
+	cbl_yarena_free(a);
 	for (char *p = u; *p != '\0'; p++)
 		*p = (char)toupper((unsigned char)*p);
 	out.text = u;
@@ -110,7 +157,7 @@ upper_data(cbl_stream *s, const struct stream_line *data,
 	 * faster than that would have to queue, or stop and resume in
 	 * on_writable as "count" does.
 	 */
-	if (stream_upper_server_send(s, &out) != 0)
+	if (send_line(s, &out) != 0)
 		(void)cbl_stream_reset(s, ENOBUFS);
 	free(u);
 }
@@ -122,19 +169,33 @@ upper_hclose(cbl_stream *s, void *arg __unused)
 	(void)cbl_stream_half_close(s);
 }
 
-static const struct stream_upper_server_cbs upper_cbs = {
+static const struct cbl_stream_cbs upper_cbs = {
 	.on_data = upper_data,
 	.on_hclose = upper_hclose,
 };
 
-int
-stream_upper_stream_open(cbl_req *req __unused,
-    const struct stream_upper_req *rq __unused, cbl_stream *s,
-    void *arg __unused)
+static int
+upper_open(cbl_req *req __unused, const cbl_msg *msg __unused,
+    cbl_stream *s, void *arg __unused)
 {
 
-	return (stream_upper_accept(s, &upper_cbs, NULL));
+	return (cbl_stream_accept(s, NULL, 0, &upper_cbs, NULL));
 }
+
+static const struct cbl_op stream_ops[] = {
+	{ .cmd = STREAM_COUNT, .flags = CBL_OPF_PUSH, .name = "count",
+	    .stream_open = count_open },
+	{ .cmd = STREAM_UPPER, .flags = CBL_OPF_STREAM, .name = "upper",
+	    .stream_open = upper_open },
+};
+
+static const struct cbl_family_def stream_def = {
+	.abi = CBL_FAMILY_ABI,
+	.name = "stream",
+	.version = 2,
+	.ops = stream_ops,
+	.nops = sizeof(stream_ops) / sizeof(stream_ops[0]),
+};
 
 static void
 on_signal(int sig __unused, void *arg)
@@ -151,7 +212,7 @@ serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls)
 	cbl_loop *loop;
 	int error;
 
-	if ((error = stream_register(ctx, NULL, &fam)) != 0)
+	if ((error = cbl_family_register(ctx, &stream_def, NULL, &fam)) != 0)
 		errc(1, error, "register");
 	if ((error = cbl_loop_new(ctx, &loop)) != 0 ||
 	    (error = cbl_listener_new(ctx, uri, flags, &l)) != 0)
@@ -181,7 +242,8 @@ struct run {
 };
 
 static void
-client_open(cbl_stream *s __unused, int error, void *arg)
+client_open(cbl_stream *s __unused, cbl_msg *accept __unused, int error,
+    void *arg)
 {
 	struct run *r = arg;
 
@@ -205,19 +267,22 @@ client_closed(cbl_stream *s __unused, int code, const char *text,
 }
 
 static void
-count_data(cbl_stream *s, const struct stream_line *data, void *arg)
+count_data(cbl_stream *s, cbl_msg *data, void *arg)
 {
 	struct run *r = arg;
+	struct stream_line l;
+	cbl_yarena *a;
 
-	if (!data->has_number || data->number != r->expect) {
+	if (read_line(data, &l, &a) != 0 || !l.has_number ||
+	    l.number != r->expect) {
 		warnx("expected %ju", (uintmax_t)r->expect);
 		(void)cbl_stream_reset(s, EBADMSG);
-		return;
-	}
-	r->expect++;
+	} else
+		r->expect++;
+	cbl_yarena_free(a);
 }
 
-static const struct stream_count_cbs count_client_cbs = {
+static const struct cbl_stream_cbs count_client_cbs = {
 	.on_open = client_open,
 	.on_data = count_data,
 	.on_close = client_closed,
@@ -232,7 +297,7 @@ upper_pump(cbl_stream *s, struct run *r)
 
 	while (r->sent < r->nlines) {
 		l.text = r->lines[r->sent];
-		if ((error = stream_upper_send(s, &l)) == EAGAIN)
+		if ((error = send_line(s, &l)) == EAGAIN)
 			return;
 		if (error != 0) {
 			r->error = error;
@@ -245,10 +310,10 @@ upper_pump(cbl_stream *s, struct run *r)
 }
 
 static void
-upper_client_open(cbl_stream *s, int error, void *arg)
+upper_client_open(cbl_stream *s, cbl_msg *accept, int error, void *arg)
 {
 
-	client_open(s, error, arg);
+	client_open(s, accept, error, arg);
 	if (error == 0)
 		upper_pump(s, arg);
 }
@@ -261,14 +326,18 @@ upper_client_writable(cbl_stream *s, size_t credit __unused, void *arg)
 }
 
 static void
-upper_client_data(cbl_stream *s __unused, const struct stream_line *data,
+upper_client_data(cbl_stream *s __unused, cbl_msg *data,
     void *arg __unused)
 {
+	struct stream_line l;
+	cbl_yarena *a;
 
-	printf("%s\n", data->text != NULL ? data->text : "");
+	if (read_line(data, &l, &a) == 0)
+		printf("%s\n", l.text != NULL ? l.text : "");
+	cbl_yarena_free(a);
 }
 
-static const struct stream_upper_cbs upper_client_cbs = {
+static const struct cbl_stream_cbs upper_client_cbs = {
 	.on_open = upper_client_open,
 	.on_data = upper_client_data,
 	.on_writable = upper_client_writable,
@@ -293,15 +362,38 @@ read_lines(struct run *r)
 	free(line);
 }
 
+/* A stream's opening: the family resolved, the request a line. */
+static int
+open_stream(cbl_conn *conn, uint16_t fam, uint16_t cmd,
+    const struct stream_line *rq, uint32_t flags,
+    const struct cbl_stream_cbs *cbs, struct run *r, cbl_stream **sp)
+{
+	cbl_msg *msg;
+	int error;
+
+	if ((error = cbl_msg_new(cbl_conn_ctx(conn), fam, cmd,
+	    CBL_F_REQUEST | CBL_F_S_OPEN, &msg)) != 0)
+		return (error);
+	if ((error = stream_line_put(msg, rq)) != 0) {
+		cbl_msg_free(msg);
+		return (error);
+	}
+	/* What we take before granting more: far less than is counted. */
+	(void)cbl_msg_set_window(msg, 4096);
+	return (cbl_stream_open(conn, msg, flags, cbs, r, sp));
+}
+
 static int
 client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
     int argc, char **argv)
 {
-	struct stream_client cl;
 	struct run r = { .expect = 1 };
+	struct stream_line rq = { 0 };
+	cbl_family_info *info;
 	uint64_t n = 0;
 	cbl_stream *s;
 	cbl_conn *conn;
+	uint16_t fam;
 	int error;
 
 	if ((error = cbl_conn_new(ctx, uri, flags, &conn)) != 0)
@@ -310,22 +402,24 @@ client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
 		(void)cbl_conn_set_tls(conn, tls);
 	if ((error = cbl_conn_connect(conn)) != 0)
 		errx(1, "%s: %s", uri, cbl_conn_errstr(conn));
-	if ((error = stream_client_init(&cl, conn)) != 0)
+	/* The family's id is the server's to choose: by its name. */
+	if ((error = cbl_resolve(conn, "stream", &info)) != 0)
 		errc(1, error, "stream family");
+	fam = cbl_family_info_id(info);
+	cbl_family_info_free(info);
 	if ((error = cbl_loop_new(ctx, &r.loop)) != 0)
 		errc(1, error, "loop");
 
 	if (strcmp(argv[0], "count") == 0 && argc == 2) {
-		struct stream_count_req req = { .has_count = true };
-
 		n = strtoull(argv[1], NULL, 10);
-		req.count = (uint32_t)n;
-		error = stream_count_open(&cl, &req, &count_client_cbs, &r,
-		    &s);
+		rq.has_count = true;
+		rq.count = (uint32_t)n;
+		error = open_stream(conn, fam, STREAM_COUNT, &rq, CBL_SF_PUSH,
+		    &count_client_cbs, &r, &s);
 	} else if (strcmp(argv[0], "upper") == 0 && argc == 1) {
 		read_lines(&r);
-		error = stream_upper_open(&cl, NULL, &upper_client_cbs, &r,
-		    &s);
+		error = open_stream(conn, fam, STREAM_UPPER, &rq, 0,
+		    &upper_client_cbs, &r, &s);
 	} else
 		errx(2, "unknown command or wrong arguments: %s", argv[0]);
 	if (error != 0)
@@ -344,7 +438,6 @@ client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
 		free(r.lines[i]);
 	free(r.lines);
 	cbl_loop_free(r.loop);
-	stream_client_fini(&cl);
 	cbl_conn_free(conn);
 	return (r.error != 0 ? 1 : 0);
 }

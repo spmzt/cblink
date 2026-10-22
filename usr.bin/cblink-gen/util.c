@@ -4,10 +4,14 @@
  * Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
  */
 
+#include <sys/stat.h>
+
 #include <err.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "gen.h"
 
@@ -178,4 +182,34 @@ xasprintf(const char *fmt, ...)
 		err(2, "vasprintf");
 	va_end(ap);
 	return (s);
+}
+
+/* Write "b" to dirfd/name, replacing it atomically. */
+int
+write_file(int dirfd, const char *name, const struct buf *b)
+{
+	char *tmp;
+	int fd, error = 0;
+
+	tmp = xasprintf(".%s.XXXXXX", name);
+	if ((fd = mkostempsat(dirfd, tmp, 0, O_CLOEXEC)) == -1) {
+		warn("%s", tmp);
+		error = 1;
+		goto out;
+	}
+	if ((b->len > 0 && write(fd, b->p, b->len) != (ssize_t)b->len) ||
+	    fchmod(fd, 0644) != 0 || close(fd) != 0) {
+		warn("%s", tmp);
+		(void)unlinkat(dirfd, tmp, 0);
+		error = 1;
+		goto out;
+	}
+	if (renameat(dirfd, tmp, dirfd, name) != 0) {
+		warn("%s", name);
+		(void)unlinkat(dirfd, tmp, 0);
+		error = 1;
+	}
+out:
+	free(tmp);
+	return (error);
 }

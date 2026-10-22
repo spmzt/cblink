@@ -1,0 +1,97 @@
+module kv {
+  yang-version 1.1;
+  namespace "urn:cblink:example:kv";
+  prefix kv;
+
+  organization
+    "cblink";
+  description
+    "A small key/value store, cblink's example of a module served by
+     the YANG family through cblink-gen's handler table.";
+
+  revision 2026-10-13;
+
+  container store {
+    description
+      "The entries, and what the store says of itself.";
+    list entry {
+      key "key";
+      leaf key {
+        type string {
+          length "1..255";
+        }
+      }
+      leaf value {
+        type binary {
+          length "0..65536";
+        }
+      }
+      leaf persistent {
+        type boolean;
+        default "false";
+      }
+      leaf secret {
+        type boolean;
+        default "false";
+        description
+          "The value is left out of what is read.";
+      }
+      leaf ttl {
+        type uint32 {
+          range "0..86400";
+        }
+        units "seconds";
+      }
+      leaf-list tag {
+        type string {
+          length "1..32";
+        }
+        max-elements 16;
+      }
+      action touch {
+        description
+          "Starts the entry's time to live again.";
+        output {
+          leaf ttl {
+            type uint32;
+            units "seconds";
+          }
+        }
+      }
+    }
+    leaf count {
+      config false;
+      type uint32;
+      description
+        "How many entries there are.";
+    }
+  }
+
+  rpc clear {
+    description
+      "Removes the entries whose keys begin with prefix, or all.";
+    input {
+      leaf prefix {
+        type string;
+      }
+    }
+    output {
+      leaf removed {
+        type uint32;
+      }
+    }
+  }
+
+  notification changed {
+    leaf key {
+      type string;
+    }
+    leaf what {
+      type enumeration {
+        enum set;
+        enum deleted;
+        enum expired;
+      }
+    }
+  }
+}

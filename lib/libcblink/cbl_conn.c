@@ -27,7 +27,6 @@
 #include <unistd.h>
 
 #include "cbl_impl.h"
-#include "cbl_ctrl_gen.h"
 
 #define	CBL_RX_RING	(64 * 1024)
 #define	CBL_RX_BUDGET	64		/* frames per process call */
@@ -1026,7 +1025,7 @@ conn_idle(cbl_conn *conn, uint64_t now)
 	}
 	if (conn->ka_pending || now < last + idle / 2)
 		return (0);
-	if (cbl_msg_new(conn->ctx, CBL_CTRL_FAMILY_ID, CBL_CTRL_CMD_PING, 0,
+	if (cbl_msg_new(conn->ctx, CBL_CTRL_FAMILY, CBL_CTRL_CMD_PING, 0,
 	    &msg) != 0)
 		return (0);
 	if ((p = calloc(1, sizeof(*p))) == NULL) {

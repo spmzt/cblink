@@ -3,92 +3,284 @@
 .\"
 .\" Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
 .\"
-.Dd October 2, 2026
+.Dd October 14, 2026
 .Dt CBLINK-GEN 1
 .Os
 .Sh NAME
 .Nm cblink-gen
-.Nd generate C code and documentation from a cblink family spec
+.Nd generate C code, schema tables and documentation from YANG modules
 .Sh SYNOPSIS
 .Nm
-.Op Fl BnV
+.Op Fl adnV
+.Op Fl F Ar module : Ns Ar feature , Ns ...
 .Op Fl b Ar base
-.Op Fl m Ar parts
+.Op Fl m Cm h , Ns Cm md , Ns Cm schema , Ns Cm server , Ns Cm sid , Ns Cm sidjson , Ns Cm tree
 .Op Fl o Ar dir
-.Ar spec.yaml
+.Op Fl p Ar dir
+.Op Fl s Ar file.sid
+.Ar module.yang ...
 .Sh DESCRIPTION
 The
 .Nm
-utility reads the description of a
+utility compiles YANG modules
+.Pq RFC 7950 ,
+named
+.Ar name Ns .yang
+or
+.Ar name Ns @ Ns Ar revision Ns .yang ,
+through libyang, and writes what a
 .Xr cblink 3
-family from
-.Ar spec.yaml
-and writes the C code that servers and clients of that family use:
-typed request and reply structures, policies, parsers, builders,
-client wrappers and server registration.
+program speaks them with: structs, the schema tables its YANG-CBOR
+.Pq RFC 9254
+is decoded, encoded and validated by, helpers for messages, rpcs and
+notifications, a server's handler table, and the modules' reference.
+Every node is keyed by its SID
+.Pq RFC 9595 ,
+from the modules'
+.Pa .sid
+files.
 It plays the part YNL plays for Linux netlink.
-The spec format, a subset of YAML, is described in
-.Pa docs/SPEC-FORMAT.md
-in the cblink sources.
 .Pp
-The output is deterministic: the same spec always gives byte-identical
+The output is deterministic: the same modules always give byte-identical
 files, so generated code can be committed and checked.
 Files are written atomically: each is created under a temporary name in
 .Ar dir
 and renamed into place, so an interrupted run leaves the previous files
 intact.
 .Pp
-The spec is untrusted input.
+The modules are untrusted input.
+Every module one may import is read before
 .Nm
-opens the spec and the output directory, then enters
+enters
 .Xr capsicum 4
-capability mode before it parses anything.
+capability mode, from its own directory and each
+.Fl p
+directory; a module imported without a revision is the latest found.
+Several may be named.
 .Pp
 The options are as follows:
 .Bl -tag -width "-m parts"
-.It Fl B
-Allow what is reserved for families built into the library:
-the family names
-.Ql ctrl
-and
-.Ql cblink.* ,
-and a
-.Ql fixed-id .
-Only the control family uses this.
+.It Fl a
+Give a SID to each item of the module of every
+.Fl s
+file that has none, and rewrite the file.
+The items are numbered as RFC 9595 Appendix B says: by namespace
+(module, identities, features, data), each in identifier order, every
+one the next SID free in the file's assignment ranges.
+A file that had items gets the next
+.Ql sid-file-version ,
+and its
+.Ql dependency-revision
+becomes the revisions the module's imports are bound to.
+Running it again on a complete file changes nothing.
+.It Fl d
+Print the generator's model of the compiled schema,
+a schema node a line (its module, kind, path and flags), for comparison
+with
+.Xr yanglint 1 .
+.It Fl F Ar module : Ns Ar feature , Ns ...
+The features of
+.Ar module
+to enable,
+.Ql *
+for all of them, none for none.
+It may be given up to 64 times.
+Without
+.Fl F ,
+every feature of every implemented module is on; with it, only those
+named are, as with
+.Xr yanglint 1 .
+What a disabled feature guards is left out, identities, enums and bits
+included; the deviations of the modules loaded are applied.
 .It Fl b Ar base
 Name the output files
 .Ar base Ns .h ,
-.Ar base Ns .c
+.Ar base Ns _schema.c
 and so on.
-The default is the spec's file name without
-.Pa .yaml .
+The default is the first module's name, without its revision.
 .It Fl m Ar parts
-A comma-separated list of the files to write:
-.Bl -tag -width "server"
+A comma-separated list of the files to write; without it, none:
+.Bl -tag -width "sidjson"
 .It Cm h
-.Ar base Ns .h :
-constants, attribute and command enumerations, structures and all
-prototypes.
-.It Cm c
-.Ar base Ns .c :
-policies, parsers and builders, needed by both sides.
-.It Cm client
-.Ar base Ns _client.c :
-client wrappers for requests (synchronous, and asynchronous for loop
-callbacks), dumps, subscriptions and streams.
+.Ar base Ns .h ,
+.Ar base
+the first module's name by default: a struct for each container, list
+entry, rpc and action input and output, notification and structure of
+the modules named and of those whose trees they add to, and one for
+each module's top-level data.
+A container is a pointer, NULL when absent; a list or leaf-list a
+count and an array; a scalar leaf other than a key has a
+.Ql has_
+flag; a choice is an enum saying its case, its cases' members beside
+it; a union a struct saying which member is set.
+Names are the module's, then the path, with
+.Ql -
+and
+.Ql \&.
+made
+.Ql _ ;
+two nodes that would have one name are an error.
+The header declares
+.Va base Ns _schema ,
+the tables
+.Cm schema
+writes, and for each struct but a module's data
+.Ft int
+.Fn struct_encode
+and
+.Fn struct_decode ,
+its value in YANG-CBOR and back, and
+.Fn struct_put
+and
+.Fn struct_parse ,
+the same in a message as
+.Brq SID : value ,
+an rpc's input and output under the rpc's SID; for each rpc
+.Fn rpc_call ,
+the rpc called through family 1, and for each notification
+.Fn notification_notify ,
+sent to its subscribers.
+.Cm schema
+defines them with
+.Xr cblink 3 Ns 's
+.Fn cbl_yencode ,
+.Fn cbl_ydecode ,
+.Fn cbl_msg_put_ynode ,
+.Fn cbl_msg_ydecode ,
+.Fn cbl_request
+and
+.Fn cbl_ynotify .
 .It Cm server
 .Ar base Ns _server.c :
-the family definition, registration and reply helpers; the server
-supplies the handler functions declared in the header.
+a server's handler table, the
+.Vt cbl_yserver
+.Va base Ns _server
+.Xr cblink 3
+serves the modules by: for each top-level data node
+.Fn node_get
+and, a configuration node,
+.Fn node_edit ;
+for each rpc
+.Fn rpc_rpc ,
+each action
+.Fn action_action ,
+which the program defines as the header declares them, the names
+those of the nodes' structs; and each notification's
+.Fn notification_notification ,
+which
+.Cm schema
+defines, writes it as
+.Brq SID : value .
+.It Cm schema
+.Ar base Ns _schema.c :
+the schema tables of the same modules, the structures of
+.In cbl_schema.h
+the library decodes, encodes and validates YANG-CBOR by: every node
+with its SID, its type, its children sorted by SID, its keys, choices,
+when and must expressions, defaults and limits; types shared between
+the nodes that have the same one, a pattern also as the POSIX ERE it
+translates to; each module's features, enabled or not; and the
+identities a value may name, the modules' own and every one derived
+from a base an identityref has, wherever it is defined, each with all
+those derived from it, by SID, for
+.Fn derived-from .
+A node's children are found by a key's delta at once where their SIDs
+follow one another, by a table of their places where they lie close,
+by a binary search otherwise; every node is also in one array by SID.
+.Xr cblink 3 Ns 's
+.Fn cbl_ynode_child ,
+.Fn cbl_yschema_node ,
+.Fn cbl_yschema_ident ,
+.Fn cbl_yschema_annot
+and
+.Fn cbl_yderived_from
+look them up.
+A module's annotations
+.Pq RFC 7952
+are in its tables with their values' types, numbered in the
+.Ql annotation
+namespace of a
+.Pa .sid
+file.
+Every node, structure and identityref base must have a SID: the
+modules'
+.Pa .sid
+files are given with
+.Fl s .
+What each module's tables come to, its trees with what other modules
+add to them, is printed and written at the top of the file.
+The tables also say where each node is in the structs of
+.Cm h :
+its member's offset, its
+.Ql has_
+flag's, its struct's size, written with
+.Fn offsetof
+and
+.Fn sizeof ,
+so that the two cannot differ.
 .It Cm md
 .Ar base Ns .md :
-reference documentation in Markdown.
+a page of Markdown for each module named: its tree diagram, and a
+table of the nodes it defines, in its own tree and in those it
+augments, with their kind, type, config, mandatory, defaults, units
+and, when its
+.Pa .sid
+file is attached with
+.Fl s ,
+their SIDs; then its features and identities.
+.It Cm sid
+.Ar module Ns @ Ns Ar revision Ns .sid.cbor ,
+one for each
+.Fl s
+file:
+the file in YANG-CBOR (RFC 9254), its
+.Ql ietf-sid-file
+structure keyed by SIDs, as cblink's GET-SID answers it.
+.It Cm sidjson
+.Ar module Ns @ Ns Ar revision Ns .sid ,
+one for each
+.Fl s
+file:
+the file in JSON, as
+.Fl a
+writes it.
+.It Cm tree
+.Ar base Ns .tree :
+the tree diagrams (RFC 8340) of the modules named, exactly as
+.Ql yanglint -f tree
+prints them: a module's own tree, rpcs and notifications compiled,
+with the nodes other modules augment into them; its augments of other
+modules' trees as written, a grouping used there as one
+.Ql -u
+line; then its structures and yang-data.
+Lines are not wrapped.
 .El
-.Pp
-The default is
-.Ql h,c,client,server,md .
 .It Fl n
-Check the spec and report problems without writing anything.
+Compile the modules and say what was compiled, writing nothing.
+.It Fl p Ar dir
+Look for the modules a module imports in
+.Ar dir ,
+as well as in the module's own directory.
+It may be given up to 16 times.
+.It Fl s Ar file.sid
+Attach the YANG Schema Item iDentifiers of a module
+from an RFC 9595
+.Pa .sid
+file, in JSON or in the YANG-CBOR form
+.Fl m Cm sid
+writes, and verify them: no SID given twice, none outside the file's
+assignment ranges, and every item of the module with one, empty
+.Ql input
+and
+.Ql output
+included.
+A file numbers every item of its module whatever
+.Fl F
+enables and whatever another module deviates: it is verified, and
+.Fl a
+numbers it, against its module alone, with every feature on; the
+items the modules given leave out are not in the tables.
+It may be given up to 256 times.
 .It Fl o Ar dir
 Write the files into
 .Ar dir
@@ -96,6 +288,15 @@ instead of the current directory.
 .It Fl V
 Print the version and exit.
 .El
+.Ss SIDs of ietf-sid-file
+The file
+.Pa share/yang/ietf-sid-file@2024-07-31.sid
+of cblink's sources holds the SIDs the YANG-CBOR form of a
+.Pa .sid
+file is keyed by: IANA's range for the module, 1300 to 1349, numbered as
+RFC 9595 Appendix B says, IANA having published no
+.Pa .sid
+file for it.
 .Ss Building with make
 .Pa ${LOCALBASE}/share/cblink/cblink.mk
 runs
@@ -106,7 +307,8 @@ Makefile:
 .Bd -literal -offset indent
 PROG=		kvd
 SRCS=		kvd.c
-CBLINK_SPECS=	kv.yaml
+CBLINK_YANG=	kv@2026-10-13.yang
+CBLINK_SIDS=	kv@2026-10-13.sid
 \&.include "${LOCALBASE}/share/cblink/cblink.mk"
 \&.include <bsd.prog.mk>
 .Ed
@@ -115,28 +317,54 @@ See the comment at the top of
 .Pa cblink.mk
 for its variables.
 .Sh FILES
-.Bl -tag -width "${LOCALBASE}/share/cblink/specs/control.yaml" -compact
+.Bl -tag -width "${LOCALBASE}/share/cblink/yang" -compact
 .It Pa ${LOCALBASE}/share/cblink/cblink.mk
-make rules for programs built from specs
-.It Pa ${LOCALBASE}/share/cblink/specs/control.yaml
-the control family's spec, an example of the format
+make rules for programs built from YANG modules
+.It Pa ${LOCALBASE}/share/cblink/yang
+the YANG modules of cblink's wire version 2, with their
+.Pa .sid
+files: the framework's structures
+.Pq Pa cblink ,
+the control family
+.Pq Pa cblink-ctrl
+and
+.Pa ietf-sid-file
+for GET-SID
 .El
 .Sh EXIT STATUS
 .Bl -tag -width "0"
 .It 0
 Success.
 .It 1
-The spec is invalid; every problem found is reported on standard error as
+A module or a
+.Pa .sid
+file is invalid, or outside what the generator handles; every problem
+found is reported on standard error as
 .Ar file : Ns Ar line : Ns Ar column : Li error: Ar message .
 .It 2
 Usage error, or an output or system error.
 .El
 .Sh EXAMPLES
-Check a spec, then generate everything but the documentation into
+Number a module's items into its
+.Pa .sid
+file, then write its header, tables and server table into
 .Pa obj :
 .Bd -literal -offset indent
-$ cblink-gen -n kv.yaml
-$ cblink-gen -m h,c,client,server -o obj kv.yaml
+$ cblink-gen -n -a -s kv@2026-10-13.sid kv@2026-10-13.yang
+$ cblink-gen -m h,schema,server -o obj -s kv@2026-10-13.sid \
+    kv@2026-10-13.yang
+.Ed
+.Pp
+Write the tree diagram and the Markdown of a YANG module, with the SIDs
+of its
+.Pa .sid
+file, into
+.Pa ietf-ip.tree
+and
+.Pa ietf-ip.md :
+.Bd -literal -offset indent
+$ cblink-gen -m md,tree -s ietf-ip@2018-02-22.sid \
+    ietf-ip@2018-02-22.yang
 .Ed
 .Sh SEE ALSO
 .Xr cblink 3 ,

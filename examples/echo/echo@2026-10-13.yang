@@ -1,0 +1,45 @@
+module echo {
+  yang-version 1.1;
+  namespace "urn:cblink:example:echo";
+  prefix echo;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's smallest example: one rpc, whose reply says who the
+     server believes the client is.";
+
+  revision 2026-10-13 {
+    description
+      "Initial revision.";
+  }
+
+  rpc echo {
+    description
+      "The text back, and the client's identity.";
+    input {
+      leaf text {
+        type string {
+          length "0..1024";
+        }
+        mandatory true;
+        description
+          "What to echo.";
+      }
+    }
+    output {
+      leaf text {
+        type string;
+        description
+          "The text sent.";
+      }
+      leaf peer {
+        type string;
+        description
+          "The client's identity as the server sees it.";
+      }
+    }
+  }
+}

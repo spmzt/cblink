@@ -13,6 +13,10 @@
  * (max_depth, max_attrs), and counts the values.  Only then does pass 2
  * allocate the exact node array from the message arena and fill it in.
  * Strings are not copied: nodes point into the frame buffer.
+ *
+ * Tags are refused but YANG-CBOR's (RFC 9254), which version 2 takes
+ * always: one tag on a value, never on a key or the body, and the value
+ * of the kind its tag says.
  */
 
 #include <errno.h>
@@ -40,12 +44,23 @@ struct dec {
 	struct dec_level	 st[CBL_DEPTH_HARD_MAX];
 	int			 depth;
 	bool			 root_done;
+	bool			 yang_tags;
+	uint8_t			 tag;		/* on the next value */
 	uint32_t		 nvalues;
 	int			 error;
 	const char		*why;
 	cbl_attr		*pool;		/* pass 2 */
 	uint32_t		 pool_used;
 	uint32_t		 pool_size;
+	/*
+	 * Where each value's bytes are (pass 2): the current item's offset,
+	 * a tag's before it, and the nodes this item ended, whose length is
+	 * known once the item is read.
+	 */
+	uint32_t		 off;
+	uint32_t		 tagoff;
+	cbl_attr		*ended[CBL_DEPTH_HARD_MAX + 1];
+	int			 nended;
 };
 
 static void
@@ -91,31 +106,8 @@ dec_pop_ready(struct dec *d)
 		if (top->remaining != 0 || (top->is_map && !top->want_key))
 			return;
 		n = top->node;
-		if (d->pass == 2 && top->is_map && n->count > 1 &&
-		    !keys_ascending(n)) {
-			/*
-			 * heapsort(3): O(n log n) whatever order a peer
-			 * chose, and no allocation.
-			 */
-			if (heapsort(n->child, n->count, sizeof(cbl_attr),
-			    key_cmp) != 0) {
-				dec_fail(d, ENOMEM, "cannot sort map keys");
-				return;
-			}
-			for (uint32_t i = 1; i < n->count; i++) {
-				/*
-				 * Keys beyond int64_t all clamp to its ends:
-				 * never valid, ignored, and not duplicates.
-				 */
-				if (n->child[i].key == n->child[i - 1].key &&
-				    n->child[i].key != INT64_MAX &&
-				    n->child[i].key != INT64_MIN) {
-					dec_fail(d, EPROTO,
-					    "duplicate map key");
-					return;
-				}
-			}
-		}
+		if (d->pass == 2 && d->nended < (int)nitems(d->ended))
+			d->ended[d->nended++] = n;
 		if (--d->depth == 0)
 			d->root_done = true;
 	}
@@ -164,6 +156,35 @@ dec_keyval(const cbl_attr *t)
 	return ((t->nflags & CBL_NF_NEGBIG) != 0 ? INT64_MIN : t->v.i);
 }
 
+/*
+ * What each YANG-CBOR tag may stand on (RFC 9254 sections 6 and 9):
+ * decimal64 is [exponent, mantissa]; bits a byte string, or an array
+ * when sparse; an enumeration its name; an identityref a SID or a name;
+ * an instance-identifier a SID, a SID with keys, or a name; tag 47 a SID.
+ */
+static bool
+tag_fits(uint8_t tag, const cbl_attr *t, uint64_t n)
+{
+
+	switch (tag) {
+	case 4:
+		return (t->kind == CBL_K_ARRAY && n == 2);
+	case 43:
+		/* Bits in a union: their names (RFC 9254 section 6.7). */
+		return (t->kind == CBL_K_TEXT);
+	case 44:
+		return (t->kind == CBL_K_TEXT);
+	case 45:
+		return (t->kind == CBL_K_UINT || t->kind == CBL_K_TEXT);
+	case 46:
+		return (t->kind == CBL_K_UINT || t->kind == CBL_K_TEXT ||
+		    t->kind == CBL_K_ARRAY);
+	case 47:
+		return (t->kind == CBL_K_UINT);
+	}
+	return (false);
+}
+
 /* One decoded item.  "t" carries kind and value; containers carry "n". */
 static void
 dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
@@ -171,11 +192,18 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 	struct dec_level *top;
 	cbl_attr *node = NULL;
 	bool container = t->kind == CBL_K_NEST || t->kind == CBL_K_ARRAY;
+	uint8_t tag;
 
 	if (d->error != 0)
 		return;
 	if (d->root_done) {
 		dec_fail(d, EBADMSG, "trailing data after body");
+		return;
+	}
+	tag = d->tag;
+	d->tag = 0;
+	if (tag != 0 && !tag_fits(tag, t, n)) {
+		dec_fail(d, EPROTO, "tagged value of the wrong kind");
 		return;
 	}
 	if (d->depth == 0) {
@@ -187,6 +215,7 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 			node = &d->pool[d->pool_used++];
 			*node = *t;
 			node->inmap = 1;
+			node->off = d->off;
 		}
 		dec_push(d, node, true, n);
 		dec_pop_ready(d);
@@ -214,6 +243,11 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 		*node = *t;
 		node->inmap = top->is_map;
 		node->key = top->is_map ? top->key : 0;
+		node->tag = tag;
+		/* From its tag, if it has one. */
+		node->off = tag != 0 ? d->tagoff : d->off;
+		if (!container && d->nended < (int)nitems(d->ended))
+			d->ended[d->nended++] = node;
 	}
 	if (container)
 		dec_push(d, node, t->kind == CBL_K_NEST, n);
@@ -331,10 +365,40 @@ cb_indef(void *ctx)
 }
 
 static void
-cb_tag(void *ctx, uint64_t v __unused)
+cb_tag(void *ctx, uint64_t v)
 {
+	struct dec *d = ctx;
+	struct dec_level *top;
 
-	dec_fail(ctx, EPROTO, "CBOR tags are not allowed");
+	if (d->error != 0)
+		return;
+	if (!d->yang_tags) {
+		dec_fail(d, EPROTO, "CBOR tags are not allowed");
+		return;
+	}
+	if (v != 4 && (v < 43 || v > 47)) {
+		dec_fail(d, EPROTO, "CBOR tag not of YANG-CBOR");
+		return;
+	}
+	d->tagoff = d->off;
+	if (d->root_done) {
+		dec_fail(d, EBADMSG, "trailing data after body");
+		return;
+	}
+	if (d->depth == 0) {
+		dec_fail(d, EPROTO, "body must be a CBOR map");
+		return;
+	}
+	top = &d->st[d->depth - 1];
+	if (top->is_map && top->want_key) {
+		dec_fail(d, EPROTO, "map keys must be integers");
+		return;
+	}
+	if (d->tag != 0) {
+		dec_fail(d, EPROTO, "a value has one tag at most");
+		return;
+	}
+	d->tag = (uint8_t)v;
 }
 
 static void
@@ -382,6 +446,8 @@ dec_run(struct dec *d, const unsigned char *p, size_t len)
 			dec_fail(d, EBADMSG, "truncated CBOR body");
 			break;
 		}
+		d->off = (uint32_t)off;
+		d->nended = 0;
 		r = cbor_stream_decode(p + off, len - off, &dec_cbs, d);
 		if (r.status == CBOR_DECODER_NEDATA) {
 			dec_fail(d, EBADMSG, "truncated CBOR body");
@@ -392,12 +458,51 @@ dec_run(struct dec *d, const unsigned char *p, size_t len)
 			break;
 		}
 		off += r.read;
+		/* What ended with this item, ends here. */
+		for (int i = 0; i < d->nended; i++)
+			d->ended[i]->len = (uint32_t)off - d->ended[i]->off;
 		if (d->error != 0)
 			break;
 	}
 	if (d->error == 0 && off != len)
 		dec_fail(d, EBADMSG, "trailing data after body");
 	return (d->error);
+}
+
+/*
+ * Maps sorted by key, after the body is read and every node's bytes are
+ * known: heapsort(3), O(n log n) whatever order a peer chose and no
+ * allocation; a key twice refused.
+ */
+static int
+sort_maps(cbl_attr *n, const char **why)
+{
+	int error;
+
+	if (n->kind == CBL_K_NEST && n->count > 1 && !keys_ascending(n)) {
+		if (heapsort(n->child, n->count, sizeof(cbl_attr), key_cmp) !=
+		    0) {
+			*why = "cannot sort map keys";
+			return (ENOMEM);
+		}
+		for (uint32_t i = 1; i < n->count; i++)
+			/*
+			 * Keys beyond int64_t all clamp to its ends: never
+			 * valid, ignored, and not duplicates.
+			 */
+			if (n->child[i].key == n->child[i - 1].key &&
+			    n->child[i].key != INT64_MAX &&
+			    n->child[i].key != INT64_MIN) {
+				*why = "duplicate map key";
+				return (EPROTO);
+			}
+	}
+	for (uint32_t i = 0; i < n->count; i++)
+		if ((n->child[i].kind == CBL_K_NEST ||
+		    n->child[i].kind == CBL_K_ARRAY) &&
+		    (error = sort_maps(&n->child[i], why)) != 0)
+			return (error);
+	return (0);
 }
 
 static void
@@ -412,38 +517,6 @@ fix_parents(cbl_attr *n)
 	}
 }
 
-static void
-extract_fw(cbl_msg *msg)
-{
-	const cbl_attr *root = cbl_msg_body(msg), *a;
-	char *s;
-
-	a = cbl_map_lookup(root, CBL_FW_CODE);
-	if (a != NULL && a->kind == CBL_K_UINT && a->v.u >= 1 &&
-	    a->v.u <= INT_MAX)
-		msg->err_code = (int)a->v.u;
-	else if ((msg->hdr.flags & CBL_F_ERROR) != 0)
-		msg->err_code = EPROTO;		/* ERROR without a valid code */
-
-	a = cbl_map_lookup(root, CBL_FW_MSG);
-	if (a != NULL && a->kind == CBL_K_TEXT &&
-	    a->v.s.len <= CBL_ERRMSG_MAX &&
-	    memchr(a->v.s.p, '\0', a->v.s.len) == NULL &&
-	    (s = cbl_arena_alloc(&msg->arena, a->v.s.len + 1)) != NULL) {
-		memcpy(s, a->v.s.p, a->v.s.len);
-		msg->err_str = s;
-	}
-	a = cbl_map_lookup(root, CBL_FW_PATH);
-	if (a != NULL && a->kind == CBL_K_ARRAY && a->count <= CBL_PATH_MAX)
-		msg->err_path = a;
-	a = cbl_map_lookup(root, CBL_FW_MISS_TYPE);
-	if (a != NULL && a->kind == CBL_K_UINT && a->v.u <= CBL_ATTR_MAX)
-		msg->err_miss = (int)a->v.u;
-	a = cbl_map_lookup(root, CBL_FW_COOKIE);
-	if (a != NULL && a->kind == CBL_K_BYTES && a->v.s.len <= CBL_COOKIE_MAX)
-		msg->err_cookie = a;
-}
-
 int
 cbl_msg_decode_body(cbl_msg *msg)
 {
@@ -455,12 +528,14 @@ cbl_msg_decode_body(cbl_msg *msg)
 	body = msg->buf + msg->hdr.hdrlen;
 	bodylen = msg->len - msg->hdr.hdrlen;
 	if (bodylen == 0) {
-		extract_fw(msg);
+		cbl_fw_extract(msg);
 		return (0);
 	}
 
 	d->lim = &msg->lim;
 	d->bodylen = bodylen;
+	/* Version 2's: YANG-CBOR's tags, always (D-1). */
+	d->yang_tags = true;
 
 	d->pass = 1;
 	if ((error = dec_run(d, body, bodylen)) != 0)
@@ -477,13 +552,16 @@ cbl_msg_decode_body(cbl_msg *msg)
 	d->pass = 2;
 	d->depth = 0;
 	d->root_done = false;
+	d->tag = 0;
 	d->nvalues = 0;
 	if ((error = dec_run(d, body, bodylen)) != 0)
+		goto out;
+	if ((error = sort_maps(&d->pool[0], &d->why)) != 0)
 		goto out;
 	msg->nodes = d->pool;
 	msg->nnodes = d->pool_size;
 	fix_parents(&msg->nodes[0]);
-	extract_fw(msg);
+	cbl_fw_extract(msg);
 out:
 	if (error != 0)
 		msg->errstr = d->why;

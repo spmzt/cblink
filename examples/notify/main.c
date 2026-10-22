@@ -5,7 +5,9 @@
  */
 
 /*
- * cbl-notify: multicast notifications, built from notify.yaml.
+ * cbl-notify: notifications, built from the YANG module
+ * notify@2026-10-13.yang: its tick sent to the subscribers of family 1's
+ * group "notify".
  *
  *	cbl-notify -l [-p] [-i ms] [-c cert -k key -a ca] uri
  *		serve, announcing a tick every ms milliseconds (1000)
@@ -25,11 +27,12 @@
 #include <unistd.h>
 
 #include <cblink.h>
+#include <cbl_schema.h>
 
 #include "notify.h"
 
 struct ticker {
-	cbl_family	*fam;
+	cbl_ctx		*ctx;
 	uint64_t	 seq;
 	struct timespec	 start;
 };
@@ -49,12 +52,12 @@ static void
 tick(cbl_timer *t __unused, void *arg)
 {
 	struct ticker *tk = arg;
-	struct notify_tick_ntf ntf = {
+	struct notify_tick ev = {
 		.has_seq = true, .seq = ++tk->seq,
 		.has_msec = true, .msec = msec_since(&tk->start),
 	};
 
-	(void)notify_tick_notify(tk->fam, &ntf);
+	(void)notify_tick_notify(tk->ctx, &ev);
 }
 
 static void
@@ -68,15 +71,16 @@ static int
 serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
     unsigned long ms)
 {
-	struct ticker tk = { 0 };
+	struct ticker tk = { .ctx = ctx };
 	cbl_listener *l;
 	cbl_timer *timer;
 	cbl_loop *loop;
 	int error;
 
 	clock_gettime(CLOCK_MONOTONIC, &tk.start);
-	if ((error = notify_register(ctx, NULL, &tk.fam)) != 0)
-		errc(1, error, "register");
+	/* The module served: family 1 is, with its group "notify". */
+	if ((error = cbl_yserver_add(ctx, &notify_server, NULL)) != 0)
+		errc(1, error, "serve");
 	if ((error = cbl_loop_new(ctx, &loop)) != 0 ||
 	    (error = cbl_listener_new(ctx, uri, flags, &l)) != 0)
 		errc(1, error, "%s", uri);
@@ -95,7 +99,6 @@ serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
 	cbl_timer_cancel(timer);
 	cbl_listener_free(l);
 	cbl_loop_free(loop);
-	(void)cbl_family_unregister(tk.fam);
 	return (error);
 }
 
@@ -106,29 +109,35 @@ struct watch {
 };
 
 static void
-on_tick(const struct notify_tick_ntf *ntf, void *arg)
+on_tick(cbl_conn *conn __unused, cbl_msg *msg, void *arg)
 {
 	struct watch *w = arg;
+	struct notify_tick t;
+	cbl_yarena *a;
 
-	/* Notifications are never reordered on one connection. */
-	if (w->last != 0 && ntf->seq <= w->last)
-		warnx("tick %ju after %ju", (uintmax_t)ntf->seq,
-		    (uintmax_t)w->last);
-	w->last = ntf->seq;
-	printf("tick %ju at %ju ms\n", (uintmax_t)ntf->seq,
-	    (uintmax_t)ntf->msec);
-	fflush(stdout);
-	if (--w->left == 0)
-		cbl_loop_stop(w->loop);
+	if ((a = cbl_yarena_new()) == NULL)
+		err(1, "cbl_yarena_new");
+	/* The group carries every module's: ENOENT, not a tick. */
+	if (notify_tick_parse(msg, &t, a, CBL_YD_STRICT, NULL, 0) == 0) {
+		/* Notifications are never reordered on one connection. */
+		if (w->last != 0 && t.seq <= w->last)
+			warnx("tick %ju after %ju", (uintmax_t)t.seq,
+			    (uintmax_t)w->last);
+		w->last = t.seq;
+		printf("tick %ju at %ju ms\n", (uintmax_t)t.seq,
+		    (uintmax_t)t.msec);
+		fflush(stdout);
+		if (--w->left == 0)
+			cbl_loop_stop(w->loop);
+	}
+	cbl_yarena_free(a);
 }
 
 static int
 client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
     long count)
 {
-	struct notify_ticks_handlers h = { .tick = on_tick };
 	struct watch w = { .left = count };
-	struct notify_client cl;
 	cbl_conn *conn;
 	cbl_sub *sub;
 	int error;
@@ -139,17 +148,16 @@ client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
 		(void)cbl_conn_set_tls(conn, tls);
 	if ((error = cbl_conn_connect(conn)) != 0)
 		errx(1, "%s: %s", uri, cbl_conn_errstr(conn));
-	if ((error = notify_client_init(&cl, conn)) != 0)
-		errc(1, error, "notify family");
-	if ((error = notify_ticks_subscribe(&cl, &h, &w, &sub)) != 0)
+	if ((error = cbl_subscribe(conn, "cblink.yang", "notify", on_tick, &w,
+	    &sub)) != 0)
 		errc(1, error, "subscribe");
 	/* Notifications are delivered by the loop the connection is on. */
 	if ((error = cbl_loop_new(ctx, &w.loop)) != 0 ||
 	    (error = cbl_conn_attach(conn, w.loop)) != 0)
 		errc(1, error, "loop");
 	(void)cbl_loop_run(w.loop);
+	(void)cbl_unsubscribe(sub);
 	cbl_loop_free(w.loop);
-	notify_client_fini(&cl);
 	cbl_conn_free(conn);
 	return (w.left == 0 ? 0 : 1);
 }

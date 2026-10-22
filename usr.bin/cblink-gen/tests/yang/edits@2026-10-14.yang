@@ -1,0 +1,120 @@
+module edits {
+  yang-version 1.1;
+  namespace "urn:cblink:test:edits";
+  prefix ed;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of the instance tree's edits: the configuration
+     RFC 6241 section 7.2's examples edit (top, its interfaces with an
+     MTU and addresses, an OSPF area's interfaces), RFC 8072's (a
+     playlist's songs, ordered by the user), and what else an edit
+     meets: a leaf-list, a choice, a default; and references, a leafref
+     and an instance-identifier.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  container top {
+    list interface {
+      key "name";
+      leaf name {
+        type string;
+      }
+      leaf mtu {
+        type uint32;
+      }
+      list address {
+        key "name";
+        leaf name {
+          type string;
+        }
+        leaf prefix-length {
+          type uint8;
+        }
+      }
+    }
+    container protocols {
+      container ospf {
+        list area {
+          key "name";
+          leaf name {
+            type string;
+          }
+          container interfaces {
+            list interface {
+              key "name";
+              leaf name {
+                type string;
+              }
+            }
+          }
+        }
+      }
+    }
+    leaf-list tags {
+      type string;
+    }
+    list route {
+      key "prefix";
+      ordered-by user;
+      leaf prefix {
+        type string;
+      }
+      leaf via {
+        type string;
+      }
+    }
+    leaf primary {
+      type leafref {
+        path "../interface/name";
+      }
+    }
+    leaf loose {
+      type leafref {
+        path "../interface/name";
+        require-instance false;
+      }
+    }
+    leaf mark {
+      type instance-identifier;
+    }
+    list playlist {
+      key "name";
+      leaf name {
+        type string;
+      }
+      list song {
+        key "index";
+        ordered-by user;
+        leaf index {
+          type uint32;
+        }
+        leaf id {
+          type string;
+        }
+      }
+    }
+    choice address-source {
+      case static {
+        leaf static-address {
+          type string;
+        }
+      }
+      case dynamic {
+        leaf dhcp {
+          type empty;
+        }
+        leaf dhcp-timeout {
+          type uint16;
+          default "30";
+        }
+      }
+    }
+  }
+}

@@ -5,469 +5,385 @@
  */
 
 /*
- * cbl-kv: an in-memory key/value store built from kv.yaml.  It shows a
- * do operation, a dump, an operation that needs an authenticated peer,
- * multicast notifications and a server-to-client stream.
- *
- *	cbl-kv -l [-pt] [-c cert -k key -a ca] uri	serve
- *	cbl-kv [-p] [...] uri get key
- *	cbl-kv [-p] [...] uri set key value		needs authentication
- *	cbl-kv [-p] [...] uri list [prefix]		a dump
- *	cbl-kv [-p] [...] uri changes count		notifications
- *	cbl-kv [-p] [...] uri watch prefix count	a push stream
- *
- * On a unix: socket, -t makes local peers authenticated (filesystem
- * permissions are then the access control).
+ * cbl-kv: the kv example in YANG (kv@2026-10-13.yang), its handlers
+ * the ones cblink-gen -m server declares in kv.h and tables in
+ * kv_server.c, served by family 1 ("cblink.yang") on a unix: socket of
+ * its own: a client edits the store, reads it back (its value in
+ * YANG-CBOR, and decoded), fetches the .sid file, and calls an rpc, and
+ * the program says what came back.  The action is called through the table, as family 1 does
+ * not carry actions yet.  A notification is shown as bytes, then sent
+ * to the client, which subscribed to family 1's group "notify".
  */
-
-#include <sys/types.h>
-#include <sys/queue.h>
 
 #include <err.h>
 #include <errno.h>
-#include <signal.h>
+#include <poll.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include <cblink.h>
-
 #include "kv.h"
 
-/* The server's state; all of it lives on the loop thread. */
-struct entry {
-	TAILQ_ENTRY(entry)	 link;
-	char			*key;
-	void			*value;
-	size_t			 len;
-	uint32_t		 flags;
-};
+#define	MAX_ENTRIES	64
 
-struct watcher {
-	LIST_ENTRY(watcher)	 link;
-	cbl_stream		*s;
-	char			*prefix;
-};
+static struct entry {
+	char		 key[256];
+	unsigned char	 value[64];
+	size_t		 vlen;
+	bool		 persistent;
+	uint32_t	 ttl;
+} store[MAX_ENTRIES];
+static size_t	nstore;
 
-static TAILQ_HEAD(, entry) entries = TAILQ_HEAD_INITIALIZER(entries);
-static LIST_HEAD(, watcher) watchers = LIST_HEAD_INITIALIZER(watchers);
-static cbl_family *kv_fam;
-
-static bool
-has_prefix(const char *key, const char *prefix)
+static char *
+astrdup(cbl_yarena *a, const char *s)
 {
+	char *p;
 
-	return (prefix == NULL || strncmp(key, prefix, strlen(prefix)) == 0);
+	if ((p = cbl_yarena_alloc(a, strlen(s) + 1)) != NULL)
+		memcpy(p, s, strlen(s) + 1);
+	return (p);
 }
 
-static struct entry *
-lookup(const char *key)
+/* GET of /kv:store: the entries, and their count. */
+int
+kv_store_get(cbl_req *req, struct kv *data, cbl_yarena *a)
 {
-	struct entry *e;
+	struct kv_store *st;
+	struct kv_store_entry *v;
 
-	TAILQ_FOREACH(e, &entries, link)
-		if (strcmp(e->key, key) == 0)
-			return (e);
+	(void)req;
+	if ((st = cbl_yarena_alloc(a, sizeof(*st))) == NULL ||
+	    (v = cbl_yarena_alloc(a, nstore * sizeof(*v))) == NULL)
+		return (ENOMEM);
+	for (size_t i = 0; i < nstore; i++) {
+		v[i].key = astrdup(a, store[i].key);
+		v[i].value.p = store[i].value;
+		v[i].value.len = store[i].vlen;
+		v[i].has_persistent = true;
+		v[i].persistent = store[i].persistent;
+		v[i].has_ttl = store[i].ttl != 0;
+		v[i].ttl = store[i].ttl;
+	}
+	st->entry.n = nstore;
+	st->entry.v = v;
+	st->has_count = true;
+	st->count = (uint32_t)nstore;
+	data->store = st;
+	return (0);
+}
+
+/* An edit of /kv:store: what it is after, kept. */
+int
+kv_store_edit(cbl_req *req, const struct kv *before, const struct kv *after)
+{
+	const struct kv_store_entry *e;
+
+	(void)req;
+	(void)before;
+	nstore = 0;
+	for (size_t i = 0; after->store != NULL && i <
+	    after->store->entry.n && nstore < MAX_ENTRIES; i++) {
+		e = &after->store->entry.v[i];
+		if (strlen(e->key) >= sizeof(store[0].key) ||
+		    e->value.len > sizeof(store[0].value))
+			return (EINVAL);
+		memset(&store[nstore], 0, sizeof(store[nstore]));
+		strcpy(store[nstore].key, e->key);
+		if (e->value.len > 0)
+			memcpy(store[nstore].value, e->value.p, e->value.len);
+		store[nstore].vlen = e->value.len;
+		store[nstore].persistent = e->has_persistent && e->persistent;
+		store[nstore].ttl = e->has_ttl ? e->ttl : 0;
+		nstore++;
+	}
+	return (0);
+}
+
+/* touch, an action on an entry: its time to live begins again. */
+int
+kv_store_entry_touch_action(cbl_req *req, const struct cbl_bytes *target,
+    const struct kv_store_entry_touch_input *in,
+    struct kv_store_entry_touch_output *out, cbl_yarena *a)
+{
+
+	(void)req;
+	(void)in;
+	(void)a;
+	if (target == NULL || target->len == 0)
+		return (EINVAL);
+	out->has_ttl = true;
+	out->ttl = 300;
+	return (0);
+}
+
+/* clear: the entries whose keys begin with the prefix go. */
+int
+kv_clear_rpc(cbl_req *req, const struct kv_clear_input *in,
+    struct kv_clear_output *out, cbl_yarena *a)
+{
+	size_t k = 0, len;
+
+	(void)req;
+	(void)a;
+	len = in->prefix != NULL ? strlen(in->prefix) : 0;
+	for (size_t i = 0; i < nstore; i++)
+		if (strncmp(store[i].key, in->prefix != NULL ? in->prefix :
+		    "", len) != 0)
+			store[k++] = store[i];
+	out->has_removed = true;
+	out->removed = (uint32_t)(nstore - k);
+	nstore = k;
+	return (0);
+}
+
+/* The handlers of the node named name, through the table. */
+static const struct cbl_yhandler *
+handler(const char *name)
+{
+	const struct cbl_ynode *n;
+
+	for (uint32_t i = 0; i < kv_server.nhandler; i++) {
+		n = cbl_yschema_node(kv_server.schema,
+		    kv_server.handler[i].sid);
+		if (n != NULL && strcmp(n->name, name) == 0)
+			return (&kv_server.handler[i]);
+	}
+	errx(1, "no handler for %s", name);
+}
+
+/* The module's top-level node named name. */
+static const struct cbl_ynode *
+node(const char *name)
+{
+	const struct cbl_ymodule *m = kv_server.schema->mod[0];
+
+	for (uint32_t i = 0; i < m->ntop; i++)
+		if (strcmp(m->top[i]->name, name) == 0)
+			return (m->top[i]);
+	errx(1, "no node %s", name);
+}
+
+static void
+hex(const char *what, const void *p, size_t len)
+{
+
+	printf("%s:", what);
+	for (size_t i = 0; i < len; i++)
+		printf(" %02x", ((const unsigned char *)p)[i]);
+	printf("\n");
+}
+
+static void *
+serve(void *loop)
+{
+
+	(void)cbl_loop_run(loop);
 	return (NULL);
 }
 
-int
-kv_get_doit(cbl_req *req, const struct kv_get_req *rq, void *arg __unused)
+static cbl_msg *
+call(cbl_conn *c, enum cbl_ycmd cmd, cbl_msg **mp)
 {
-	struct kv_get_rsp rsp = { 0 };
-	struct entry *e;
-
-	if ((e = lookup(rq->key)) == NULL) {
-		(void)cbl_req_set_err(req, "no such key", NULL, 0, -1);
-		return (ENOENT);
-	}
-	rsp.key = e->key;
-	rsp.value.p = e->value;
-	rsp.value.len = e->len;
-	rsp.has_flags = true;
-	rsp.flags = e->flags;
-	return (kv_get_reply(req, &rsp));
-}
-
-/*
- * One item per call; st->pos[0] counts the entries already looked at.
- * EAGAIN asks for another call, 0 ends the dump.
- */
-int
-kv_get_dumpit(cbl_req *req, const struct kv_get_dump_req *rq,
-    struct cbl_dump_state *st, void *arg __unused)
-{
-	struct kv_get_dump_rsp rsp = { 0 };
-	struct entry *e;
-	uint64_t i = 0;
+	cbl_msg *r;
 	int error;
 
-	TAILQ_FOREACH(e, &entries, link) {
-		if (i++ < st->pos[0])
-			continue;
-		st->pos[0]++;
-		if (!has_prefix(e->key, rq->prefix))
-			continue;
-		rsp.key = e->key;
-		if ((e->flags & KV_ENTRY_FLAGS_SECRET) == 0) {
-			rsp.value.p = e->value;
-			rsp.value.len = e->len;
-		}
-		rsp.has_flags = true;
-		rsp.flags = e->flags;
-		if ((error = kv_get_dump_reply(req, &rsp)) != 0)
-			return (error);
-		return (EAGAIN);
-	}
-	return (0);
+	if ((error = cbl_request(c, *mp, &r, 5000)) != 0)
+		errx(1, "command %d: %s: %s", cmd, strerror(error),
+		    r != NULL && cbl_msg_err_str(r) != NULL ?
+		    cbl_msg_err_str(r) : "");
+	*mp = NULL;
+	return (r);
 }
 
-/* "auth: true" in kv.yaml: only called for authenticated peers. */
-int
-kv_set_doit(cbl_req *req __unused, const struct kv_set_req *rq,
-    void *arg __unused)
-{
-	struct kv_changed_ntf ntf = { 0 };
-	struct kv_kv item = { 0 };
-	struct watcher *w;
-	struct entry *e;
-	void *v;
-
-	if ((v = malloc(rq->value.len + 1)) == NULL)
-		return (ENOMEM);
-	memcpy(v, rq->value.p, rq->value.len);
-	if ((e = lookup(rq->key)) == NULL) {
-		if ((e = calloc(1, sizeof(*e))) == NULL ||
-		    (e->key = strdup(rq->key)) == NULL) {
-			free(e);
-			free(v);
-			return (ENOMEM);
-		}
-		TAILQ_INSERT_TAIL(&entries, e, link);
-	}
-	free(e->value);
-	e->value = v;
-	e->len = rq->value.len;
-	e->flags = rq->has_flags ? rq->flags : 0;
-
-	/* Everyone subscribed to "changes" hears about it ... */
-	ntf.key = e->key;
-	ntf.has_flags = true;
-	ntf.flags = e->flags;
-	(void)kv_changed_notify(kv_fam, &ntf);
-	/* ... and watchers of a matching prefix get the new value. */
-	item.key = e->key;
-	item.value.p = e->value;
-	item.value.len = e->len;
-	LIST_FOREACH(w, &watchers, link)
-		if (has_prefix(e->key, w->prefix))
-			(void)kv_watch_server_send(w->s, &item);
-	return (0);		/* an empty reply acknowledges */
-}
-
+/* A notification heard: which, and its key and what. */
 static void
-watch_closed(cbl_stream *s __unused, int code __unused,
-    const char *text __unused, void *arg)
+heard(cbl_conn *conn, cbl_msg *m, void *arg)
 {
-	struct watcher *w = arg;
+	struct kv_changed ch = { 0 };
+	cbl_yarena *a;
+	int *n = arg;
 
-	LIST_REMOVE(w, link);
-	free(w->prefix);
-	free(w);
+	(void)conn;
+	if ((a = cbl_yarena_new()) == NULL)
+		err(1, "cbl_yarena_new");
+	/* ENOENT: another notification than this one. */
+	if (kv_changed_parse(m, &ch, a, CBL_YD_STRICT, NULL, 0) != 0)
+		errx(1, "not the notification sent");
+	printf("notified: changed %s %s\n", ch.key,
+	    ch.what == KV_CHANGED_WHAT_DELETED ? "deleted" : "set");
+	cbl_yarena_free(a);
+	(*n)++;
 }
 
-static const struct kv_watch_server_cbs watch_cbs = {
-	.on_close = watch_closed,
-};
+static cbl_msg *
+request(cbl_ctx *ctx, enum cbl_ycmd cmd)
+{
+	cbl_msg *m;
 
-/* A watch starts with the current matching entries. */
+	if (cbl_msg_new(ctx, CBL_YANG_FAMILY, cmd, 0, &m) != 0)
+		errx(1, "cbl_msg_new");
+	return (m);
+}
+
 int
-kv_watch_stream_open(cbl_req *req __unused, const struct kv_watch_req *rq,
-    cbl_stream *s, void *arg __unused)
+main(void)
 {
-	struct kv_kv item = { 0 };
-	struct watcher *w;
-	struct entry *e;
-	int error;
-
-	if ((w = calloc(1, sizeof(*w))) == NULL ||
-	    (rq->prefix != NULL && (w->prefix = strdup(rq->prefix)) == NULL)) {
-		free(w);
-		return (ENOMEM);
-	}
-	w->s = s;
-	if ((error = kv_watch_accept(s, &watch_cbs, w)) != 0) {
-		free(w->prefix);
-		free(w);
-		return (error);
-	}
-	LIST_INSERT_HEAD(&watchers, w, link);
-	TAILQ_FOREACH(e, &entries, link) {
-		if (!has_prefix(e->key, w->prefix))
-			continue;
-		item.key = e->key;
-		item.value.p = e->value;
-		item.value.len = e->len;
-		(void)kv_watch_server_send(s, &item);
-	}
-	return (0);
-}
-
-static void
-on_signal(int sig __unused, void *arg)
-{
-
-	cbl_loop_stop(arg);
-}
-
-static int
-serve(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls)
-{
+	static unsigned char hello[] = "hello";
+	struct kv_store_entry e[2] = {
+		{ .key = "alpha", .value = { hello, 5 },
+		    .has_ttl = true, .ttl = 60 },
+		{ .key = "beta", .has_persistent = true, .persistent = true },
+	};
+	struct kv_store st = { .entry = { 2, e } };
+	struct kv_store back;
+	struct kv_clear_input cin = { .prefix = "al" };
+	struct kv_clear_output cout = { 0 };
+	struct kv_store_entry_touch_output tout = { 0 };
+	struct kv_changed ch = { .key = "beta",
+	    .has_what = true, .what = KV_CHANGED_WHAT_DELETED };
+	struct cbl_ybuf b = { 0 };
+	/*
+	 * /kv:store/entry[key="alpha"], an instance-identifier as RFC 9254
+	 * section 6.13.1 has it: [the list's SID, its key].
+	 */
+	unsigned char iid[16] = { 0x82, 0x1b };
+	struct cbl_bytes target = { iid, sizeof(iid) };
+	const struct cbl_ynode *kvs, *list;
+	char dir[] = "/tmp/cbl-kv.XXXXXX", uri[64], why[256];
+	cbl_ctx *sctx, *cctx;
 	cbl_listener *l;
 	cbl_loop *loop;
-	struct entry *e;
-	int error;
-
-	if ((error = kv_register(ctx, NULL, &kv_fam)) != 0)
-		errc(1, error, "register");
-	if ((error = cbl_loop_new(ctx, &loop)) != 0 ||
-	    (error = cbl_listener_new(ctx, uri, flags, &l)) != 0)
-		errc(1, error, "%s", uri);
-	if (tls != NULL)
-		(void)cbl_listener_set_tls(l, tls);
-	if ((error = cbl_listener_start(l, loop)) != 0)
-		errx(1, "%s: %s", uri, cbl_listener_errstr(l));
-	(void)cbl_loop_signal(loop, SIGINT, on_signal, loop);
-	(void)cbl_loop_signal(loop, SIGTERM, on_signal, loop);
-	printf("listening on %s\n", uri);
-	fflush(stdout);
-	error = cbl_loop_run(loop);
-	cbl_listener_free(l);
-	cbl_loop_free(loop);		/* closes streams: watchers go */
-	(void)cbl_family_unregister(kv_fam);
-	while ((e = TAILQ_FIRST(&entries)) != NULL) {
-		TAILQ_REMOVE(&entries, e, link);
-		free(e->key);
-		free(e->value);
-		free(e);
-	}
-	return (error);
-}
-
-/* Client side. */
-
-struct counter {
-	cbl_loop	*loop;
-	long		 left;
-};
-
-static void
-changed(const struct kv_changed_ntf *ntf, void *arg)
-{
-	struct counter *c = arg;
-
-	printf("changed %s flags=%u\n", ntf->key,
-	    ntf->has_flags ? ntf->flags : 0);
-	fflush(stdout);
-	if (--c->left == 0)
-		cbl_loop_stop(c->loop);
-}
-
-static void
-watch_data(cbl_stream *s, const struct kv_kv *data, void *arg)
-{
-	struct counter *c = arg;
-
-	printf("%s = %.*s\n", data->key, (int)data->value.len,
-	    (const char *)data->value.p);
-	fflush(stdout);
-	if (--c->left == 0) {
-		(void)cbl_stream_close(s, 0, NULL);
-		cbl_loop_stop(c->loop);
-	}
-}
-
-static void
-watch_open(cbl_stream *s __unused, int error, void *arg)
-{
-	struct counter *c = arg;
-
-	if (error != 0) {
-		warnc(error, "watch");
-		cbl_loop_stop(c->loop);
-	}
-}
-
-static const struct kv_watch_cbs watch_client_cbs = {
-	.on_open = watch_open,
-	.on_data = watch_data,
-};
-
-/* Notifications and streams need the connection on an event loop. */
-static int
-listen_for(cbl_ctx *ctx, struct kv_client *cl, const char *what,
-    const char *prefix, long count)
-{
-	struct kv_changes_handlers h = { .changed = changed };
-	struct kv_watch_req wr = { .prefix = prefix };
-	struct counter c = { .left = count };
-	cbl_stream *s;
-	cbl_sub *sub = NULL;
-	int error;
-
-	if ((error = cbl_loop_new(ctx, &c.loop)) != 0)
-		errc(1, error, "loop");
-	if (strcmp(what, "changes") == 0)
-		error = kv_changes_subscribe(cl, &h, &c, &sub);
-	else
-		error = kv_watch_open(cl, &wr, &watch_client_cbs, &c, &s);
-	if (error != 0)
-		errc(1, error, "%s", what);
-	printf("ready\n");
-	fflush(stdout);
-	if ((error = cbl_conn_attach(cl->conn, c.loop)) != 0)
-		errc(1, error, "attach");
-	error = cbl_loop_run(c.loop);
-	cbl_loop_free(c.loop);
-	return (error);
-}
-
-static int
-client(cbl_ctx *ctx, const char *uri, uint32_t flags, cbl_tls *tls,
-    int argc, char **argv)
-{
-	struct kv_get_dump_rsp *item;
-	struct kv_get_rsp *rsp;
-	struct kv_client cl;
-	cbl_conn *conn;
+	cbl_conn *c;
+	cbl_msg *m, *r;
+	cbl_yarena *a;
+	struct pollfd pfd;
 	cbl_dump *d;
-	int error;
+	bool same = false;
+	int nfiles = 0;
+	pthread_t thr;
+	cbl_sub *sub;
+	uint64_t sid;
+	int error, events, timeout, nheard = 0;
+	const void *v;
+	size_t len;
 
-	if ((error = cbl_conn_new(ctx, uri, flags, &conn)) != 0)
-		errc(1, error, "%s", uri);
-	if (tls != NULL)
-		(void)cbl_conn_set_tls(conn, tls);
-	if ((error = cbl_conn_connect(conn)) != 0)
-		errx(1, "%s: %s", uri, cbl_conn_errstr(conn));
-	if ((error = kv_client_init(&cl, conn)) != 0)
-		errc(1, error, "kv family");
+	if ((a = cbl_yarena_new()) == NULL)
+		err(1, "cbl_yarena_new");
+	kvs = node("store");
 
-	if (strcmp(argv[0], "get") == 0 && argc == 2) {
-		struct kv_get_req req = { .key = argv[1] };
-
-		if ((error = kv_get(&cl, &req, &rsp)) == 0) {
-			printf("%s = %.*s\n", rsp->key, (int)rsp->value.len,
-			    (const char *)rsp->value.p);
-			kv_get_rsp_free(rsp);
-		}
-	} else if (strcmp(argv[0], "set") == 0 && argc == 3) {
-		struct kv_set_req req = { .key = argv[1] };
-
-		req.value.p = argv[2];
-		req.value.len = strlen(argv[2]);
-		error = kv_set(&cl, &req);
-	} else if (strcmp(argv[0], "list") == 0 && argc <= 2) {
-		struct kv_get_dump_req req = {
-			.prefix = argc == 2 ? argv[1] : NULL };
-
-		/* Each item lives until the next call. */
-		if ((error = kv_get_dump(&cl, &req, &d)) == 0) {
-			while ((error = kv_get_dump_next(d, &item)) == 0 &&
-			    item != NULL) {
-				printf("%s = %.*s\n", item->key,
-				    (int)item->value.len,
-				    (const char *)item->value.p);
-			}
-			cbl_dump_free(d);
-		}
-	} else if (strcmp(argv[0], "changes") == 0 && argc == 2)
-		error = listen_for(ctx, &cl, "changes", NULL,
-		    strtol(argv[1], NULL, 10));
-	else if (strcmp(argv[0], "watch") == 0 && argc == 3)
-		error = listen_for(ctx, &cl, "watch", argv[1],
-		    strtol(argv[2], NULL, 10));
-	else
-		errx(2, "unknown command or wrong arguments: %s", argv[0]);
-	if (error != 0)
-		errx(1, "%s: %s", argv[0], cl.err != NULL &&
-		    cbl_msg_err_str(cl.err) != NULL ?
-		    cbl_msg_err_str(cl.err) : strerror(error));
-	kv_client_fini(&cl);
-	cbl_conn_free(conn);
-	return (0);
-}
-
-static cbl_tls *
-tls_config(const char *cert, const char *key, const char *ca)
-{
-	cbl_tls *tls;
-
-	if (cert == NULL && ca == NULL)
-		return (NULL);
-	if (cbl_tls_new(&tls) != 0 ||
-	    (cert != NULL && cbl_tls_set_cert(tls, cert, key) != 0) ||
-	    (ca != NULL && cbl_tls_set_ca(tls, ca, NULL) != 0))
-		errx(1, "TLS configuration");
-	return (tls);
-}
-
-static void
-usage(void)
-{
-
-	fprintf(stderr,
-	    "usage: cbl-kv -l [-pt] [-c cert -k key -a ca] uri\n"
-	    "       cbl-kv [-p] [-c cert -k key -a ca] uri command ...\n"
-	    "commands: get key | set key value | list [prefix] |\n"
-	    "          changes count | watch prefix count\n");
-	exit(2);
-}
-
-int
-main(int argc, char **argv)
-{
-	const char *cert = NULL, *key = NULL, *ca = NULL;
-	uint32_t flags = 0;
-	bool listen = false;
-	cbl_tls *tls;
-	cbl_ctx *ctx;
-	int ch, rv;
-
-	while ((ch = getopt(argc, argv, "a:c:k:lpt")) != -1) {
-		switch (ch) {
-		case 'a':
-			ca = optarg;
-			break;
-		case 'c':
-			cert = optarg;
-			break;
-		case 'k':
-			key = optarg;
-			break;
-		case 'l':
-			listen = true;
-			break;
-		case 'p':
-			flags |= CBL_PLAINTEXT;
-			break;
-		case 't':
-			flags |= CBL_LF_UNIX_TRUSTED;
-			break;
-		default:
-			usage();
-		}
-	}
-	argc -= optind;
-	argv += optind;
-	if (listen ? argc != 1 : argc < 2)
-		usage();
-	if (cbl_ctx_new(&ctx) != 0)
+	/* The server: kv's table, served by family 1. */
+	if (mkdtemp(dir) == NULL)
+		err(1, "mkdtemp");
+	snprintf(uri, sizeof(uri), "unix:%s/s", dir);
+	if (cbl_ctx_new(&sctx) != 0 || cbl_ctx_new(&cctx) != 0)
 		errx(1, "cbl_ctx_new");
-	tls = tls_config(cert, key, ca);
-	rv = listen ? serve(ctx, argv[0], flags, tls) :
-	    client(ctx, argv[0], flags, tls, argc - 1, argv + 1);
-	cbl_tls_free(tls);
-	cbl_ctx_free(ctx);
-	return (rv);
+	if (cbl_yserver_add(sctx, &kv_server, NULL) != 0)
+		errx(1, "cbl_yserver_add");
+	if (cbl_loop_new(sctx, &loop) != 0 ||
+	    cbl_listener_new(sctx, uri, CBL_PLAINTEXT, &l) != 0 ||
+	    cbl_listener_start(l, loop) != 0)
+		errx(1, "%s: cannot listen", uri);
+	if (pthread_create(&thr, NULL, serve, loop) != 0)
+		errx(1, "pthread_create");
+	if (cbl_conn_new(cctx, uri, CBL_PLAINTEXT, &c) != 0 ||
+	    cbl_conn_connect(c) != 0)
+		errx(1, "%s: cannot connect", uri);
+
+	/* EDIT: the store, its two entries; kv_store_put() as kv.h has it. */
+	m = request(cctx, CBL_YCMD_EDIT);
+	if (kv_store_put(m, &st) != 0)
+		errx(1, "edit");
+	cbl_msg_free(call(c, CBL_YCMD_EDIT, &m));
+	printf("edit: %zu entries\n", nstore);
+
+	/* GET: the store, as YANG-CBOR and decoded. */
+	m = request(cctx, CBL_YCMD_GET);
+	sid = kvs->sid;
+	if (cbl_msg_put_yget(m, &sid, 1) != 0)
+		errx(1, "get");
+	r = call(c, CBL_YCMD_GET, &m);
+	if (cbl_msg_sid_raw(r, kvs->sid, &v, &len) != 0)
+		errx(1, "get: no store");
+	if (kv_store_parse(r, &back, a, CBL_YD_STRICT, why, sizeof(why)) != 0)
+		errx(1, "decode: %s", why);
+	printf("get: %zu entries, count %u\n", back.entry.n, back.count);
+	hex("store", v, len);
+	printf("decoded: %s ttl %u, %s%s\n", back.entry.v[0].key,
+	    back.entry.v[0].ttl, back.entry.v[1].key,
+	    back.entry.v[1].persistent ? " persistent" : "");
+	cbl_msg_free(r);
+
+	/* GET-SID: the .sid file the server numbers kv by. */
+	if (cbl_msg_new(cctx, CBL_YANG_FAMILY, CBL_YCMD_GET_SID, CBL_F_DUMP,
+	    &m) != 0 || cbl_dump_start(c, m, &d) != 0)
+		errx(1, "get-sid");
+	while (cbl_dump_next(d, &r) == 0 && r != NULL) {
+		if (cbl_msg_sid_raw(r, CBL_YSID_FILE, &v, &len) != 0)
+			errx(1, "get-sid: not a sid-file");
+		same = len == kv_server.sidfile[0].len &&
+		    memcmp(v, kv_server.sidfile[0].cbor, len) == 0;
+		nfiles++;
+	}
+	cbl_dump_free(d);
+	printf("get-sid: %d file, %zu bytes, %s\n", nfiles, len,
+	    same ? "as the table has it" : "not the table's");
+
+	/* touch, an action: through the table, as family 1 has none yet. */
+	list = NULL;
+	for (uint32_t i = 0; i < kvs->nchild; i++)
+		if (strcmp(kvs->child[i]->name, "entry") == 0)
+			list = kvs->child[i];
+	if (list == NULL)
+		errx(1, "no /kv:store/entry");
+	for (int i = 0; i < 8; i++)
+		iid[2 + i] = (unsigned char)(list->sid >> (56 - 8 * i));
+	iid[10] = 0x65;		/* a text string of 5 */
+	memcpy(iid + 11, "alpha", 5);
+	if (handler("touch")->action(NULL, &target, NULL, &tout, a) != 0)
+		errx(1, "touch");
+	printf("touch: ttl %u\n", tout.ttl);
+
+	/* RPC: clear, called through family 1 (kv_clear_call()). */
+	if ((error = kv_clear_call(c, &cin, &cout, a, 5000)) != 0)
+		errc(1, error, "clear");
+	printf("clear al: %u removed, %zu left\n", cout.removed, nstore);
+
+	if (kv_changed_notification(&ch, &b) != 0)
+		errx(1, "notification");
+	hex("changed", b.p, b.len);
+	cbl_ybuf_free(&b);
+
+	/* The notification sent to who subscribed, the client. */
+	if (cbl_subscribe(c, "cblink.yang", "notify", heard, &nheard,
+	    &sub) != 0)
+		errx(1, "subscribe");
+	if (kv_changed_notify(sctx, &ch) != 0)
+		errx(1, "notify");
+	while (nheard == 0 && cbl_conn_is_open(c)) {
+		cbl_conn_interest(c, &events, &timeout);
+		pfd.fd = cbl_conn_fd(c);
+		pfd.events = POLLIN | ((events & CBL_EV_WRITE) ? POLLOUT : 0);
+		if (poll(&pfd, 1, 5000) == 0)
+			errx(1, "no notification");
+		(void)cbl_conn_process(c,
+		    ((pfd.revents & POLLIN) ? CBL_EV_READ : 0) |
+		    ((pfd.revents & POLLOUT) ? CBL_EV_WRITE : 0));
+	}
+	(void)cbl_unsubscribe(sub);
+
+	cbl_conn_free(c);
+	cbl_loop_stop(loop);
+	(void)pthread_join(thr, NULL);
+	cbl_listener_free(l);
+	cbl_loop_free(loop);
+	cbl_ctx_free(cctx);
+	cbl_ctx_free(sctx);
+	(void)unlink(uri + 5);
+	(void)rmdir(dir);
+	cbl_yarena_free(a);
+	return (0);
 }

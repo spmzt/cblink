@@ -6,9 +6,11 @@ prototypes. For the protocol, see WIRE-FORMAT.md.
 
 ## 0. Conventions
 
-- **One public header:** `#include <cblink.h>`. It includes only `<stdbool.h>`,
-  `<stddef.h>`, `<stdint.h>`, `<sys/types.h>` and `<sys/socket.h>`. No
-  libcbor or OpenSSL type appears in it.
+- **Two public headers:** `<cblink.h>`, the transport, messages and
+  families, which includes only `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`,
+  `<sys/types.h>` and `<sys/socket.h>`; and `<cbl_schema.h>`, YANG: the
+  schema tables, the YANG-CBOR codec and the YANG family (section 7). No
+  libcbor or OpenSSL type appears in either.
 - **Prefix:** `cbl_` for functions and types, and `CBL_` for macros and
   enumerators.
 - **Opaque types**, all declared as `typedef struct cbl_x cbl_x;`:
@@ -21,7 +23,7 @@ prototypes. For the protocol, see WIRE-FORMAT.md.
   | `cbl_conn`     | A connection or association (TCP, SCTP, AF_UNIX). |
   | `cbl_tls`      | A TLS/DTLS configuration (certificates, CA, CRL, names). |
   | `cbl_msg`      | A message being built or received. Owns its arena. |
-  | `cbl_attr`     | A read-only handle to one decoded attribute inside a `cbl_msg`. |
+  | `cbl_yarena`   | Where a YANG-CBOR decode puts what it allocates (`<cbl_schema.h>`). |
   | `cbl_family`   | A registered family. |
   | `cbl_req`      | Server-side context of one incoming request. |
   | `cbl_stream`   | A stream. |
@@ -86,8 +88,8 @@ prototypes. For the protocol, see WIRE-FORMAT.md.
     the call queues the request and waits on a condition variable.
   - Calling a synchronous function **from that connection's own loop
     thread** returns `EDEADLK`. The asynchronous forms work there:
-    `cbl_request_async()`, `cbl_resolve_async()`, `cbl_subscribe_async()`
-    and the generated `P_op_async()` wrappers.
+    `cbl_request_async()`, `cbl_resolve_async()` and
+    `cbl_subscribe_async()`.
 - A `cbl_msg` is not thread-safe while it is being built. Once sent, it
   belongs to the library.
 
@@ -252,44 +254,47 @@ CBL_PLAINTEXT"`.
 
 ## 5. Messages: building
 
+A version 2 body is one map whose top-level keys are SIDs (RFC 9595),
+each a node's data in YANG-CBOR (RFC 9254). A program puts items by SID;
+`cblink-gen` writes typed helpers over these for each struct (section 7).
+
 ```c
 int	cbl_msg_new(cbl_ctx *, uint16_t family, uint16_t cmd, uint32_t flags, cbl_msg **);
 void	cbl_msg_free(cbl_msg *);
-void	*cbl_msg_alloc(cbl_msg *, size_t);	/* arena: freed with the message */
-char	*cbl_msg_strdup(cbl_msg *, const char *);
+int	cbl_msg_ref(cbl_msg *);		/* keep a received msg past the callback */
 
-int	cbl_put_uint(cbl_msg *, uint16_t type, uint64_t);
-int	cbl_put_int(cbl_msg *, uint16_t type, int64_t);
-int	cbl_put_bool(cbl_msg *, uint16_t type, bool);
-int	cbl_put_flag(cbl_msg *, uint16_t type);
-int	cbl_put_str(cbl_msg *, uint16_t type, const char *);
-int	cbl_put_strn(cbl_msg *, uint16_t type, const char *, size_t);
-int	cbl_put_bytes(cbl_msg *, uint16_t type, const void *, size_t);
-int	cbl_put_double(cbl_msg *, uint16_t type, double);
-int	cbl_put_null(cbl_msg *, uint16_t type);
-int	cbl_put_attr(cbl_msg *, uint16_t type, const cbl_attr *);	/* copy a decoded subtree */
+int	cbl_msg_put_sid_raw(cbl_msg *, uint64_t sid, const void *cbor, size_t len);
 
-int	cbl_nest_start(cbl_msg *, uint16_t type);
-int	cbl_nest_end(cbl_msg *);
-int	cbl_array_start(cbl_msg *, uint16_t type);
-int	cbl_array_end(cbl_msg *);
-#define	CBL_ELEM	0	/* the "type" argument for an element inside an array */
+/* <cbl_schema.h> */
+int	cbl_msg_put_ynode(cbl_msg *, const struct cbl_ynode *, const void *p);
+int	cbl_msg_put_ymember(cbl_msg *, const struct cbl_ynode *, const void *parent);
+int	cbl_msg_put_ynull(cbl_msg *, uint64_t sid);	/* in an EDIT: deleted */
+
+/* an ERROR's, or an ack's, error and cookie: the cblink:error structure */
+int	cbl_msg_put_error(cbl_msg *, int code, const char *text,
+	    const struct cbl_path_elem *, size_t pathlen, int miss_type);
+int	cbl_msg_put_cookie(cbl_msg *, const void *, size_t);
 
 const char *cbl_msg_errstr(const cbl_msg *);	/* sticky builder error */
+int	cbl_msg_error(const cbl_msg *);
 ```
 
+- A SID is 1 to 2^63 − 1. `cbl_msg_put_ynode()` puts a node's own struct
+  under its SID (an rpc's or an action's input and output under the rpc's
+  or the action's, as CORECONF does); `cbl_msg_put_ymember()` a module's
+  top-level node from the module's data struct (a container's pointer, a
+  list's array, a leaf); `cbl_msg_put_sid_raw()` a value already encoded,
+  one well-formed item that the receiver checks as it checks any body.
 - Builder errors are **sticky**, as with the snl(3) writer. After the first
   failure, further puts are no-ops that return the same error, and the send
   call fails with it too. A caller can therefore chain puts and check once.
-  The failures are: exceeding `max_frame`, `max_depth` or `max_attrs`;
-  unbalanced start/end; a non-`CBL_ELEM` type inside an array; a duplicate
-  key in a map; `type == 0`.
-- Encoding uses preferred serialization and definite lengths. A map or
-  array header is reserved as one byte. On `_end`, the real count is
-  written, and the contents are moved only when the count is 24 or more.
+  The failures are: exceeding `max_frame` or `max_attrs`; a SID twice
+  (`EEXIST`); a SID out of range; a put after the message was encoded.
+- Encoding uses preferred serialization and definite lengths. The error
+  structure is written last, as the message is encoded.
 - Each message has its own **arena**, a chain of linear buffers like snl's
-  `struct linear_buffer`. The encoded frame, decoded nodes and parse results
-  all live in it. `cbl_msg_free()` releases everything at once.
+  `struct linear_buffer`. The encoded frame and the decoder's tree live in
+  it. `cbl_msg_free()` releases everything at once.
 
 ## 6. Messages: receiving and reading
 
@@ -299,27 +304,21 @@ uint16_t cbl_msg_cmd(const cbl_msg *);
 uint32_t cbl_msg_flags(const cbl_msg *);
 uint32_t cbl_msg_seq(const cbl_msg *);
 uint32_t cbl_msg_stream(const cbl_msg *);	/* group id for NOTIFY */
-int	cbl_msg_ref(cbl_msg *);		/* keep a received msg past the callback */
 
-const cbl_attr *cbl_msg_attr(const cbl_msg *, uint16_t type);	/* top level; NULL if absent */
-const cbl_attr *cbl_attr_get(const cbl_attr *nest, uint16_t type);
-const cbl_attr *cbl_attr_first(const cbl_attr *container);	/* iterate map or array */
-const cbl_attr *cbl_attr_next(const cbl_attr *);
-uint16_t cbl_attr_type(const cbl_attr *);	/* key in parent map; 0 in arrays */
-enum cbl_kind cbl_attr_kind(const cbl_attr *);
-size_t	cbl_attr_count(const cbl_attr *);	/* entries or elements */
-int	cbl_attr_uint(const cbl_attr *, uint64_t *);	/* EINVAL wrong kind */
-int	cbl_attr_int(const cbl_attr *, int64_t *);	/* ERANGE out of range */
-int	cbl_attr_bool(const cbl_attr *, bool *);
-int	cbl_attr_double(const cbl_attr *, double *);
-int	cbl_attr_bytes(const cbl_attr *, const void **, size_t *);	/* zero-copy */
-int	cbl_attr_str(cbl_msg *, const cbl_attr *, const char **);	/* NUL-terminated arena copy */
+int	cbl_msg_sid_raw(const cbl_msg *, uint64_t sid, const void **, size_t *);	/* ENOENT */
 
-/* extended error (NLMSG_ERROR) accessors: valid on any received msg */
-int	cbl_msg_err_code(const cbl_msg *);	/* ERROR, S_RESET, S_CLOSE; else 0 */
+/* <cbl_schema.h>: decoded into the node's struct, what it points to a's */
+int	cbl_msg_ydecode(const cbl_msg *, const struct cbl_ynode *, void *p,
+	    cbl_yarena *a, int flags, char *why, size_t whylen);
+int	cbl_msg_ydecode_member(const cbl_msg *, const struct cbl_ynode *, void *parent,
+	    cbl_yarena *a, int flags, char *why, size_t whylen);
+
+/* the cblink:error structure of a received msg: valid on any */
+int	cbl_msg_err_code(const cbl_msg *);	/* errno: ERROR, S_RESET, S_CLOSE; else 0 */
 const char *cbl_msg_err_str(const cbl_msg *);	/* NULL if absent */
 size_t	cbl_msg_err_path(const cbl_msg *, struct cbl_path_elem *, size_t max);
-int	cbl_msg_err_miss_type(const cbl_msg *);	/* -1 if absent */
+int	cbl_msg_err_miss_type(const cbl_msg *);	/* missing-element: -1 if absent */
+uint64_t cbl_msg_err_sid(const cbl_msg *);	/* the node at fault, family 1; 0 */
 int	cbl_msg_err_cookie(const cbl_msg *, const void **, size_t *);
 
 /* raw frame helpers (tests, fuzzers, custom transports) */
@@ -327,108 +326,273 @@ int	cbl_frame_decode(cbl_ctx *, const void *buf, size_t len, size_t *used, cbl_m
 int	cbl_msg_encode(cbl_msg *, const void **frame, size_t *len);
 ```
 
-Within a map, attributes are kept in key order after decoding, so lookups
-use binary search.
+Before a received message reaches the program, the decoder has checked
+its whole body under the limits: definite lengths, integer keys, no key
+twice in a map, valid UTF-8, YANG-CBOR's tags (4, 43 to 47) only on the
+kinds of value they belong to. The top-level items are kept in SID
+order, so `cbl_msg_sid_raw()` is a binary search. A top-level key that is
+not a SID (0, negative, beyond 2^63 − 1) is taken and never found.
 
-## 7. Policies (nla_policy)
+## 7. YANG: schema tables, codec, the YANG family
 
-```c
-enum cbl_kind {
-	CBL_K_ANY, CBL_K_UINT, CBL_K_INT, CBL_K_BOOL, CBL_K_FLAG,
-	CBL_K_TEXT, CBL_K_BYTES, CBL_K_FLOAT, CBL_K_NEST, CBL_K_NULL,
-};
-#define	CBL_PF_REQUIRED	0x01	/* missing -> EINVAL + MISS_TYPE */
-#define	CBL_PF_MULTI	0x02	/* value is an array of `kind` */
-#define	CBL_PF_MASK	0x04	/* uint: value & ~u.max must be 0 (flag sets) */
-
-struct cbl_policy {
-	uint16_t	type;		/* attribute key */
-	uint8_t		kind;		/* enum cbl_kind */
-	uint8_t		flags;		/* CBL_PF_* */
-	uint32_t	min_count;	/* CBL_PF_MULTI: element count range */
-	uint32_t	max_count;	/*   0 = no limit (max_attrs still applies) */
-	union {
-		struct { uint64_t min, max; } u;	/* CBL_K_UINT */
-		struct { int64_t min, max; } i;		/* CBL_K_INT */
-		struct { uint32_t min, max; } len;	/* TEXT, BYTES: byte length */
-		const struct cbl_policy_set *nested;	/* CBL_K_NEST */
-		const struct cbl_enum *values;		/* UINT with an enum */
-	};
-	int	(*validate)(const cbl_attr *, void *arg, cbl_msg *err);	/* optional */
-	void	*arg;
-};
-struct cbl_policy_set {
-	const struct cbl_policy	*p;	/* sorted by type (verified at register) */
-	uint32_t		n;
-	uint16_t		maxtype;
-};
-#define	CBL_POLICY_SET(name, arr)	/* static const struct cbl_policy_set name = ... */
-
-int	cbl_validate(const cbl_msg *, const cbl_attr *nest_or_NULL,
-	    const struct cbl_policy_set *, cbl_msg *errout);
-```
-
-The framework runs `cbl_validate()` on the request against the op's policy
-**before** calling the handler. On failure it sends the `ERROR` frame with
-`CODE`, `MSG`, `PATH` and `MISS_TYPE` filled in, and the handler is never
-called. Attributes that are not in the policy are ignored (WIRE-FORMAT.md
-section 5.4).
-
-## 8. Declarative parsers (snl-style)
+`<cbl_schema.h>` holds what a program speaks YANG with. `cblink-gen`
+(GENERATOR.md) writes, from the program's modules, the structs (`-m h`),
+the schema tables (`-m schema`) and the server's handler table
+(`-m server`); YANG.md says what of YANG they cover.
 
 ```c
-typedef int cbl_parse_attr_f(cbl_msg *, const cbl_attr *, const void *arg, void *target);
-typedef int cbl_parse_post_f(cbl_msg *, void *target);
+/* the tables: nodes by SID, types, identities, features */
+struct cbl_yschema, struct cbl_ymodule, struct cbl_ynode, struct cbl_ytype,
+    struct cbl_yident, struct cbl_yfeature;
+const struct cbl_ynode *cbl_ynode_child(const struct cbl_ynode *, int64_t delta);
+uint64_t cbl_ynode_base(const struct cbl_ynode *);	/* what its children's deltas are from */
+const struct cbl_ynode *cbl_yschema_node(const struct cbl_yschema *, uint64_t sid);
+const struct cbl_yident *cbl_yschema_ident(const struct cbl_yschema *, uint64_t sid);
+/* RFC 7952's annotations: by SID, or a module's by name */
+const struct cbl_yannot *cbl_yschema_annot(const struct cbl_yschema *, uint64_t sid);
+const struct cbl_yannot *cbl_ymodule_annot(const struct cbl_ymodule *, const char *name);
+bool	cbl_yderived_from(const struct cbl_yschema *, uint64_t ident, uint64_t base, bool self);
 
-struct cbl_attr_parser {
-	uint16_t		type;	/* sorted ascending */
-	uint32_t		off;	/* offsetof(target struct, field) */
-	cbl_parse_attr_f	*cb;
-	const void		*arg;
-};
-struct cbl_parser {
-	uint32_t			out_size;	/* for nested allocations */
-	uint32_t			np_size;
-	const struct cbl_attr_parser	*np;
-	cbl_parse_post_f		*post;
-};
-#define	CBL_DECLARE_PARSER(name, type_t, np, post)	/* static const struct cbl_parser */
+/* the codec: a node's struct as YANG-CBOR and back */
+int	cbl_yencode(const struct cbl_ynode *, const void *p, struct cbl_ybuf *);
+int	cbl_yencode_sid(const struct cbl_ynode *, const void *p, struct cbl_ybuf *);	/* {SID: value} */
+int	cbl_yencode_member(const struct cbl_ynode *, const void *parent, struct cbl_ybuf *);
+int	cbl_ydecode(const struct cbl_ynode *, const void *, size_t, void *p,
+	    cbl_yarena *, int flags, char *why, size_t whylen);	/* CBL_YD_STRICT */
+int	cbl_ydecode_member(const struct cbl_ynode *, const void *, size_t, void *parent,
+	    cbl_yarena *, int flags, char *why, size_t whylen);
+void	cbl_ybuf_free(struct cbl_ybuf *);
+cbl_yarena *cbl_yarena_new(void);
+void	*cbl_yarena_alloc(cbl_yarena *, size_t);	/* zeroed */
+void	cbl_yarena_set_limit(cbl_yarena *, size_t);	/* 64 MiB by default */
+void	cbl_yarena_free(cbl_yarena *);
 
-int	cbl_parse(cbl_msg *, const struct cbl_parser *, void *target);	/* body */
-int	cbl_parse_nest(cbl_msg *, const cbl_attr *, const struct cbl_parser *, void *target);
+/* family 1, "cblink.yang": a program's modules served by SID */
+#define	CBL_YANG_FAMILY	1
+enum cbl_ycmd { CBL_YCMD_GET = 1, CBL_YCMD_EDIT, CBL_YCMD_RPC, CBL_YCMD_NOTIFY,
+    CBL_YCMD_GET_SID };
+int	cbl_yserver_add(cbl_ctx *, const struct cbl_yserver *, void *arg);
+void	*cbl_req_yarg(const cbl_req *);
+int	cbl_req_set_yerr(cbl_req *, const char *text, uint64_t sid);
+int	cbl_msg_put_yget(cbl_msg *, const uint64_t *sids, size_t n);
 
-/* stock callbacks; target field types in comments */
-cbl_parse_attr_f cbl_get_u8, cbl_get_u16, cbl_get_u32, cbl_get_u64;	/* uintN_t */
-cbl_parse_attr_f cbl_get_s8, cbl_get_s16, cbl_get_s32, cbl_get_s64;	/* intN_t */
-cbl_parse_attr_f cbl_get_bool, cbl_get_flag;		/* bool */
-cbl_parse_attr_f cbl_get_double;			/* double */
-cbl_parse_attr_f cbl_get_str;		/* const char * (arena copy) */
-cbl_parse_attr_f cbl_get_bytes;		/* struct cbl_bytes { const void *p; size_t len; } */
-cbl_parse_attr_f cbl_get_attr;		/* const cbl_attr * */
-cbl_parse_attr_f cbl_get_nested;	/* embedded struct; arg = const struct cbl_parser * */
-cbl_parse_attr_f cbl_get_nested_ptr;	/* struct * in arena; arg = parser */
-cbl_parse_attr_f cbl_get_array;		/* struct cbl_array { size_t n; void *v; }; arg = elem desc */
-struct cbl_array_desc { cbl_parse_attr_f *cb; const void *arg; uint32_t elem_size; };
+/* the static validator; defaults */
+#define	CBL_YV_EDIT	0x0001	/* config false nodes refused */
+struct cbl_yverr { const struct cbl_ynode *node; const char *tag, *apptag; char msg[160]; };
+int	cbl_yvalidate(const struct cbl_ynode *, const void *p, int flags, struct cbl_yverr *);
+int	cbl_yvalidate_member(const struct cbl_ynode *, const void *parent, int flags,
+	    struct cbl_yverr *);
+int	cbl_ydefaults(const struct cbl_ynode *, void *p, cbl_yarena *);
+
+/* YANG notifications, to family 1's group "notify" */
+int	cbl_ynotify(cbl_ctx *, const struct cbl_ynode *, const void *p);
+struct cbl_ynotif { uint64_t sid; const char *event_time; const void *content; size_t len; };
+int	cbl_msg_ynotif(const cbl_msg *, struct cbl_ynotif *, cbl_yarena *);
 ```
 
-Usage mirrors snl(3). A hand-written example:
+`<cbl_data.h>`, the instance tree: YANG data as nodes of the tables, for
+what keeps data and works on it as YANG does (a datastore, an edit, a
+diff, XPath), where the structs are what one handler fills or reads.
 
 ```c
-struct kv_entry { const char *key; struct cbl_bytes value; uint32_t ttl; };
-#define	_OUT(f)	offsetof(struct kv_entry, f)
-static const struct cbl_attr_parser kv_entry_np[] = {
-	{ .type = KV_A_KEY,   .off = _OUT(key),   .cb = cbl_get_str },
-	{ .type = KV_A_VALUE, .off = _OUT(value), .cb = cbl_get_bytes },
-	{ .type = KV_A_TTL,   .off = _OUT(ttl),   .cb = cbl_get_u32 },
-};
-#undef _OUT
-CBL_DECLARE_PARSER(kv_entry_parser, struct kv_entry, kv_entry_np, NULL);
-
-struct kv_entry e = {};
-error = cbl_parse(reply, &kv_entry_parser, &e);
+cbl_dtree *cbl_dtree_new(const struct cbl_yschema *);	/* its root: no schema node */
+void	cbl_dtree_free(cbl_dtree *);
+cbl_dnode *cbl_dtree_root(const cbl_dtree *);
+size_t	cbl_dtree_count(const cbl_dtree *);
+/* walking: the children in schema order, entries as added */
+const struct cbl_ynode *cbl_dnode_schema(const cbl_dnode *);
+cbl_dnode *cbl_dnode_parent(const cbl_dnode *), *cbl_dnode_first(const cbl_dnode *),
+    *cbl_dnode_last(const cbl_dnode *), *cbl_dnode_next(const cbl_dnode *),
+    *cbl_dnode_prev(const cbl_dnode *);
+const void *cbl_dnode_value(const cbl_dnode *);	/* as its struct member is */
+/* making: EINVAL where the schema has it not, EEXIST a second */
+int	cbl_dnode_add(cbl_dnode *parent, const struct cbl_ynode *, const void *value,
+	    cbl_dnode **out);
+int	cbl_dnode_add_entry(cbl_dnode *parent, const struct cbl_ynode *list,
+	    const void *const *keys, cbl_dnode **out);
+int	cbl_dnode_set(cbl_dnode *, const void *value);
+int	cbl_dnode_remove(cbl_dnode *);
+/* finding: a list's entries by their keys, from an index */
+cbl_dnode *cbl_dnode_child(const cbl_dnode *, const struct cbl_ynode *);
+cbl_dnode *cbl_dnode_entry(const cbl_dnode *parent, const struct cbl_ynode *list,
+    const void *const *keys);
+cbl_dnode *cbl_dnode_llentry(const cbl_dnode *parent, const struct cbl_ynode *,
+    const void *value);
+/* defaults: on demand, or made (CBL_DN_DEFAULT) */
+const void *cbl_dnode_leaf(const cbl_dnode *, const struct cbl_ynode *leaf, bool *isdflt);
+ssize_t	cbl_dtree_defaults(cbl_dnode *);
+/* RFC 6243: CBL_WD_REPORT_ALL, CBL_WD_TRIM, CBL_WD_EXPLICIT */
+int	cbl_dtree_with_defaults(cbl_dnode *, int mode);
+/* the structs and YANG-CBOR */
+int	cbl_dnode_from_struct(cbl_dnode *parent, const struct cbl_ynode *, const void *p,
+	    cbl_dnode **out);
+int	cbl_dnode_to_struct(const cbl_dnode *, void *p, cbl_yarena *);
+int	cbl_dtree_from_module(cbl_dtree *, const struct cbl_ymodule *, const void *p);
+int	cbl_dtree_to_module(const cbl_dtree *, const struct cbl_ymodule *, void *p,
+	    cbl_yarena *);
+int	cbl_dnode_decode(cbl_dnode *parent, const struct cbl_ynode *, const void *, size_t,
+	    int flags, char *why, size_t whylen, cbl_dnode **out);
+int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
+/* the whole tree, its top keyed by SIDs; read into an empty one */
+int	cbl_dtree_decode(cbl_dtree *, const void *, size_t, int flags, char *why,
+	    size_t whylen);
+int	cbl_dtree_encode(const cbl_dtree *, struct cbl_ybuf *);
+/* annotations (RFC 7952), in YANG-CBOR as draft-ietf-core-yang-metadata */
+int	cbl_dnode_meta_set(cbl_dnode *, const struct cbl_yannot *, const void *value);
+const void *cbl_dnode_meta(const cbl_dnode *, const struct cbl_yannot *);
+const struct cbl_yannot *cbl_dnode_meta_next(const cbl_dnode *,
+	    const struct cbl_yannot *prev, const void **value);
+/* edits (RFC 6241 section 7.2): all or nothing */
+#define	CBL_DOP_MERGE	1	/* and REPLACE, CREATE, DELETE, REMOVE; NONE, a default;
+				   INSERT and MOVE, YANG Patch's */
+int	cbl_dnode_set_op(cbl_dnode *, int op);	/* 0: its parent's */
+#define	CBL_DWHERE_FIRST 1	/* and LAST, BEFORE, AFTER */
+int	cbl_dnode_set_where(cbl_dnode *, int where, const void *const *point);
+struct cbl_dederr { const cbl_dnode *node; const char *tag; char msg[160]; };
+int	cbl_dtree_edit(cbl_dtree *target, const cbl_dtree *edit, int dflt,
+	    struct cbl_dederr *);
+/* the edit that makes a b, applied with none: a YANG Patch's changes */
+cbl_dtree *cbl_dtree_diff(const cbl_dtree *a, const cbl_dtree *b);
+/* leafrefs and instance-identifiers that require an instance: there? */
+int	cbl_dtree_check_refs(const cbl_dtree *, struct cbl_dederr *);
+/* every when and must: hold? */
+int	cbl_dtree_check_conds(const cbl_dtree *, struct cbl_dederr *);
+/* filters: what one selects, a tree of its own */
+cbl_dtree *cbl_dtree_select(const cbl_dtree *, const cbl_dnode *const *, size_t);
+cbl_dtree *cbl_dtree_filter_xpath(const cbl_dtree *, const char *expr,
+	    char *why, size_t whylen);
+cbl_dfilter *cbl_dfilter_new(const struct cbl_yschema *);
+int	cbl_dfilter_add(cbl_dfnode *parent, const struct cbl_ynode *,
+	    const void *value, cbl_dfnode **);	/* parent: cbl_dfilter_root() */
+cbl_dtree *cbl_dtree_filter_subtree(const cbl_dtree *, const cbl_dfilter *);
+/* a mount point's parent references, and the mounted tree given them */
+cbl_dtree *cbl_dtree_parent_refs(const cbl_dtree *, const cbl_dnode *mp,
+	    const char *const *exprs, size_t n, char *why, size_t whylen);
+int	cbl_dtree_set_refs(cbl_dtree *mounted, const cbl_dtree *refs);
+/* NACM's data-node rule paths: compiled once, matched against nodes */
+cbl_dnacm_path *cbl_dnacm_path_new(const struct cbl_yschema *, const char *path,
+	    char *why, size_t whylen);
+bool	cbl_dnacm_path_match(const cbl_dnacm_path *, const cbl_dnode *,
+	    const char *user);
+bool	cbl_dnacm_path_match_schema(const cbl_dnacm_path *,
+	    const struct cbl_ynode *);
+/* XPath-lite: an expression as the tables hold one, over a tree */
+struct cbl_xval { enum cbl_xv_kind kind; bool b; double num; char *s;
+    const cbl_dnode **nodes; size_t n; };	/* NODES, BOOL, NUMBER, STRING */
+int	cbl_xp_eval(const cbl_dtree *, const char *expr, const cbl_dnode *ctx,
+	    const cbl_dnode *cur, struct cbl_xval *, char *why, size_t whylen);
+void	cbl_xval_free(struct cbl_xval *);
 ```
 
-## 9. Families (server side, and client side for symmetric use)
+- **A tree's shape** is kept: a node only where its schema node is, one
+  container or leaf of a kind, one entry of a list's keys, a
+  configuration leaf-list's values once, never two cases of a choice. A
+  key is its entry's: neither set nor taken away alone. The rest of what
+  the schema says is the validator's and the evaluator's.
+- **Values** are held as their struct members are, the tree owning a
+  copy of what they point to; `cbl_dnode_to_struct()` points into the
+  tree. Through the structs, the codec reads and writes a tree: a value
+  decoded, made a tree, and encoded again is the same bytes.
+- **Defaults**: `cbl_dnode_leaf()` gives a leaf's default where it is
+  in use and has no node, its case taken into account;
+  `cbl_dtree_defaults()` makes a node of each, and of the non-presence
+  containers that hold them; not of one under a `when` that does not
+  hold, and it removes one made before. `cbl_dtree_with_defaults()`
+  makes a subtree as RFC 6243's retrieval modes report it: report-all
+  makes the defaults; explicit keeps what was set, by a client or the
+  server, whatever its value, and takes the defaults made out; trim
+  takes out too every leaf whose value is its default and a leaf-list
+  whose values are its defaults (never a key). Both take out a
+  non-presence container left empty. report-all-tagged waits for the
+  codec's metadata.
+- **Edits** are another tree of the schema, each node with an
+  operation or its parent's: merge, replace, create (data-exists where
+  the node is), delete (data-missing where it is not), remove; the
+  default none changes nothing not asked for. A node of a choice's case
+  takes the other cases' place; a replaced entry keeps its place. An
+  ordered-by user list's entry, or leaf-list's value, goes where its
+  edit says: first, last, or before or after another, by its keys or
+  value (RFC 7950 section 7.8.6); YANG Patch's insert and move (RFC 8072)
+  must say where, and a move's entry must be there.
+- **References**: `cbl_dtree_check_refs()` finds the first leafref
+  that requires an instance and has none of its value among its target
+  node's (the tables name the target), or instance-identifier naming no
+  node of the tree (read from its YANG-CBOR, found by its lists' keys):
+  data-missing, instance-required. A leafref whose path has predicates
+  is looked for among the nodes the path finds (`cbl_xp_eval()`).
+- **Conditions**: `cbl_dtree_check_conds()` finds the first node whose
+  `when`s do not all hold (its choices' and cases', an augment's or a
+  uses', its own; each from its context node, the tree altered as RFC
+  7950 section 7.21.5 says): unknown-element, but for a default, which
+  is then not in use; or whose `must` does not: operation-failed, the
+  must's error-message and error-app-tag (must-violation by default).
+  The tree's defaults should be made first: the expressions see them.
+- **Filters** select nodes of a tree, and what they select is a tree of
+  its own: each node with all below it, the nodes above it with an
+  entry's keys. An XPath filter selects the node set its expression
+  finds from the root (RFC 6241 section 8.9). A subtree filter (section
+  6) is a tree of the schema's nodes: one with a value is a content
+  match node, one with children a containment node, one with neither a
+  selection node. Its content match nodes all matching, a node is
+  selected whole if it has no other filter nodes under it, else with
+  what they match and select; an empty filter selects nothing.
+- **NACM paths**: a data-node rule's `path` (RFC 8341 section 3.4.5) is
+  an instance-identifier whose key predicates may be left out, any
+  entry then, and whose values may be `$USER`; `/` is every node. It is
+  compiled once against the schema, each step to its node and each
+  value to its key's type, and matches the node it names and all below
+  it. An rpc or a notification with no instance is matched by its
+  schema node, which a path with predicates never matches.
+- **Parent references** (RFC 8528 section 4): a mounted tree's
+  expressions see only it, and what its mount point's parent-reference
+  expressions select of the parent tree, each a node set evaluated from
+  the mount point. `cbl_dtree_parent_refs()` makes that a tree as a
+  filter's is; `cbl_dtree_set_refs()` gives it to the mounted tree, whose
+  `when`s, `must`s and leafrefs then see its nodes beside their own.
+- **A difference** of two trees is the edit that makes the first the
+  second with the default none, what a YANG Patch carries: creates of
+  what only the second has, merges of the leaves that differ, removes
+  of what only the first has (but where another case's create takes its
+  place), and, where an ordered-by user list's order would not be the
+  second's, each of its entries said where. A keyless list's entries
+  cannot be named: the node they are in is replaced. Every
+  change goes in an undo log as it is made, played back on an error:
+  the target is as it was, and the error names the edit's node, its
+  error-tag and why.
+
+- **Decoding** checks what the CBOR is: its shape, its kinds, its tags,
+  UTF-8, and with `CBL_YD_STRICT` a key the node has no child for.
+  What a decode allocates is the arena's, bounded by its limit, since a
+  list entry may be one byte of input and a struct of many.
+- **Validating** is what RFC 7950 says within one tree (YANG.md section
+  4): `cbl_yvalidate()` gives the first violation with its node, error-tag,
+  error-app-tag and message. `cbl_ydefaults()` sets what is unset to the
+  module's defaults.
+- **The YANG family** serves the handlers of the tables given to
+  `cbl_yserver_add()`, in CORECONF's shape (WIRE-FORMAT.md section 7.6):
+  GET reads top-level data nodes through their `get` handlers, a dump a
+  node a frame; EDIT creates, replaces or deletes them through their
+  `edit` handlers, all or nothing, each value validated first; RPC calls
+  an rpc's handler with its input validated; GET-SID
+  sends the `.sid` files the table carries. A handler names the node at
+  fault with `cbl_req_set_yerr()`: the error's `error-path`, read with
+  `cbl_msg_err_sid()`.
+- **What `cblink-gen` writes per struct** (`-m h,schema`): `X_encode()`
+  and `X_decode()` (the value alone), `X_put()` and `X_parse()` (in a
+  message, as `cbl_msg_put_ynode()` and `cbl_msg_ydecode()`); per rpc,
+  `X_call(conn, in, out, a, timeout)`, the rpc called through family 1;
+  per notification, `X_notify(ctx, p)` and, as for every struct,
+  `X_parse()`, which reads it from family 1's envelope and is `ENOENT`
+  for another notification. With `-m server`, the handlers the program
+  defines: `node_get()` and `node_edit()` per top-level data node,
+  `rpc_rpc()`, `action_action()`.
+
+## 8. Families (server side, and client side for symmetric use)
+
+A program's own operations, when the YANG family's do not fit (a stream
+of its own, a command of its own): its handlers receive the request as
+it came, and check what they take themselves, the YANG codec decoding
+strictly.
 
 ```c
 #define	CBL_OPF_DO	0x01
@@ -446,8 +610,7 @@ struct cbl_dump_state { uint64_t pos[4]; void *priv; void (*priv_free)(void *); 
 struct cbl_op {
 	uint16_t			cmd;
 	uint32_t			flags;		/* CBL_OPF_* */
-	const char			*name;		/* for ctrl getfamily */
-	const struct cbl_policy_set	*policy;	/* request policy; NULL = accept all */
+	const char			*name;		/* for ctrl get-family */
 	cbl_doit_f			*doit;
 	cbl_dumpit_f			*dumpit;
 	cbl_stream_open_f		*stream_open;
@@ -513,9 +676,10 @@ cbl_conn *cbl_req_conn(const cbl_req *);
 
 int	cbl_notify(cbl_family *, uint32_t group_idx, cbl_msg *);	/* thread-safe broadcast */
 int	cbl_conn_notify(cbl_conn *, cbl_family *, uint32_t group_idx, cbl_msg *); /* unicast */
+bool	cbl_conn_subscribed(cbl_conn *, cbl_family *, uint32_t group_idx); /* thread-safe */
 ```
 
-## 10. Peer identity (same for every transport)
+## 9. Peer identity (same for every transport)
 
 ```c
 #define	CBL_PEER_AUTHENTICATED	0x01	/* verified client certificate */
@@ -542,7 +706,7 @@ int		 cbl_peer_cred(const cbl_peer *, uid_t *, gid_t *);	/* AF_UNIX via getpeere
   `cbl_peer_cred()`, or pass `CBL_LF_UNIX_TRUSTED`, which marks every
   AF_UNIX peer authenticated so that filesystem permissions alone decide.
 
-## 11. Client API
+## 10. Client API
 
 ```c
 /* synchronous; always sets ACK; *reply is the first reply, or the ERROR msg */
@@ -562,7 +726,7 @@ void	cbl_dump_free(cbl_dump *);
  * slows the server down instead of losing the dump.
  */
 
-/* control family wrappers (built on the generated cbl_ctrl_* code) */
+/* the control family (the module cblink-ctrl): its rpcs as calls */
 struct cbl_family_info;	/* opaque */
 int	cbl_resolve(cbl_conn *, const char *family, struct cbl_family_info **);
 /* the same from a loop callback: cb owns "info" */
@@ -593,7 +757,7 @@ Unsolicited frames arriving at a client are handled as follows:
 - **Notifications** go to the matching subscription callback.
 - Anything else is counted and dropped.
 
-## 12. Streams
+## 11. Streams
 
 ```c
 struct cbl_stream_cbs {
@@ -628,23 +792,25 @@ been consumed. With `CBL_SF_MANUAL_CREDIT`, credit is returned only by
 `cbl_stream_consumed()`. This lets the application apply backpressure all
 the way to the sender.
 
-## 13. Versioning and ABI policy
+## 12. Versioning and ABI policy
 
 - The shared library is `libcblink.so.1` (`SHLIB_MAJOR=1`). Symbols are
   versioned with `Symbol.map` and `Versions.def` (bsd.symver.mk), starting at
   `CBLINK_1.0`.
 - Adding functions is allowed within a major version; new symbols go in a
   new version node (`CBLINK_1.1`, …).
-- Public structs are **tables**: `cbl_policy`, `cbl_attr_parser`, `cbl_op`,
-  `cbl_family_def`, `cbl_stream_cbs`, `cbl_conn_cbs` and so on. They never
-  change layout within a major version. `cbl_family_def.abi` lets the
-  library recognise newer table layouts if the major version is bumped.
-  Every other type is opaque.
+- Public structs are **tables**: `cbl_op`, `cbl_family_def`,
+  `cbl_stream_cbs`, `cbl_conn_cbs`, `cbl_yserver`, `cbl_yhandler` and the
+  schema tables (`cbl_ynode`, `cbl_ytype`, ...). They never change layout
+  within a major version. `cbl_family_def.abi` lets the library recognise
+  newer table layouts if the major version is bumped. Every other type is
+  opaque.
 - Enumerations and flag values are append-only.
 - `cbl_version()` returns the run-time library version string. The header
   defines `CBLINK_VERSION_MAJOR`, `_MINOR` and `_PATCH`. `cbl_features()`
   returns what this build can do: `CBL_FEAT_DTLS_SCTP` when its OpenSSL
   has SCTP.
 - Generated code records the version of `cblink-gen` that produced it.
-  Generated code compiled against a header with a newer **major** version
-  fails to compile (a `_Static_assert` in the generated `.c`).
+  Its tables are written with designated initializers against
+  `<cbl_schema.h>`, so they compile against the header they are built
+  with or not at all.

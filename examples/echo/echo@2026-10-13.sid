@@ -1,0 +1,50 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "echo",
+    "module-revision": "2026-10-13",
+    "description": "cblink example (60 300, 100: RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md)).",
+    "assignment-range": [
+      {
+        "entry-point": "60300",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "echo",
+        "sid": "60300"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo",
+        "sid": "60301"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo/input",
+        "sid": "60302"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo/input/text",
+        "sid": "60303"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo/output",
+        "sid": "60304"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo/output/peer",
+        "sid": "60305"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/echo:echo/output/text",
+        "sid": "60306"
+      }
+    ]
+  }
+}

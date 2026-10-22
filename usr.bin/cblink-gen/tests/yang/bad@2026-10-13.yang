@@ -1,0 +1,25 @@
+module bad {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:bad";
+  prefix b;
+
+  import ietf-yang-types {
+    prefix yang;
+  }
+
+  revision 2026-10-13;
+
+  container things {
+    list thing {
+      key "name";
+      leaf name {
+        type string {
+          length "1..63";
+        }
+      }
+      leaf seen {
+        type uint33;
+      }
+    }
+  }
+}

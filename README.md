@@ -1,17 +1,20 @@
 # cblink
 
-Netlink-style messaging over CBOR between userland programs on FreeBSD.
+Netlink-style messaging between userland programs on FreeBSD, its data
+modelled in YANG.
 
-A cblink message is a fixed 24-byte binary header (family, command, flags,
-sequence number, stream id) followed by a CBOR map of typed attributes.
-Servers register **families** of operations with declarative attribute
-policies. Clients find a family by name at run time and then use:
+A cblink message is a fixed 24-byte binary header (family, command,
+flags, sequence number, stream id) followed by one CBOR map of YANG data:
+its keys are SIDs (RFC 9595), its values YANG-CBOR (RFC 9254). A program
+describes its configuration, state, rpcs and notifications in YANG
+modules; the built-in YANG family serves them by SID, in CORECONF's
+shape, and clients use:
 
-- **request/response**, with extended acks: a failed request says which
-  attribute was wrong and why;
+- **GET, EDIT and RPC**: reads, all-or-nothing edits and calls, with
+  errors that name the node at fault and why;
 - **dumps** that list large tables one item at a time;
 - **streams** in one or both directions, with credit-based flow control;
-- **multicast notifications**.
+- **notifications** to subscribers.
 
 Transports and their security:
 - **TCP:** TLS 1.3.
@@ -23,62 +26,61 @@ Transports and their security:
   passthrough, and can learn the client's address from a PROXY protocol
   header (docs/TRANSPORTS.md).
 
-`cblink-gen` reads a family's YAML spec and generates typed C structures,
-policies, parsers, builders, client wrappers, server glue and
-documentation, as YNL does for Linux netlink.
+`cblink-gen` compiles the modules with libyang and writes their C
+structs, the schema tables the codec works by, helpers for messages,
+rpcs and notifications, a server's handler table, documentation and
+`.sid` files, as YNL does for Linux netlink.
 
-## A family in a few lines
+## A module in a few lines
 
-```yaml
-# kv.yaml (abridged; see examples/kv)
-name: kv
-version: 1
-attribute-sets:
-  - name: kv
-    attributes:
-      - name: key
-        type: text
-        checks:
-          min-len: 1
-          max-len: 255
-      - name: value
-        type: bytes
-operations:
-  - name: get
-    attribute-set: kv
-    do:
-      request:
-        attributes:
-          - key
-        required:
-          - key
-      reply:
-        attributes:
-          - key
-          - value
+```yang
+// kv@2026-10-13.yang (abridged; see examples/kv)
+module kv {
+  yang-version 1.1;
+  namespace "urn:cblink:example:kv";
+  prefix kv;
+
+  container store {
+    list entry {
+      key "key";
+      leaf key { type string { length "1..255"; } }
+      leaf value { type binary; }
+      leaf ttl { type uint32; units "seconds"; }
+    }
+  }
+  rpc clear {
+    input { leaf prefix { type string; } }
+    output { leaf removed { type uint32; } }
+  }
+}
 ```
 
 ```c
-/* Client */
-struct kv_client cl;
-struct kv_get_req req = { .key = "colour" };
-struct kv_get_rsp *rsp;
-
-cbl_ctx_new(&ctx);
-cbl_conn_new(ctx, "unix:/var/run/kv.sock", 0, &conn);
-cbl_conn_connect(conn);
-kv_client_init(&cl, conn);		/* finds the family by name */
-if (kv_get(&cl, &req, &rsp) == 0)
-	printf("%.*s\n", (int)rsp->value.len, (const char *)rsp->value.p);
-
-/* Server: the handler cblink-gen declared */
+/* Server: the handlers kv.h declares, served by SID */
 int
-kv_get_doit(cbl_req *req, const struct kv_get_req *rq, void *arg)
+kv_store_get(cbl_req *req, struct kv *data, cbl_yarena *a)
 {
-	struct kv_get_rsp rsp = { .key = rq->key, .value = lookup(rq->key) };
-
-	return (kv_get_reply(req, &rsp));
+	data->store = current_store(a);
+	return (0);
 }
+
+int
+kv_clear_rpc(cbl_req *req, const struct kv_clear_input *in,
+    struct kv_clear_output *out, cbl_yarena *a)
+{
+	out->has_removed = true;
+	out->removed = remove_prefix(in->prefix);
+	return (0);
+}
+
+cbl_yserver_add(ctx, &kv_server, NULL);
+
+/* Client: the rpc called through the YANG family */
+struct kv_clear_input in = { .prefix = "tmp/" };
+struct kv_clear_output out;
+
+if (kv_clear_call(conn, &in, &out, a, -1) == 0)
+	printf("%u removed\n", out.removed);
 ```
 
 The program's Makefile only needs:
@@ -86,17 +88,18 @@ The program's Makefile only needs:
 ```make
 PROG=		kvd
 SRCS=		kvd.c
-CBLINK_SPECS=	kv.yaml
+CBLINK_YANG=	kv@2026-10-13.yang
+CBLINK_SIDS=	kv@2026-10-13.sid
 .include "${LOCALBASE}/share/cblink/cblink.mk"
 .include <bsd.prog.mk>
 ```
 
-`examples/` has four complete programs, each built from its spec and
+`examples/` has four complete programs, each built from its module and
 tested:
-- `echo`: the smallest family;
-- `kv`: do, dump, auth, notifications and a watch stream;
-- `stream`: flow control and a bidirectional stream;
-- `notify`: multicast notifications.
+- `echo`: one rpc;
+- `kv`: GET, EDIT, RPC, GET-SID and a notification, over a socket;
+- `stream`: a family of its own, flow control and a bidirectional stream;
+- `notify`: notifications to subscribers.
 
 ## Building
 
@@ -120,6 +123,7 @@ directory. The test suite and the example programs are built only with
 Dependencies:
 - libc;
 - libcbor;
+- libyang 3, for cblink-gen (`pkg install libyang3`);
 - OpenSSL (base by default, or the port's `USES=ssl` choice). DTLS over
   SCTP needs an OpenSSL built with SCTP: base has it, the OpenSSL ports
   have it as an option (on by default), LibreSSL has none; a library
@@ -128,8 +132,8 @@ Dependencies:
 - kqueue;
 - SCTP, which is optional at run time.
 
-The public header `<cblink.h>` exposes no libcbor or OpenSSL types. The
-library is `libcblink.so.1`, with symbol versioning.
+The public headers `<cblink.h>` and `<cbl_schema.h>` expose no libcbor or
+OpenSSL types. The library is `libcblink.so.1`, with symbol versioning.
 
 ## Testing
 
@@ -139,16 +143,18 @@ cd /tmp/r/usr/local/tests/cblink
 LD_LIBRARY_PATH=/tmp/r/usr/local/lib kyua test -k Kyuafile
 ```
 
-The suite has about 130 cases, using atf-c, atf-sh and kyua. It covers:
+The suite has about 155 cases, using atf-c, atf-sh and kyua. It covers:
 - the wire format against the documented hex examples;
 - malformed and hostile input;
 - every transport, with mTLS and its failure cases;
-- the generator, through golden files, determinism, error diagnostics and
-  compiled output;
+- the generator: the YANG front end, the structs and tables of every
+  shape and type, the codec's round trips, the YANG family over a
+  connection, `.sid` files, determinism;
 - the examples.
 
 CI also runs the suite under ASan, UBSan and TSan, and runs the libFuzzer
-harnesses in `fuzz/` (frames, PROXY headers, specs) for a minute each.
+harnesses in `fuzz/` (frames, PROXY headers, XPath, patterns) for a
+minute each.
 docs/TESTING.md has the details.
 
 ## Documentation
@@ -157,8 +163,8 @@ docs/TESTING.md has the details.
 |----------|----------|
 | [docs/WIRE-FORMAT.md](docs/WIRE-FORMAT.md) | The protocol, with hex examples |
 | [docs/API.md](docs/API.md) | The C API and threading model |
-| [docs/FAMILIES.md](docs/FAMILIES.md) | Designing families; the control family ([docs/ctrl.md](docs/ctrl.md)) |
-| [docs/SPEC-FORMAT.md](docs/SPEC-FORMAT.md) | The YAML spec format |
+| [docs/YANG.md](docs/YANG.md) | The YANG taken, its encoding, what is left out |
+| [docs/FAMILIES.md](docs/FAMILIES.md) | Families; the control family ([docs/ctrl.md](docs/ctrl.md)) |
 | [docs/GENERATOR.md](docs/GENERATOR.md) | cblink-gen and the generated API |
 | [docs/STREAMS.md](docs/STREAMS.md) | Streams and flow control |
 | [docs/TRANSPORTS.md](docs/TRANSPORTS.md) | TCP, SCTP, AF_UNIX: framing, features, caveats, proxies |
@@ -172,7 +178,8 @@ Man pages: cblink(3), cblink-gen(1).
 ```
 lib/libcblink/        the library, its man page and tests
 usr.bin/cblink-gen/   the generator, its man page and tests
-share/cblink/         control family spec, cblink.mk, cblink.pc
+share/yang/           cblink's own YANG modules and their .sid files
+share/cblink/         cblink.mk, cblink.pc
 examples/             echo, kv, stream, notify, and their tests
 fuzz/                 libFuzzer harnesses and seed corpora
 docs/                 documentation

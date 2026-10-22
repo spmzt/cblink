@@ -1,0 +1,24 @@
+module bibliomod {
+  yang-version 1.1;
+  namespace "urn:example:bibliomod";
+  prefix bib;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of annotations: RFC 7952 section 5.2.4's leaf-list
+     folio, numbered as draft-ietf-core-yang-metadata's examples number
+     it.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  leaf-list folio {
+    type uint32;
+    ordered-by user;
+  }
+}

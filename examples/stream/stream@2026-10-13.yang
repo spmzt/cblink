@@ -1,0 +1,52 @@
+module stream {
+  yang-version 1.1;
+  namespace "urn:cblink:example:stream";
+  prefix str;
+
+  import ietf-yang-structure-ext {
+    prefix sx;
+    reference
+      "RFC 8791: YANG Data Structure Extensions";
+  }
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's example of streams with credit-based flow control.  The
+     program's own family, 'stream', has two commands that open a
+     stream: 'count' (1), server to client, the numbers 1 to count as
+     fast as the client grants credit; and 'upper' (2), both ways,
+     every line answered in upper case.  Every frame's body, the
+     open request and each piece of data, is this structure.";
+
+  revision 2026-10-13 {
+    description
+      "Initial revision.";
+  }
+
+  sx:structure line {
+    description
+      "A request or a piece of a stream.";
+    leaf text {
+      type string {
+        length "0..4096";
+      }
+      description
+        "A line of text.";
+    }
+    leaf number {
+      type uint64;
+      description
+        "A number counted.";
+    }
+    leaf count {
+      type uint32 {
+        range "0..10000000";
+      }
+      description
+        "How far to count: count's request.";
+    }
+  }
+}

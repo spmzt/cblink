@@ -1,0 +1,125 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "kv",
+    "module-revision": "2026-10-13",
+    "description": "The kv example's SIDs (60 100, 100: RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md)), numbered by cblink-gen -a.",
+    "assignment-range": [
+      {
+        "entry-point": "60100",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "kv",
+        "sid": "60100"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:changed",
+        "sid": "60101"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:changed/key",
+        "sid": "60102"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:changed/what",
+        "sid": "60103"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:clear",
+        "sid": "60104"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:clear/input",
+        "sid": "60105"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:clear/input/prefix",
+        "sid": "60106"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:clear/output",
+        "sid": "60107"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:clear/output/removed",
+        "sid": "60108"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store",
+        "sid": "60109"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/count",
+        "sid": "60110"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry",
+        "sid": "60111"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/key",
+        "sid": "60112"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/persistent",
+        "sid": "60113"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/secret",
+        "sid": "60114"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/tag",
+        "sid": "60115"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/touch",
+        "sid": "60116"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/touch/input",
+        "sid": "60117"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/touch/output",
+        "sid": "60118"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/touch/output/ttl",
+        "sid": "60119"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/ttl",
+        "sid": "60120"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/kv:store/entry/value",
+        "sid": "60121"
+      }
+    ]
+  }
+}

@@ -3,7 +3,7 @@
 .\"
 .\" Copyright (c) 2026 Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>
 .\"
-.Dd October 2, 2026
+.Dd October 14, 2026
 .Dt CBLINK 3
 .Os
 .Sh NAME
@@ -14,6 +14,7 @@ cblink Library
 .Pq libcblink , Fl lcblink
 .Sh SYNOPSIS
 .In cblink.h
+.In cbl_schema.h
 .Pp
 Link with
 .Fl lcblink ,
@@ -26,16 +27,17 @@ The
 .Nm
 library carries netlink-style messages between programs: a fixed binary
 header with a family, a command, flags, a sequence number and a stream
-id, followed by a body that is a CBOR map
-.Pq RFC 8949
-of typed attributes.
-Servers register
+id, followed by a body that is one CBOR map
+.Pq RFC 8949 :
+its keys are the SIDs
+.Pq RFC 9595
+of YANG nodes, its values those nodes' data in YANG-CBOR
+.Pq RFC 9254 .
+Servers serve the YANG modules they implement by SID, through the
+built-in YANG family, or register
 .Em families
-of operations with declarative attribute
-.Em policies ;
-clients resolve a family by name at run time, send requests, iterate
-dumps, open flow-controlled streams and subscribe to multicast
-notifications.
+of operations of their own; clients send requests, iterate dumps, open
+flow-controlled streams and subscribe to notifications.
 The same library serves both sides.
 .Pp
 Messages travel over TCP, SCTP and
@@ -58,21 +60,22 @@ contains no HTTP implementation; behind a load balancer it runs under a
 TCP proxy with TLS passthrough,
 optionally with the PROXY protocol.
 .Pp
-The wire format, the full API, the spec format of
+The wire format, the full API, the YANG that
 .Xr cblink-gen 1
-and the transports are described in
+takes and the transports are described in
 .Pa docs/WIRE-FORMAT.md ,
 .Pa docs/API.md ,
-.Pa docs/SPEC-FORMAT.md
+.Pa docs/YANG.md
 and
 .Pa docs/TRANSPORTS.md ,
 installed under
 .Pa ${PREFIX}/share/doc/cblink
 by the port.
-Most programs do not use the attribute API directly: they describe their
-family in a spec and let
+Programs describe their data, rpcs and notifications in YANG modules and
+let
 .Xr cblink-gen 1
-generate typed structures, client wrappers and server glue.
+generate the structs, the schema tables, the helpers that put them in
+messages and read them back, and the server's handler table.
 .Ss Conventions
 All types are opaque.
 Functions that can fail return 0 or an
@@ -110,72 +113,85 @@ while a loop, listener or connection made from the context exists.
 .Fn cbl_tls_reload
 rereads certificates, keys, CAs and CRLs for the connections made from
 then on.
-.Ss Messages and attributes
+.Ss Messages and bodies
 .Fn cbl_msg_new
 starts a message for a family and command.
-Attributes are added with
-.Fn cbl_put_uint ,
-.Fn cbl_put_int ,
-.Fn cbl_put_bool ,
-.Fn cbl_put_str ,
-.Fn cbl_put_bytes ,
-.Fn cbl_put_double
-and friends; nested maps and arrays are opened and closed with
-.Fn cbl_nest_start ,
-.Fn cbl_nest_end ,
-.Fn cbl_array_start
-and
-.Fn cbl_array_end .
+A body's top-level items are added by SID:
+.Fn cbl_msg_put_ynode
+puts a node's struct as YANG-CBOR,
+.Fn cbl_msg_put_ymember
+a module's top-level node from the module's struct,
+.Fn cbl_msg_put_ynull
+a null, and
+.Fn cbl_msg_put_sid_raw
+a value already encoded.
+An rpc's or an action's input and output go under the rpc's or the
+action's SID.
+.Xr cblink-gen 1
+writes typed helpers for each struct over these.
 .Pp
 On a received message,
-.Fn cbl_msg_attr
-looks up a top-level attribute and
-.Fn cbl_attr_get ,
-.Fn cbl_attr_first
+.Fn cbl_msg_sid_raw
+finds an item's bytes by its SID,
+.Fn cbl_msg_ydecode
 and
-.Fn cbl_attr_next
-walk nested ones;
-.Fn cbl_attr_uint ,
-.Fn cbl_attr_str ,
-.Fn cbl_attr_bytes
-and the other accessors check the type and return
-.Er EINVAL
-on a mismatch.
-Error replies carry an
-.Em extended ack :
-a code, a message, the path of the offending attribute and the expected
-type, read with
-.Fn cbl_msg_err_code ,
+.Fn cbl_msg_ydecode_member
+decode it into its struct.
+The decoder has checked the whole body first: definite lengths, integer
+keys, no key twice, YANG-CBOR's tags only where they may be, and the
+limits.
+.Pp
+An ERROR frame, or an ack with a warning or a cookie, carries the
+cblink module's
+.Em error
+structure, built with
+.Fn cbl_msg_put_error
+and
+.Fn cbl_msg_put_cookie
+and read with
+.Fn cbl_msg_err_code
+.Pq its errno ,
 .Fn cbl_msg_err_str ,
-.Fn cbl_msg_err_path
+.Fn cbl_msg_err_path ,
+.Fn cbl_msg_err_miss_type ,
+.Fn cbl_msg_err_sid
+.Pq the node at fault
 and
-.Fn cbl_msg_err_miss_type .
+.Fn cbl_msg_err_cookie .
 .Pp
 .Fn cbl_msg_encode
 and
 .Fn cbl_frame_decode
 convert between messages and raw frames for programs that carry frames
 themselves.
-.Ss Policies and parsers
-A
-.Vt struct cbl_policy_set
-describes the attributes an operation accepts: their types, ranges,
-lengths, nesting and which are required.
-.Fn cbl_validate
-checks a message against it and reports the first problem as an extended
-ack; registered operations are validated before their handler runs.
-Declarative parsers
-.Pq Fn CBL_DECLARE_PARSER , Fn cbl_parse
-fill C structures from validated messages.
 .Ss Families and servers
-A server describes a family with a
+A server with operations of its own describes a family with a
 .Vt struct cbl_family_def :
 its name, version, operations and multicast groups, and registers it with
 .Fn cbl_family_register .
 The family id is assigned at registration; clients learn it by name with
 .Fn cbl_resolve .
-Family 0 is the built-in control family, which answers name lookups,
-subscriptions, pings and hellos.
+Family 0 is the built-in control family, the YANG module
+.Ql cblink-ctrl ,
+which answers name lookups, subscriptions, pings and hellos.
+.Pp
+Family 1, the YANG family, serves the modules of the server tables
+.Xr cblink-gen 1
+writes
+.Pq Fl m Cm server
+once
+.Fn cbl_yserver_add
+is given one: GET reads top-level data nodes, a dump a node a frame;
+EDIT creates, replaces and deletes them, all or nothing; RPC calls an
+rpc; GET-SID sends the modules'
+.Pa .sid
+files.
+The handlers the server defines get the argument given with
+.Fn cbl_req_yarg ,
+and name the node at fault with
+.Fn cbl_req_set_yerr .
+.Fn cbl_msg_put_yget
+puts a GET's targets.
 .Pp
 An operation's handler receives a
 .Vt cbl_req
@@ -267,7 +283,17 @@ and
 iterate the items of a dump.
 .Fn cbl_subscribe
 joins a multicast group of a family; the server sends to it with
-.Fn cbl_notify .
+.Fn cbl_notify ,
+or to one peer with
+.Fn cbl_conn_notify ;
+.Fn cbl_conn_subscribed
+says whether a peer joined, for what is told only to those that asked.
+A YANG notification goes to the YANG family's group
+.Ql notify
+with
+.Fn cbl_ynotify ;
+.Fn cbl_msg_ynotif
+tells a receiver which it is, when it happened and its content.
 .Pp
 Streams carry a sequence of messages in one or both directions with
 credit-based flow control:
@@ -313,6 +339,50 @@ which makes simple blocking clients short.
 .Fn cbl_conn_stats
 reports what a connection is doing: queued output, requests in flight,
 dropped notifications.
+.Ss YANG schema tables
+.In cbl_schema.h
+describes the schema tables
+.Xr cblink-gen 1
+writes of YANG modules
+.Pq Fl m Cm schema :
+every node with its SID
+.Pq RFC 9595 ,
+its type, its children by SID, its constraints and expressions; the
+identities a value may name, each with those derived from it; each
+module's features.
+.Fn cbl_ynode_child
+finds the child a map key's delta names
+.Pq RFC 9254 ,
+.Fn cbl_yschema_node
+and
+.Fn cbl_yschema_ident
+a node and an identity by SID, and
+.Fn cbl_yderived_from
+answers XPath's
+.Fn derived-from
+and, with
+.Fa self ,
+.Fn derived-from-or-self .
+.Fn cbl_yencode
+writes a node's value from the struct
+.Xr cblink-gen 1
+made for it as YANG-CBOR
+.Pq RFC 9254 ,
+its children keyed by their SID deltas, into a
+.Vt struct cbl_ybuf ;
+.Fn cbl_ydecode
+reads it back into such a struct, what it points to allocated from a
+.Vt cbl_yarena
+.Pq Fn cbl_yarena_new , Fn cbl_yarena_free ,
+and with
+.Dv CBL_YD_STRICT
+refuses a key the node has no child for.
+A list entry may be one byte of input and a struct of many: what an
+arena holds is bounded,
+.Fn cbl_yarena_set_limit ,
+64 MiB unless set, and a decode past it fails with
+.Er ENOMEM .
+It checks what the CBOR is, not what the schema further says.
 .Sh LIMITS
 Every limit has a default, a minimum and a maximum, and applies per
 context, listener or connection
@@ -320,7 +390,7 @@ context, listener or connection
 Limits on input are checked before memory is allocated for it.
 They include the largest frame
 .Pq Dv CBL_LIM_MAX_FRAME ,
-nesting depth, attribute count, open streams per connection, the initial
+nesting depth, values per body, open streams per connection, the initial
 stream window, outstanding requests, connections, and handshake and
 idle timeouts.
 A server stops reading a peer whose replies pile up in its send queue,
@@ -342,7 +412,7 @@ The operation needs an authenticated peer.
 .It Bq Er EMSGSIZE
 A message is larger than the peer or the transport accepts.
 .It Bq Er ENOENT
-No such family, group or attribute.
+No such family, group or node.
 .It Bq Er EOPNOTSUPP
 The family has no such operation, or the operation does not support
 dumps.
@@ -354,29 +424,41 @@ No reply in time.
 .Pp
 When a request fails at the server, the reply's extended ack says why.
 .Sh EXAMPLES
-A client of a family generated from a spec named
-.Pa kv.yaml :
+A client of the module
+.Pa kv@2026-10-13.yang ,
+its store read and an rpc called through the YANG family, with what
+.Xr cblink-gen 1
+writes into
+.Pa kv.h
+and
+.Pa kv_schema.c :
 .Bd -literal -offset indent
 #include <cblink.h>
+#include <cbl_schema.h>
 #include "kv.h"
 
+struct kv_clear_input in = { .prefix = "tmp/" };
+struct kv_clear_output out;
 cbl_ctx *ctx;
 cbl_conn *conn;
-struct kv_client cl;
-struct kv_get_req req = { .key = "colour" };
-struct kv_get_rsp *rsp;
+cbl_msg *m, *r;
+cbl_yarena *a;
+struct kv_store st;
 int error;
 
 if ((error = cbl_ctx_new(&ctx)) != 0 ||
     (error = cbl_conn_new(ctx, "unix:/var/run/kv.sock", 0, &conn)) != 0 ||
-    (error = cbl_conn_connect(conn)) != 0 ||
-    (error = kv_client_init(&cl, conn)) != 0)
+    (error = cbl_conn_connect(conn)) != 0)
 	errc(1, error, "kv");
-if ((error = kv_get(&cl, &req, &rsp)) != 0)
-	errx(1, "get: %s", cl.err != NULL ?
-	    cbl_msg_err_str(cl.err) : strerror(error));
-printf("%.*s\en", (int)rsp->value.len, (const char *)rsp->value.p);
-kv_get_rsp_free(rsp);
+a = cbl_yarena_new();
+/* A GET without targets: the whole datastore. */
+cbl_msg_new(ctx, CBL_YANG_FAMILY, CBL_YCMD_GET, 0, &m);
+if ((error = cbl_request(conn, m, &r, -1)) != 0 ||
+    (error = kv_store_parse(r, &st, a, CBL_YD_STRICT, NULL, 0)) != 0)
+	errc(1, error, "get");
+printf("%zu entries\en", st.entry.n);
+if ((error = kv_clear_call(conn, &in, &out, a, -1)) != 0)
+	errc(1, error, "clear");
 .Ed
 .Pp
 Complete servers and clients are installed by the port under
@@ -396,6 +478,26 @@ Complete servers and clients are installed by the port under
 .%D December 2020
 .Re
 .Rs
+.%A M. Veillette
+.%A I. Petrov
+.%A A. Pelov
+.%A C. Bormann
+.%A M. Richardson
+.%T Encoding of Data Modeled with YANG in the Concise Binary Object Representation (CBOR)
+.%R RFC 9254
+.%D July 2022
+.Re
+.Rs
+.%A M. Veillette
+.%A A. Pelov
+.%A I. Petrov
+.%A C. Bormann
+.%A M. Richardson
+.%T YANG Schema Item iDentifier (YANG SID)
+.%R RFC 9595
+.%D July 2024
+.Re
+.Rs
 .%A M. Tuexen
 .%A R. Seggelmann
 .%A E. Rescorla
@@ -408,8 +510,14 @@ Complete servers and clients are installed by the port under
 .Sh SECURITY CONSIDERATIONS
 Every frame is untrusted input: headers are checked before any
 allocation, CBOR bodies are decoded with fixed limits on size, depth and
-item count, and only definite-length, tag-free CBOR with integer keys is
-accepted.
+item count, and only definite-length CBOR with integer keys is accepted,
+its only tags YANG-CBOR's (4, and 43 to 47, each on the kind of value it
+belongs to).
+The YANG codec checks UTF-8, bounds what a decode may allocate
+.Pq Fn cbl_yarena_set_limit
+and, with
+.Dv CBL_YD_STRICT ,
+refuses a key the node has no child for.
 .Pp
 Plaintext must be requested explicitly.
 A

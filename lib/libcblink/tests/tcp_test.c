@@ -93,7 +93,7 @@ ATF_TC_BODY(unknown_family, tc)
 	c = client_connect(ctx, ts.uri);
 	for (int i = 0; i < 100; i++) {
 		ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 999, 1, 0, &req));
-		cbl_put_str(req, 1, "hello");
+		t_put_str(req, 1, "hello");
 		ATF_REQUIRE_EQ(ENOENT, cbl_request(c, req, &rsp, 2000));
 		ATF_REQUIRE(rsp != NULL);
 		ATF_REQUIRE_STREQ("unknown family 999", cbl_msg_err_str(rsp));
@@ -125,7 +125,7 @@ async_cb(cbl_conn *conn, cbl_msg *rsp, bool final, int error,
 		r->finals++;
 		r->error = error;
 	} else if (rsp != NULL)
-		(void)cbl_attr_uint(cbl_msg_attr(rsp, 1), &r->val);
+		(void)t_get_uint(rsp, 1, &r->val);
 }
 
 /* Replies arriving in reverse order are matched by sequence number. */
@@ -149,7 +149,7 @@ ATF_TC_BODY(out_of_order, tc)
 
 	for (int i = 0; i < 5; i++) {
 		ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 7, 1, 0, &req));
-		cbl_put_uint(req, 1, (uint64_t)i);
+		t_put_uint(req, 1, (uint64_t)i);
 		ATF_REQUIRE_EQ(0, cbl_request_async(c, req, async_cb, &rec[i]));
 	}
 	for (int i = 0; i < 5; i++) {
@@ -171,7 +171,7 @@ ATF_TC_BODY(out_of_order, tc)
 		}
 		ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 7, 1, 0, &m));
 		cbl_msg_set_seq(m, seqs[i]);
-		cbl_put_uint(m, 1, 100 + (uint64_t)i);
+		t_put_uint(m, 1, 100 + (uint64_t)i);
 		raw_send_msg(fd, m);
 		ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, 7, 1, CBL_F_ACK, &m));
 		cbl_msg_set_seq(m, seqs[i]);
@@ -239,10 +239,10 @@ peer_thread(void *arg)
 	if (p->mode == PEER_BIG) {
 		blob = malloc(p->big);
 		memset(blob, 0xa5, p->big);
-		cbl_put_bytes(m, 1, blob, p->big);
+		t_put_bytes(m, 1, blob, p->big);
 		free(blob);
 	} else
-		cbl_put_str(m, 1, "trickled");
+		t_put_str(m, 1, "trickled");
 	cbl_msg_encode(m, &f, &len);
 	if (p->mode == PEER_TRICKLE) {
 		/* One byte at a time. */
@@ -270,7 +270,7 @@ run_peer(int mode, size_t big, int timeout, int want_error)
 	pthread_t thr;
 	cbl_msg *req, *rsp;
 	const void *data;
-	const char *s;
+	char s[64];
 	char uri[64];
 	uint16_t port;
 	size_t len;
@@ -287,13 +287,11 @@ run_peer(int mode, size_t big, int timeout, int want_error)
 	if (want_error == 0) {
 		ATF_REQUIRE(rsp != NULL);
 		if (mode == PEER_BIG) {
-			ATF_REQUIRE_EQ(0, cbl_attr_bytes(cbl_msg_attr(rsp, 1),
-			    &data, &len));
+			ATF_REQUIRE(t_get_bytes(rsp, 1, &data, &len));
 			ATF_REQUIRE_EQ(big, len);
 			ATF_REQUIRE_EQ(0xa5, ((const uint8_t *)data)[len - 1]);
 		} else {
-			ATF_REQUIRE_EQ(0,
-			    cbl_attr_str(rsp, cbl_msg_attr(rsp, 1), &s));
+			ATF_REQUIRE(t_get_str(rsp, 1, s, sizeof(s)));
 			ATF_REQUIRE_STREQ("trickled", s);
 		}
 		cbl_msg_free(rsp);
@@ -544,7 +542,7 @@ ATF_TC_BODY(hello_limits, tc)
 	c = client_connect(ctx, ts.uri);
 	ATF_REQUIRE_EQ(0, cbl_hello(c));
 	ATF_REQUIRE_EQ(0, cbl_msg_new(ctx, CBL_CTRL_FAMILY, 4, 0, &req));
-	ATF_REQUIRE_EQ(0, cbl_put_bytes(req, 9, big, sizeof(big)));
+	ATF_REQUIRE_EQ(0, t_put_bytes(req, 9, big, sizeof(big)));
 	ATF_REQUIRE_EQ(EMSGSIZE, cbl_request(c, req, &rsp, 2000));
 	ATF_REQUIRE(rsp == NULL);
 	/* Nothing was sent: the connection is fine. */

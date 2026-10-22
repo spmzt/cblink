@@ -1,0 +1,1 @@
+/if:interfaces/if:interface[if:name = current()/../name]/if:enabled

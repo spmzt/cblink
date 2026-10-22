@@ -1,0 +1,15 @@
+module good-dev {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:good-dev";
+  prefix gd;
+
+  import good {
+    prefix g;
+  }
+
+  revision 2026-10-13;
+
+  deviation "/g:things/g:thing/g:seen" {
+    deviate not-supported;
+  }
+}

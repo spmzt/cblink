@@ -37,8 +37,9 @@ op_stream_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s, void *arg)
 }
 ```
 
-- **Opening.** The open request is validated against the operation's
-  policy like any request. The handler accepts by calling
+- **Opening.** The open request goes to the operation's `stream_open`
+  handler, which checks it (its body is YANG data, read with the codec
+  strictly, as `examples/stream` does). The handler accepts by calling
   `cbl_stream_accept()`, optionally with an accept message of its own.
   It may already send data inside the handler.
   - If `cbl_stream_accept()` fails (an accept message that cannot be
@@ -105,8 +106,7 @@ frame costs its full length, header included.
   - An opener announces its window in the open, and an acceptor in its
     accept.
   - `cbl_msg_set_window(msg, bytes)` on the open or accept message changes
-    it for one stream. Generated code does this for a spec's
-    `initial-credit`.
+    it for one stream.
   - A peer that sends beyond the window has the stream reset with
     `ENOBUFS`.
 
@@ -122,13 +122,11 @@ Streams also share their connection's limits:
 | TCP, TLS, AF_UNIX | all kinds |
 | SCTP, DTLS over SCTP | all kinds; each stream travels on its own SCTP stream, so streams do not block each other (TRANSPORTS.md) |
 
-## 5. Generated streams
+## 5. YANG on a stream
 
-For a `streams:` entry in a spec, cblink-gen generates typed wrappers
-(GENERATOR.md section 3):
-- `P_<stream>_open()` with typed callbacks, and `P_<stream>_send()` for
-  the opener;
-- the `P_<stream>_stream_open()` handler prototype, `P_<stream>_accept()`
-  and `P_<stream>_server_send()` for the acceptor.
-
-The data structures are those of the stream's payload attribute set.
+A stream's frames carry YANG data like any body: a program models what
+it sends in a module (an `sx:structure`, say) and puts and reads it with
+the helpers cblink-gen writes for it, `X_put()` on a message from
+`cbl_stream_msg_new()` and `X_parse()` in `on_data` (GENERATOR.md section
+3.3). `examples/stream` counts and echoes lines that way, its family its
+own.

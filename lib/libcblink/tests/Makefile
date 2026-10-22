@@ -8,20 +8,35 @@ beforeinstall: .PHONY
 	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 0755 ${DESTDIR}${TESTSDIR}
 .endif
 
-ATF_TESTS_C=	attr_test \
-		family_test \
+ATF_TESTS_C=	family_test \
 		frame_test \
 		malformed_test \
 		notify_test \
-		policy_test \
 		proxy_test \
 		sctp_raw_test \
+		sid_test \
+		ybody_test \
 		stream_test \
-		tcp_test
+		tcp_test \
+		pattern_test \
+		xpath_test
 
 CFLAGS+=	-I${.CURDIR}/..
 LDADD+=		-L${.OBJDIR:H} -lcblink -lpthread
 DPADD+=		${.OBJDIR:H}/libcblink.so
+
+# The XPath parser is internal to the library: compiled in.
+.PATH:		${.CURDIR:H}
+SRCS.xpath_test=	xpath_test.c cbl_xpath.c
+SRCS.pattern_test=	pattern_test.c cbl_pattern.c
+
+# YANG-CBOR written and read with libcbor itself.
+CFLAGS.sid_test+=	${CBOR_CFLAGS}
+.if defined(CBLINK_INTREE)
+LIBADD.sid_test+=	cbor
+.else
+LDADD.sid_test+=	${CBOR_LDADD}
+.endif
 
 ATF_TESTS_SH=	sctp_test \
 		tls_test \

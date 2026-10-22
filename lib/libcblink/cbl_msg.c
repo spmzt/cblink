@@ -21,6 +21,7 @@
 #include <cbor.h>
 
 #include "cbl_impl.h"
+#include "cbl_schema.h"
 
 #define	CBL_HEAD_MAX	9	/* largest CBOR item head */
 
@@ -35,6 +36,7 @@ cbl_msg_alloc_empty(const struct cbl_limits *lim, cbl_msg **msgp)
 	atomic_init(&msg->refs, 1);
 	msg->lim = *lim;
 	msg->err_miss = -1;
+	msg->fwout.miss = -1;
 	msg->empty.kind = CBL_K_NEST;
 	msg->empty.inmap = 1;
 	cbl_arena_init(&msg->arena);
@@ -75,6 +77,7 @@ cbl_msg_free(cbl_msg *msg)
 	if (atomic_fetch_sub(&msg->refs, 1) != 1)
 		return;
 	free(msg->buf);
+	cbl_yarena_free(msg->ya);
 	cbl_arena_free(&msg->arena);
 	free(msg);
 }
@@ -87,29 +90,6 @@ cbl_msg_ref(cbl_msg *msg)
 		return (EINVAL);
 	atomic_fetch_add(&msg->refs, 1);
 	return (0);
-}
-
-void *
-cbl_msg_alloc(cbl_msg *msg, size_t len)
-{
-
-	if (msg == NULL)
-		return (NULL);
-	return (cbl_arena_alloc(&msg->arena, len));
-}
-
-char *
-cbl_msg_strdup(cbl_msg *msg, const char *s)
-{
-	size_t len;
-	char *p;
-
-	if (msg == NULL || s == NULL)
-		return (NULL);
-	len = strlen(s);
-	if ((p = cbl_arena_alloc(&msg->arena, len + 1)) != NULL)
-		memcpy(p, s, len);
-	return (p);
 }
 
 const char *
@@ -272,7 +252,7 @@ msg_note_key(cbl_msg *msg, struct cbl_bframe *f, int64_t key)
 		for (uint32_t i = 0; i < f->nkeys; i++)
 			if (f->keys[i] == key)
 				return (cbl_msg_fail(msg, EEXIST,
-				    "duplicate attribute in map"));
+				    "an item twice in the body"));
 	} else
 		f->lastkey = key;
 	if (f->nkeys == f->capkeys) {
@@ -290,12 +270,11 @@ msg_note_key(cbl_msg *msg, struct cbl_bframe *f, int64_t key)
 }
 
 /*
- * Start a value: open the root map if needed, emit the key when the
- * current container is a map, and account for limits.  "fw" allows the
- * negative framework keys.
+ * Start a top-level item: open the body's map if needed, emit its SID,
+ * and account for limits.
  */
 static int
-msg_begin_value(cbl_msg *msg, int64_t key, bool fw)
+msg_begin_item(cbl_msg *msg, int64_t key)
 {
 	struct cbl_bframe *f;
 	int error;
@@ -309,27 +288,9 @@ msg_begin_value(cbl_msg *msg, int64_t key, bool fw)
 	if (msg->depth == 0 && (error = msg_open_root(msg)) != 0)
 		return (error);
 	f = &msg->stack[msg->depth - 1];
-	if (f->is_map) {
-		if (fw) {
-			if (key >= 0 || key < CBL_FW_MIN)
-				return (cbl_msg_fail(msg, EINVAL,
-				    "invalid framework key"));
-		} else if (key < CBL_ATTR_MIN || key > CBL_ATTR_MAX)
-			return (cbl_msg_fail(msg, EINVAL,
-			    "attribute type must be 1..65535 inside a map"));
-		if ((error = msg_note_key(msg, f, key)) != 0)
-			return (error);
-		if (key >= 0)
-			error = msg_emit_head(msg, cbor_encode_uint,
-			    (uint64_t)key);
-		else
-			error = msg_emit_head(msg, cbor_encode_negint,
-			    (uint64_t)(-1 - key));
-		if (error != 0)
-			return (error);
-	} else if (key != CBL_ELEM)
-		return (cbl_msg_fail(msg, EINVAL,
-		    "array elements must use CBL_ELEM"));
+	if ((error = msg_note_key(msg, f, key)) != 0 ||
+	    (error = msg_emit_head(msg, cbor_encode_uint, (uint64_t)key)) != 0)
+		return (error);
 	if (++msg->nvalues > msg->lim.v[CBL_LIM_MAX_ATTRS])
 		return (cbl_msg_fail(msg, E2BIG, "too many attributes"));
 	if (f->count == UINT32_MAX)
@@ -339,191 +300,6 @@ msg_begin_value(cbl_msg *msg, int64_t key, bool fw)
 }
 
 
-
-static size_t
-enc_text(uint64_t v, unsigned char *p, size_t len)
-{
-
-	return (cbor_encode_string_start((size_t)v, p, len));
-}
-
-static size_t
-enc_bytes(uint64_t v, unsigned char *p, size_t len)
-{
-
-	return (cbor_encode_bytestring_start((size_t)v, p, len));
-}
-
-static size_t
-enc_bool(uint64_t v, unsigned char *p, size_t len)
-{
-
-	return (cbor_encode_bool(v != 0, p, len));
-}
-
-static size_t
-enc_null(uint64_t v __unused, unsigned char *p, size_t len)
-{
-
-	return (cbor_encode_null(p, len));
-}
-
-static int
-put_uint_k(cbl_msg *msg, int64_t key, bool fw, uint64_t v)
-{
-	int error;
-
-	if ((error = msg_begin_value(msg, key, fw)) != 0)
-		return (error);
-	return (msg_emit_head(msg, cbor_encode_uint, v));
-}
-
-static int
-put_text_k(cbl_msg *msg, int64_t key, bool fw, const char *s, size_t len)
-{
-	int error;
-
-	if ((error = msg_begin_value(msg, key, fw)) != 0)
-		return (error);
-	if (memchr(s, '\0', len) != NULL ||
-	    !cbl_utf8_valid((const unsigned char *)s, len))
-		return (cbl_msg_fail(msg, EINVAL,
-		    "text must be UTF-8 without NUL"));
-	if ((error = msg_emit_head(msg, enc_text, len)) != 0)
-		return (error);
-	return (msg_emit_raw(msg, s, len));
-}
-
-static int
-put_bytes_k(cbl_msg *msg, int64_t key, bool fw, const void *p, size_t len)
-{
-	int error;
-
-	if ((error = msg_begin_value(msg, key, fw)) != 0)
-		return (error);
-	if ((error = msg_emit_head(msg, enc_bytes, len)) != 0)
-		return (error);
-	return (msg_emit_raw(msg, p, len));
-}
-
-int
-cbl_put_uint(cbl_msg *msg, uint16_t type, uint64_t v)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	return (put_uint_k(msg, type, false, v));
-}
-
-int
-cbl_put_int(cbl_msg *msg, uint16_t type, int64_t v)
-{
-	int error;
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (v >= 0)
-		return (put_uint_k(msg, type, false, (uint64_t)v));
-	if ((error = msg_begin_value(msg, type, false)) != 0)
-		return (error);
-	return (msg_emit_head(msg, cbor_encode_negint, (uint64_t)(-1 - v)));
-}
-
-int
-cbl_put_bool(cbl_msg *msg, uint16_t type, bool v)
-{
-	int error;
-
-	if (msg == NULL)
-		return (EINVAL);
-	if ((error = msg_begin_value(msg, type, false)) != 0)
-		return (error);
-	return (msg_emit_head(msg, enc_bool, v));
-}
-
-int
-cbl_put_flag(cbl_msg *msg, uint16_t type)
-{
-
-	return (cbl_put_bool(msg, type, true));
-}
-
-int
-cbl_put_null(cbl_msg *msg, uint16_t type)
-{
-	int error;
-
-	if (msg == NULL)
-		return (EINVAL);
-	if ((error = msg_begin_value(msg, type, false)) != 0)
-		return (error);
-	return (msg_emit_head(msg, enc_null, 0));
-}
-
-int
-cbl_put_double(cbl_msg *msg, uint16_t type, double v)
-{
-	unsigned char tmp[CBL_HEAD_MAX];
-	size_t n;
-	int error;
-
-	if (msg == NULL)
-		return (EINVAL);
-	if ((error = msg_begin_value(msg, type, false)) != 0)
-		return (error);
-	/*
-	 * Shortest exact float width; NaN, infinities and anything a float
-	 * cannot hold (converting it would be undefined) stay double.
-	 */
-	if (v >= -FLT_MAX && v <= FLT_MAX && (double)(float)v == v)
-		n = cbor_encode_single((float)v, tmp, sizeof(tmp));
-	else
-		n = cbor_encode_double(v, tmp, sizeof(tmp));
-	return (msg_emit_raw(msg, tmp, n));
-}
-
-int
-cbl_put_str(cbl_msg *msg, uint16_t type, const char *s)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (s == NULL)
-		return (cbl_msg_fail(msg, EINVAL, "NULL string"));
-	return (put_text_k(msg, type, false, s, strlen(s)));
-}
-
-int
-cbl_put_strn(cbl_msg *msg, uint16_t type, const char *s, size_t len)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (s == NULL && len != 0)
-		return (cbl_msg_fail(msg, EINVAL, "NULL string"));
-	return (put_text_k(msg, type, false, s != NULL ? s : "", len));
-}
-
-int
-cbl_put_bytes(cbl_msg *msg, uint16_t type, const void *p, size_t len)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (p == NULL && len != 0)
-		return (cbl_msg_fail(msg, EINVAL, "NULL buffer"));
-	return (put_bytes_k(msg, type, false, p, len));
-}
-
-static int
-start_k(cbl_msg *msg, int64_t key, bool fw, bool is_map)
-{
-	int error;
-
-	if ((error = msg_begin_value(msg, key, fw)) != 0)
-		return (error);
-	return (msg_push(msg, is_map));
-}
 
 /* Close the innermost container, widening its head if needed. */
 static int
@@ -552,141 +328,6 @@ msg_pop(cbl_msg *msg)
 	return (0);
 }
 
-static int
-end_k(cbl_msg *msg, bool is_map)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (msg->error != 0)
-		return (msg->error);
-	if (msg->decoded || msg->finalized)
-		return (cbl_msg_fail(msg, EBUSY, "message is not being built"));
-	if (msg->depth <= 1 || msg->stack[msg->depth - 1].is_map != is_map)
-		return (cbl_msg_fail(msg, EINVAL, is_map ?
-		    "cbl_nest_end() without matching cbl_nest_start()" :
-		    "cbl_array_end() without matching cbl_array_start()"));
-	return (msg_pop(msg));
-}
-
-int
-cbl_nest_start(cbl_msg *msg, uint16_t type)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	return (start_k(msg, type, false, true));
-}
-
-int
-cbl_nest_end(cbl_msg *msg)
-{
-
-	return (end_k(msg, true));
-}
-
-int
-cbl_array_start(cbl_msg *msg, uint16_t type)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	return (start_k(msg, type, false, false));
-}
-
-int
-cbl_array_end(cbl_msg *msg)
-{
-
-	return (end_k(msg, false));
-}
-
-/* Re-encode a decoded subtree; framework and invalid keys are dropped. */
-static int
-put_attr_k(cbl_msg *msg, int64_t key, bool fw, const cbl_attr *a)
-{
-	const cbl_attr *c;
-	int error;
-
-	switch (a->kind) {
-	case CBL_K_UINT:
-		return (put_uint_k(msg, key, fw, a->v.u));
-	case CBL_K_INT:
-		if ((error = msg_begin_value(msg, key, fw)) != 0)
-			return (error);
-		return (msg_emit_head(msg, cbor_encode_negint,
-		    (a->nflags & CBL_NF_NEGBIG) != 0 ? a->v.u :
-		    (uint64_t)(-1 - a->v.i)));
-	case CBL_K_BOOL:
-		if ((error = msg_begin_value(msg, key, fw)) != 0)
-			return (error);
-		return (msg_emit_head(msg, enc_bool, a->v.b));
-	case CBL_K_NULL:
-		if ((error = msg_begin_value(msg, key, fw)) != 0)
-			return (error);
-		return (msg_emit_head(msg, enc_null, 0));
-	case CBL_K_FLOAT:
-		if (fw)
-			return (cbl_msg_fail(msg, EINVAL,
-			    "bad framework value"));
-		return (cbl_put_double(msg, (uint16_t)key, a->v.d));
-	case CBL_K_TEXT:
-		return (put_text_k(msg, key, fw, (const char *)a->v.s.p,
-		    a->v.s.len));
-	case CBL_K_BYTES:
-		return (put_bytes_k(msg, key, fw, a->v.s.p, a->v.s.len));
-	case CBL_K_NEST:
-	case CBL_K_ARRAY:
-		if ((error = start_k(msg, key, fw, a->kind == CBL_K_NEST)) != 0)
-			return (error);
-		for (uint32_t i = 0; i < a->count; i++) {
-			c = &a->child[i];
-			if (c->inmap &&
-			    (c->key < CBL_ATTR_MIN || c->key > CBL_ATTR_MAX))
-				continue;
-			if ((error = put_attr_k(msg, c->inmap ? c->key :
-			    CBL_ELEM, false, c)) != 0)
-				return (error);
-		}
-		return (msg_pop(msg));
-	default:
-		return (cbl_msg_fail(msg, EINVAL, "bad attribute"));
-	}
-}
-
-int
-cbl_put_attr(cbl_msg *msg, uint16_t type, const cbl_attr *a)
-{
-
-	if (msg == NULL)
-		return (EINVAL);
-	if (a == NULL)
-		return (cbl_msg_fail(msg, EINVAL, "NULL attribute"));
-	return (put_attr_k(msg, type, false, a));
-}
-
-/* Framework attributes (negative keys). */
-int
-cbl_msg_put_fw_uint(cbl_msg *msg, int key, uint64_t v)
-{
-
-	return (put_uint_k(msg, key, true, v));
-}
-
-int
-cbl_msg_put_fw_str(cbl_msg *msg, int key, const char *s)
-{
-
-	return (put_text_k(msg, key, true, s, strlen(s)));
-}
-
-int
-cbl_msg_put_fw_bytes(cbl_msg *msg, int key, const void *p, size_t len)
-{
-
-	return (put_bytes_k(msg, key, true, p, len));
-}
-
 /* Longest prefix of "s" not above "max" bytes ending on a UTF-8 boundary. */
 static size_t
 utf8_trunc(const char *s, size_t len, size_t max)
@@ -710,34 +351,153 @@ cbl_msg_put_error(cbl_msg *msg, int code, const char *text,
 		return (EINVAL);
 	if (code < 0 || pathlen > CBL_PATH_MAX || (path == NULL && pathlen > 0))
 		return (cbl_msg_fail(msg, EINVAL, "bad error attributes"));
-	if (code > 0 && (error = put_uint_k(msg, CBL_FW_CODE, true,
-	    (uint64_t)code)) != 0)
-		return (error);
-	if (text != NULL && (error = put_text_k(msg, CBL_FW_MSG, true, text,
-	    utf8_trunc(text, strlen(text), CBL_ERRMSG_MAX))) != 0)
-		return (error);
-	if (pathlen > 0) {
-		if ((error = start_k(msg, CBL_FW_PATH, true, false)) != 0)
-			return (error);
-		for (size_t i = 0; i < pathlen; i++) {
-			if (path[i].index) {
-				if ((error = start_k(msg, CBL_ELEM, false,
-				    false)) != 0 ||
-				    (error = put_uint_k(msg, CBL_ELEM, false,
-				    path[i].v)) != 0 ||
-				    (error = msg_pop(msg)) != 0)
-					return (error);
-			} else if ((error = put_uint_k(msg, CBL_ELEM, false,
-			    path[i].v)) != 0)
-				return (error);
-		}
-		if ((error = msg_pop(msg)) != 0)
-			return (error);
+	if (msg->decoded)
+		return (cbl_msg_fail(msg, EPERM, "message is read-only"));
+	if (msg->finalized)
+		return (cbl_msg_fail(msg, EBUSY, "message already encoded"));
+	/* Kept, and sent as the cblink error structure at encode. */
+	if (text != NULL) {
+		size_t len = utf8_trunc(text, strlen(text), CBL_ERRMSG_MAX);
+		char *t;
+
+		if ((t = cbl_arena_alloc(&msg->arena, len + 1)) == NULL)
+			return (cbl_msg_fail(msg, ENOMEM, "out of memory"));
+		memcpy(t, text, len);
+		t[len] = '\0';
+		text = t;
 	}
-	if (miss_type >= 0 && (error = put_uint_k(msg, CBL_FW_MISS_TYPE, true,
-	    (uint64_t)miss_type)) != 0)
+	if ((error = cbl_fw_error(msg, code, text, path, pathlen,
+	    miss_type)) != 0)
 		return (error);
 	return (0);
+}
+
+/*
+ * Version 2: a top-level item {sid: value}, the value YANG-CBOR as it is
+ * (one well-formed item; the receiver checks it, as any body).
+ */
+int
+cbl_msg_put_sid_raw(cbl_msg *msg, uint64_t sid, const void *cbor,
+    size_t len)
+{
+	int error;
+
+	if (msg == NULL || cbor == NULL || len == 0)
+		return (EINVAL);
+	if (sid == 0 || sid > INT64_MAX)
+		return (cbl_msg_fail(msg, EINVAL, "a SID is 1 to 2^63 - 1"));
+	if ((error = msg_begin_item(msg, (int64_t)sid)) != 0)
+		return (error);
+	return (msg_emit_raw(msg, cbor, len));
+}
+
+int
+cbl_msg_put_ynode(cbl_msg *msg, const struct cbl_ynode *n, const void *p)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (msg == NULL || n == NULL || p == NULL)
+		return (EINVAL);
+	if ((error = cbl_yencode(n, p, &b)) != 0)
+		return (cbl_msg_fail(msg, error, "cannot encode the value"));
+	/* An input or an output goes under its rpc's SID (CORECONF). */
+	error = cbl_msg_put_sid_raw(msg, cbl_ynode_base(n), b.p, b.len);
+	cbl_ybuf_free(&b);
+	return (error);
+}
+
+int
+cbl_msg_put_ymember(cbl_msg *msg, const struct cbl_ynode *n,
+    const void *parent)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (msg == NULL || n == NULL || parent == NULL)
+		return (EINVAL);
+	if ((error = cbl_yencode_member(n, parent, &b)) == ENOENT)
+		return (0);	/* not there: nothing to say */
+	if (error != 0)
+		return (cbl_msg_fail(msg, error, "cannot encode the value"));
+	error = cbl_msg_put_sid_raw(msg, n->sid, b.p, b.len);
+	cbl_ybuf_free(&b);
+	return (error);
+}
+
+int
+cbl_msg_put_ynull(cbl_msg *msg, uint64_t sid)
+{
+	static const uint8_t null = 0xf6;
+
+	return (cbl_msg_put_sid_raw(msg, sid, &null, 1));
+}
+
+int
+cbl_msg_sid_raw(const cbl_msg *msg, uint64_t sid, const void **pp,
+    size_t *lenp)
+{
+	const cbl_attr *a;
+
+	if (msg == NULL || pp == NULL || lenp == NULL || sid == 0 ||
+	    sid > INT64_MAX || !msg->decoded)
+		return (EINVAL);
+	if ((a = cbl_map_lookup(cbl_msg_body(msg), (int64_t)sid)) == NULL)
+		return (ENOENT);
+	*pp = msg->buf + msg->hdr.hdrlen + a->off;
+	*lenp = a->len;
+	return (0);
+}
+
+int
+cbl_msg_ydecode(const cbl_msg *msg, const struct cbl_ynode *n, void *p,
+    cbl_yarena *a, int flags, char *why, size_t whylen)
+{
+	const void *v;
+	size_t len;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || p == NULL || a == NULL)
+		return (EINVAL);
+	error = cbl_msg_sid_raw(msg, cbl_ynode_base(n), &v, &len);
+	/* A notification sent: in the cblink:notification envelope. */
+	if (error == ENOENT && n->kind == CBL_YN_NOTIF) {
+		struct cbl_ynotif nt;
+
+		if (cbl_msg_ynotif(msg, &nt, a) != 0 || nt.sid != n->sid)
+			return (ENOENT);
+		memset(p, 0, n->size);
+		return (cbl_ydecode(n, nt.content, nt.len, p, a, flags, why,
+		    whylen));
+	}
+	if (error != 0)
+		return (error);
+	memset(p, 0, n->size);
+	/* No input or no output: null, as CORECONF sends it. */
+	if ((n->kind == CBL_YN_INPUT || n->kind == CBL_YN_OUTPUT) &&
+	    len == 1 && *(const uint8_t *)v == 0xf6)
+		return (0);
+	return (cbl_ydecode(n, v, len, p, a, flags, why, whylen));
+}
+
+int
+cbl_msg_ydecode_member(const cbl_msg *msg, const struct cbl_ynode *n,
+    void *parent, cbl_yarena *a, int flags, char *why, size_t whylen)
+{
+	const void *v;
+	size_t len;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || parent == NULL || a == NULL)
+		return (EINVAL);
+	if ((error = cbl_msg_sid_raw(msg, n->sid, &v, &len)) != 0)
+		return (error);
+	return (cbl_ydecode_member(n, v, len, parent, a, flags, why,
+	    whylen));
 }
 
 int
@@ -748,7 +508,7 @@ cbl_msg_put_cookie(cbl_msg *msg, const void *p, size_t len)
 		return (EINVAL);
 	if (len > CBL_COOKIE_MAX || (p == NULL && len != 0))
 		return (cbl_msg_fail(msg, EINVAL, "bad cookie"));
-	return (put_bytes_k(msg, CBL_FW_COOKIE, true, p, len));
+	return (cbl_fw_cookie(msg, p, len));
 }
 
 /* Finish the body and write the header.  Idempotent. */
@@ -764,9 +524,9 @@ cbl_msg_encode(cbl_msg *msg, const void **framep, size_t *lenp)
 	if (!msg->finalized) {
 		if (msg->decoded)
 			return (EPERM);
-		if (msg->depth > 1)
-			return (cbl_msg_fail(msg, EINVAL,
-			    "unterminated nest or array"));
+		/* The error asked of it, written last. */
+		if ((error = cbl_fw_flush(msg)) != 0)
+			return (error);
 		if (msg->depth == 1 && (error = msg_pop(msg)) != 0)
 			return (error);
 		if (msg->len == 0) {

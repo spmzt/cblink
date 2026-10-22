@@ -1,0 +1,250 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "cblink-ctrl",
+    "module-revision": "2026-10-13",
+    "description": "The control family of cblink wire version 2 (60 200, 100: RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md)).",
+    "assignment-range": [
+      {
+        "entry-point": "60200",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "cblink-ctrl",
+        "sid": "60200"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added",
+        "sid": "60201"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group",
+        "sid": "60202"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/flags",
+        "sid": "60203"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/id",
+        "sid": "60204"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/group/name",
+        "sid": "60205"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/id",
+        "sid": "60206"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/name",
+        "sid": "60207"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op",
+        "sid": "60208"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/cmd",
+        "sid": "60209"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/flags",
+        "sid": "60210"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/op/name",
+        "sid": "60211"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-added/version",
+        "sid": "60212"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed",
+        "sid": "60213"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed/id",
+        "sid": "60214"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:family-removed/name",
+        "sid": "60215"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family",
+        "sid": "60216"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input",
+        "sid": "60217"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input/id",
+        "sid": "60218"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/input/name",
+        "sid": "60219"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output",
+        "sid": "60220"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group",
+        "sid": "60221"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/flags",
+        "sid": "60222"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/id",
+        "sid": "60223"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/group/name",
+        "sid": "60224"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/id",
+        "sid": "60225"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/name",
+        "sid": "60226"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op",
+        "sid": "60227"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/cmd",
+        "sid": "60228"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/flags",
+        "sid": "60229"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/op/name",
+        "sid": "60230"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:get-family/output/version",
+        "sid": "60231"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping",
+        "sid": "60232"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/input",
+        "sid": "60233"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/input/cookie",
+        "sid": "60234"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/output",
+        "sid": "60235"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:ping/output/cookie",
+        "sid": "60236"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe",
+        "sid": "60237"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input",
+        "sid": "60238"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input/family-id",
+        "sid": "60239"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/input/group-id",
+        "sid": "60240"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:subscribe/output",
+        "sid": "60241"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe",
+        "sid": "60242"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input",
+        "sid": "60243"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input/family-id",
+        "sid": "60244"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/input/group-id",
+        "sid": "60245"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink-ctrl:unsubscribe/output",
+        "sid": "60246"
+      }
+    ]
+  }
+}

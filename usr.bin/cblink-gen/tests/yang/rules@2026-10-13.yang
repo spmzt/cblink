@@ -1,0 +1,229 @@
+module rules {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:rules";
+  prefix r;
+
+  description
+    "The static validator's test module: each constraint RFC 7950
+     checks within one tree, most from the RFC's own examples.";
+
+  revision 2026-10-13;
+
+  identity crypto-alg;
+
+  identity des {
+    base crypto-alg;
+  }
+
+  identity des3 {
+    base des;
+  }
+
+  identity hash;
+
+  identity sha1 {
+    base hash;
+  }
+
+  typedef my-base-int32-type {
+    type int32 {
+      range "1..4 | 10..20";
+    }
+  }
+
+  container rules {
+    leaf small {
+      type my-base-int32-type;
+    }
+    leaf ratio {
+      type decimal64 {
+        fraction-digits 2;
+        range "-1 .. 1";
+      }
+    }
+    leaf host-name {
+      type string {
+        length "1..253";
+        pattern '[a-zA-Z0-9\-.]*' {
+          error-message "not a host name";
+          error-app-tag "bad-host";
+        }
+      }
+    }
+    leaf code {
+      type string {
+        length "2";
+      }
+    }
+    leaf not-x {
+      type string {
+        pattern 'x.*' {
+          modifier invert-match;
+        }
+      }
+    }
+    leaf blob {
+      type binary {
+        length "4";
+      }
+    }
+    leaf colour {
+      type enumeration {
+        enum red;
+        enum green {
+          value 5;
+        }
+      }
+    }
+    leaf flags {
+      type bits {
+        bit up {
+          position 0;
+        }
+        bit down {
+          position 3;
+        }
+      }
+    }
+    leaf alg {
+      type identityref {
+        base crypto-alg;
+      }
+    }
+    leaf either {
+      type union {
+        type int8 {
+          range "1..10";
+        }
+        type string {
+          pattern '[a-z]+';
+        }
+      }
+    }
+    leaf must-have {
+      type string;
+      mandatory true;
+    }
+    choice snack {
+      mandatory true;
+      case sports-arena {
+        leaf pretzel {
+          type empty;
+        }
+        leaf beer {
+          type empty;
+        }
+      }
+      case late-night {
+        leaf chocolate {
+          type enumeration {
+            enum dark;
+            enum milk;
+          }
+        }
+      }
+    }
+    leaf-list tag {
+      type string;
+      min-elements 1;
+      max-elements 3;
+    }
+    list server {
+      key "name";
+      unique "addr/ip addr/port";
+      leaf name {
+        type string;
+      }
+      container addr {
+        leaf ip {
+          type string;
+        }
+        leaf port {
+          type uint16;
+        }
+      }
+    }
+    leaf status {
+      config false;
+      type string;
+    }
+    leaf port {
+      type uint16;
+      default "80";
+    }
+    container defaults {
+      description
+        "A default of every kind, for cbl_ydefaults().";
+      choice transfer {
+        default interval;
+        case interval {
+          leaf interval {
+            type uint16;
+            default "30";
+          }
+        }
+        case daily {
+          leaf daily {
+            type empty;
+          }
+        }
+      }
+      leaf-list dns {
+        type string;
+        default "a.example";
+        default "b.example";
+      }
+      leaf hash-alg {
+        type identityref {
+          base hash;
+        }
+        default "sha1";
+      }
+      leaf level {
+        type decimal64 {
+          fraction-digits 3;
+        }
+        default "-1.5";
+      }
+      leaf mode {
+        type bits {
+          bit fast {
+            position 1;
+          }
+          bit safe {
+            position 9;
+          }
+        }
+        default "fast safe";
+      }
+      leaf colour {
+        type enumeration {
+          enum red;
+          enum blue {
+            value 7;
+          }
+        }
+        default "blue";
+      }
+      leaf key-data {
+        type binary;
+        default "AQID";
+      }
+      leaf on {
+        type boolean;
+        default "true";
+      }
+      leaf name {
+        type string;
+        default "anon";
+      }
+      leaf pick {
+        type union {
+          type int8;
+          type string;
+        }
+        default "word";
+      }
+    }
+  }
+}

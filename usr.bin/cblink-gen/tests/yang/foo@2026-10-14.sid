@@ -1,0 +1,25 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "foo",
+    "module-revision": "2026-10-14",
+    "description": "cblink's test SIDs: draft-ietf-core-yang-metadata's examples' numbers, never on a wire.",
+    "assignment-range": [
+      {
+        "entry-point": "61620",
+        "size": "2"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "data",
+        "identifier": "/foo:flag",
+        "sid": "61620"
+      },
+      {
+        "namespace": "module",
+        "identifier": "foo",
+        "sid": "61621"
+      }
+    ]
+  }
+}

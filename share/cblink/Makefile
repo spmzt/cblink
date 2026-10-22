@@ -1,5 +1,7 @@
-# Data files: the control family spec, cblink.mk for programs built from
-# specs, and cblink.pc for pkg-config.
+# Data files: the YANG modules wire version 2 is made of (the framework's
+# structures, the control family, ietf-sid-file for GET-SID) with their
+# .sid files, cblink.mk for programs built from modules, and cblink.pc
+# for pkg-config.
 
 .if !defined(SRCTOP) || defined(CBLINK_OUT_OF_TREE)
 PREFIX?=	/usr/local
@@ -16,10 +18,15 @@ PC_REQUIRES=
 PC_LIBS=	-lprivatecbor -lssl -lcrypto -lpthread
 .endif
 
-FILESGROUPS=	SPECS MK PC
+FILESGROUPS=	YANG MK PC
 
-SPECS=		specs/control.yaml
-SPECSDIR=	${SHAREDIR}/cblink/specs
+YANG=		${.CURDIR}/../yang/cblink@2026-10-13.yang \
+		${.CURDIR}/../yang/cblink@2026-10-13.sid \
+		${.CURDIR}/../yang/cblink-ctrl@2026-10-13.yang \
+		${.CURDIR}/../yang/cblink-ctrl@2026-10-13.sid \
+		${.CURDIR}/../yang/ietf-sid-file@2024-07-31.yang \
+		${.CURDIR}/../yang/ietf-sid-file@2024-07-31.sid
+YANGDIR=	${SHAREDIR}/cblink/yang
 MK=		cblink.mk
 MKDIR=		${SHAREDIR}/cblink
 PC=		cblink.pc

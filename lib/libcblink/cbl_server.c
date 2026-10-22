@@ -22,7 +22,8 @@
 static int
 send_error_ext(cbl_conn *conn, const struct cbl_hdr *h, int code,
     const char *text, const struct cbl_path_elem *path, size_t pathlen,
-    int miss, const void *cookie, size_t cookie_len, uint32_t extra)
+    int miss, const void *cookie, size_t cookie_len, uint32_t extra,
+    const cbl_req *yreq)
 {
 	cbl_msg *msg;
 	int error;
@@ -39,6 +40,9 @@ send_error_ext(cbl_conn *conn, const struct cbl_hdr *h, int code,
 	    pathlen > CBL_PATH_MAX ? CBL_PATH_MAX : pathlen, miss);
 	if (cookie != NULL)
 		(void)cbl_msg_put_cookie(msg, cookie, cookie_len);
+	/* Family 1's: the node at fault by its SID, the tag. */
+	if (yreq != NULL && (yreq->err_ysid != 0 || yreq->err_ytag != NULL))
+		cbl_fw_yerr(msg, yreq->err_ysid, yreq->err_ytag);
 	return (cbl_conn_enqueue_ctl(conn, msg));
 }
 
@@ -102,7 +106,7 @@ req_end(cbl_req *req, int error)
 			    req->err_msg != NULL ? req->err_msg :
 			    "stream not accepted", req->err_path,
 			    req->err_pathlen, req->err_miss, NULL, 0,
-			    CBL_F_S_OPEN);
+			    CBL_F_S_OPEN, NULL);
 		cbl_stream_rele(s);
 		return (true);
 	}
@@ -110,7 +114,7 @@ req_end(cbl_req *req, int error)
 		(void)send_error_ext(req->conn, &req->hdr, error, req->err_msg,
 		    req->err_path, req->err_pathlen, req->err_miss,
 		    req->has_cookie ? req->cookie : NULL, req->cookie_len,
-		    dump ? CBL_F_MULTI | CBL_F_DONE : 0);
+		    dump ? CBL_F_MULTI | CBL_F_DONE : 0, req);
 	} else if (dump || (req->hdr.flags & CBL_F_ACK) != 0) {
 		if (cbl_msg_alloc_empty(&req->conn->lim, &msg) == 0) {
 			msg->hdr.family = req->hdr.family;
@@ -257,7 +261,6 @@ void
 cbl_server_dispatch(cbl_conn *conn, cbl_msg *msg)
 {
 	const struct cbl_op *op;
-	struct cbl_verr verr;
 	cbl_family *fam;
 	cbl_req *req;
 	uint32_t f = msg->hdr.flags;
@@ -304,16 +307,6 @@ cbl_server_dispatch(cbl_conn *conn, cbl_msg *msg)
 	if (atomic_load(&conn->inflight) >= conn->lim.v[CBL_LIM_MAX_INFLIGHT]) {
 		cbl_family_rele(fam);
 		reject(conn, msg, EAGAIN, "too many requests in flight");
-		return;
-	}
-	if ((error = cbl_validate(cbl_msg_body(msg), op->policy,
-	    &verr)) != 0) {
-		(void)send_error_ext(conn, &msg->hdr, error, verr.msg,
-		    verr.path, verr.pathlen, verr.miss_type, NULL, 0,
-		    (f & CBL_F_S_OPEN) != 0 ? CBL_F_S_OPEN :
-		    (f & CBL_F_DUMP) != 0 ? CBL_F_MULTI | CBL_F_DONE : 0);
-		cbl_family_rele(fam);
-		cbl_msg_free(msg);
 		return;
 	}
 	if ((req = calloc(1, sizeof(*req))) == NULL) {
@@ -517,7 +510,7 @@ cbl_server_stream_open(cbl_req *req)
 	if (error != 0)
 		(void)send_error_ext(req->conn, &req->hdr, error, req->err_msg,
 		    req->err_path, req->err_pathlen, req->err_miss, NULL, 0,
-		    CBL_F_S_OPEN);
+		    CBL_F_S_OPEN, NULL);
 	atomic_store(&req->completed, true);
 	req_rele(req);
 }

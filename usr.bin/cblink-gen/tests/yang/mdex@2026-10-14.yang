@@ -1,0 +1,36 @@
+module mdex {
+  yang-version 1.1;
+  namespace "urn:example:mdex";
+  prefix mdex;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "cblink's test of annotations: the nodes RFC 7952 section 5.2's
+     examples annotate, cask, seq and stuff, numbered as
+     draft-ietf-core-yang-metadata's examples number them (61600 to
+     61603); what the examples leave as '...' made a leaf each.";
+
+  revision 2026-10-14 {
+    description
+      "Initial revision.";
+  }
+
+  container cask {
+    leaf vintage {
+      type uint16;
+    }
+  }
+  list seq {
+    key "name";
+    leaf name {
+      type string;
+    }
+    leaf count {
+      type uint8;
+    }
+  }
+  anyxml stuff;
+}

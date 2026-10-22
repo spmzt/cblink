@@ -44,11 +44,76 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "cblink.h"
+#include "cbl_test.h"
 
 enum { TP_WHOAMI = 1, TP_SECRET, TP_ECHO, TP_DUMP, TP_FEED };
 enum { TA_SUBJECT = 1, TA_SANS, TA_FP, TA_FLAGS, TA_TRANSPORT, TA_ISSUER,
     TA_VALUE, TA_N, TA_UID, TA_ADDR };
+
+/* The SANs: an array of text. */
+static void
+put_sans(cbl_msg *rsp, const cbl_peer *p)
+{
+	size_t n = cbl_peer_san_count(p), len = 9;
+	uint8_t *b, *q;
+
+	for (size_t i = 0; i < n; i++)
+		len += 9 + strlen(cbl_peer_san(p, i));
+	if ((b = q = malloc(len)) == NULL)
+		return;
+	q += t_head(q, 4, n);
+	for (size_t i = 0; i < n; i++) {
+		q += t_head(q, 3, strlen(cbl_peer_san(p, i)));
+		memcpy(q, cbl_peer_san(p, i), strlen(cbl_peer_san(p, i)));
+		q += strlen(cbl_peer_san(p, i));
+	}
+	(void)cbl_msg_put_sid_raw(rsp, TA_SANS, b, (size_t)(q - b));
+	free(b);
+}
+
+/* A CBOR head at *pp, before end: its major type and value. */
+static bool
+head_at(const uint8_t **pp, const uint8_t *end, unsigned *major,
+    uint64_t *v)
+{
+	const uint8_t *p = *pp;
+	size_t k;
+
+	if (p >= end)
+		return (false);
+	*major = *p >> 5;
+	*v = *p++ & 0x1f;
+	if (*v >= 24) {
+		if (*v > 27 || (size_t)(end - p) < (k = (size_t)1 << (*v - 24)))
+			return (false);
+		for (*v = 0; k > 0; k--)
+			*v = *v << 8 | *p++;
+	}
+	*pp = p;
+	return (true);
+}
+
+static void
+print_sans(const cbl_msg *rsp)
+{
+	const uint8_t *p, *end;
+	uint64_t n, len;
+	unsigned major;
+	size_t raw;
+
+	if (cbl_msg_sid_raw(rsp, TA_SANS, (const void **)&p, &raw) != 0)
+		return;
+	end = p + raw;
+	if (!head_at(&p, end, &major, &n) || major != 4)
+		return;
+	for (; n > 0; n--) {
+		if (!head_at(&p, end, &major, &len) || major != 3 ||
+		    len > (uint64_t)(end - p))
+			return;
+		printf("san=%.*s\n", (int)len, (const char *)p);
+		p += len;
+	}
+}
 
 static int
 whoami_doit(cbl_req *req, const cbl_msg *msg __unused, void *arg __unused)
@@ -65,27 +130,23 @@ whoami_doit(cbl_req *req, const cbl_msg *msg __unused, void *arg __unused)
 	if ((error = cbl_req_reply_new(req, 0, &rsp)) != 0)
 		return (error);
 	if (cbl_peer_subject(p) != NULL)
-		cbl_put_str(rsp, TA_SUBJECT, cbl_peer_subject(p));
+		t_put_str(rsp, TA_SUBJECT, cbl_peer_subject(p));
 	if (cbl_peer_issuer(p) != NULL)
-		cbl_put_str(rsp, TA_ISSUER, cbl_peer_issuer(p));
-	if (cbl_peer_san_count(p) > 0) {
-		cbl_array_start(rsp, TA_SANS);
-		for (size_t i = 0; i < cbl_peer_san_count(p); i++)
-			cbl_put_str(rsp, CBL_ELEM, cbl_peer_san(p, i));
-		cbl_array_end(rsp);
-	}
+		t_put_str(rsp, TA_ISSUER, cbl_peer_issuer(p));
+	if (cbl_peer_san_count(p) > 0)
+		put_sans(rsp, p);
 	if (cbl_peer_fingerprint(p, "sha256", fp, &fplen) == 0)
-		cbl_put_bytes(rsp, TA_FP, fp, fplen);
-	cbl_put_uint(rsp, TA_FLAGS, cbl_peer_flags(p));
-	cbl_put_uint(rsp, TA_TRANSPORT, (uint64_t)cbl_peer_transport(p));
+		t_put_bytes(rsp, TA_FP, fp, fplen);
+	t_put_uint(rsp, TA_FLAGS, cbl_peer_flags(p));
+	t_put_uint(rsp, TA_TRANSPORT, (uint64_t)cbl_peer_transport(p));
 	if (cbl_peer_cred(p, &uid, NULL) == 0)
-		cbl_put_uint(rsp, TA_UID, uid);
+		t_put_uint(rsp, TA_UID, uid);
 	if (cbl_peer_addr(p, &ss, NULL) == 0 && inet_ntop(ss.ss_family,
 	    ss.ss_family == AF_INET ?
 	    (void *)&((struct sockaddr_in *)&ss)->sin_addr :
 	    (void *)&((struct sockaddr_in6 *)&ss)->sin6_addr, addr,
 	    sizeof(addr)) != NULL)
-		cbl_put_str(rsp, TA_ADDR, addr);
+		t_put_str(rsp, TA_ADDR, addr);
 	return (cbl_req_send(req, rsp));
 }
 
@@ -105,8 +166,7 @@ echo_doit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 
 	if ((error = cbl_req_reply_new(req, 0, &rsp)) != 0)
 		return (error);
-	if (cbl_msg_attr(msg, TA_VALUE) != NULL)
-		cbl_put_attr(rsp, TA_VALUE, cbl_msg_attr(msg, TA_VALUE));
+	(void)t_copy(rsp, msg, TA_VALUE);
 	return (cbl_req_send(req, rsp));
 }
 
@@ -118,12 +178,12 @@ dump_dumpit(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 	cbl_msg *item;
 	int error;
 
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_N), &n);
+	(void)t_get_uint(msg, TA_N, &n);
 	if (st->pos[0] >= n)
 		return (0);
 	if ((error = cbl_req_dump_item(req, &item)) != 0)
 		return (error);
-	cbl_put_uint(item, TA_VALUE, st->pos[0]++);
+	t_put_uint(item, TA_VALUE, st->pos[0]++);
 	if ((error = cbl_req_send(req, item)) != 0)
 		return (error);
 	return (EAGAIN);
@@ -142,7 +202,7 @@ feed_pump(cbl_stream *s, struct feed *f)
 	while (f->next < f->n) {
 		if (cbl_stream_msg_new(s, &m) != 0)
 			return;
-		cbl_put_uint(m, TA_VALUE, f->next);
+		t_put_uint(m, TA_VALUE, f->next);
 		if ((error = cbl_stream_send(s, m)) == EAGAIN) {
 			cbl_msg_free(m);
 			return;
@@ -184,7 +244,7 @@ feed_open(cbl_req *req __unused, const cbl_msg *msg, cbl_stream *s,
 	if ((f = calloc(1, sizeof(*f))) == NULL)
 		return (ENOMEM);
 	f->n = 10;
-	(void)cbl_attr_uint(cbl_msg_attr(msg, TA_N), &f->n);
+	(void)t_get_uint(msg, TA_N, &f->n);
 	if ((error = cbl_stream_accept(s, NULL, 0, &feed_cbs, f)) != 0) {
 		free(f);
 		return (error);
@@ -402,44 +462,37 @@ serve(int argc, char **argv)
 static void
 print_reply(cbl_msg *rsp)
 {
-	const cbl_attr *a, *e;
-	const char *s;
+	char s[1024];
 	const void *p;
 	uint64_t v;
 	size_t len;
 
-	if ((a = cbl_msg_attr(rsp, TA_SUBJECT)) != NULL &&
-	    cbl_attr_str(rsp, a, &s) == 0)
+	if (t_get_str(rsp, TA_SUBJECT, s, sizeof(s)))
 		printf("subject=%s\n", s);
-	if ((a = cbl_msg_attr(rsp, TA_ISSUER)) != NULL &&
-	    cbl_attr_str(rsp, a, &s) == 0)
+	if (t_get_str(rsp, TA_ISSUER, s, sizeof(s)))
 		printf("issuer=%s\n", s);
-	for (e = cbl_attr_first(cbl_msg_attr(rsp, TA_SANS)); e != NULL;
-	    e = cbl_attr_next(e))
-		if (cbl_attr_str(rsp, e, &s) == 0)
-			printf("san=%s\n", s);
-	if (cbl_attr_bytes(cbl_msg_attr(rsp, TA_FP), &p, &len) == 0) {
+	print_sans(rsp);
+	if (t_get_bytes(rsp, TA_FP, &p, &len)) {
 		printf("sha256=");
 		for (size_t i = 0; i < len; i++)
 			printf("%02x", ((const uint8_t *)p)[i]);
 		printf("\n");
 	}
-	if (cbl_attr_uint(cbl_msg_attr(rsp, TA_FLAGS), &v) == 0)
+	if (t_get_uint(rsp, TA_FLAGS, &v))
 		printf("authenticated=%d\nproxied=%d\n",
 		    (v & CBL_PEER_AUTHENTICATED) != 0,
 		    (v & CBL_PEER_PROXIED) != 0);
-	if (cbl_attr_uint(cbl_msg_attr(rsp, TA_TRANSPORT), &v) == 0)
+	if (t_get_uint(rsp, TA_TRANSPORT, &v))
 		printf("transport=%s\n", v == CBL_TR_TCP ? "tcp" :
 		    v == CBL_TR_SCTP ? "sctp" :
 		    v == CBL_TR_UNIX ? "unix" : "?");
-	if (cbl_attr_uint(cbl_msg_attr(rsp, TA_UID), &v) == 0)
+	if (t_get_uint(rsp, TA_UID, &v))
 		printf("uid=%ju\n", (uintmax_t)v);
-	if ((a = cbl_msg_attr(rsp, TA_ADDR)) != NULL &&
-	    cbl_attr_str(rsp, a, &s) == 0)
+	if (t_get_str(rsp, TA_ADDR, s, sizeof(s)))
 		printf("addr=%s\n", s);
-	if (cbl_attr_uint(cbl_msg_attr(rsp, TA_VALUE), &v) == 0)
+	if (t_get_uint(rsp, TA_VALUE, &v))
 		printf("value=%ju\n", (uintmax_t)v);
-	if (cbl_attr_bytes(cbl_msg_attr(rsp, TA_VALUE), &p, &len) == 0)
+	if (t_get_bytes(rsp, TA_VALUE, &p, &len))
 		printf("bytes=%zu\n", len);
 }
 
@@ -540,7 +593,7 @@ call(int argc, char **argv)
 
 	if (strcmp(op, "dump") == 0) {
 		cbl_msg_new(ctx, id, TP_DUMP, 0, &req);
-		cbl_put_uint(req, TA_N, n);
+		t_put_uint(req, TA_N, n);
 		if ((error = cbl_dump_start(conn, req, &d)) != 0)
 			errc(1, error, "dump");
 		for (count = 0; (error = cbl_dump_next(d, &item)) == 0 &&
@@ -559,7 +612,7 @@ call(int argc, char **argv)
 		int events, timeout;
 
 		cbl_msg_new(ctx, id, TP_FEED, 0, &req);
-		cbl_put_uint(req, TA_N, n);
+		t_put_uint(req, TA_N, n);
 		if ((error = cbl_stream_open(conn, req, CBL_SF_PUSH, &fr_cbs,
 		    &r, &st)) != 0)
 			errc(1, error, "stream");
@@ -595,10 +648,10 @@ call(int argc, char **argv)
 		if (bigsz > 0) {
 			void *blob = calloc(1, bigsz);
 
-			cbl_put_bytes(req, TA_VALUE, blob, bigsz);
+			t_put_bytes(req, TA_VALUE, blob, bigsz);
 			free(blob);
 		} else
-			cbl_put_uint(req, TA_VALUE, n);
+			t_put_uint(req, TA_VALUE, n);
 	} else
 		usage();
 	if ((error = cbl_request(conn, req, &rsp, 5000)) != 0)

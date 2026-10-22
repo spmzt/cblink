@@ -24,7 +24,7 @@
 #include <string.h>
 
 #include "cbl_impl.h"
-#include "cbl_ctrl_gen.h"
+#include "cbl_schema.h"
 
 static int
 group_cmp(struct cbl_group *a, struct cbl_group *b)
@@ -192,10 +192,18 @@ copy_with_missed(cbl_conn *conn, cbl_msg *msg)
 	}
 	copy->hdr = msg->hdr;
 	copy->hdr.length = 0;
+	/* Its items as they are, but the framework's; and ENOBUFS. */
 	body = cbl_msg_body(rx);
-	for (a = cbl_attr_first(body); a != NULL; a = cbl_attr_next(a))
-		(void)cbl_put_attr(copy, cbl_attr_type(a), a);
-	(void)cbl_msg_put_fw_uint(copy, CBL_FW_CODE, ENOBUFS);
+	for (uint32_t i = 0; body != NULL && i < body->count; i++) {
+		a = &body->child[i];
+		/* An error it had already: the new one says ENOBUFS. */
+		if (a->key < 1 ||
+		    (uint64_t)a->key == cbl_fw_node("error")->sid)
+			continue;
+		(void)cbl_msg_put_sid_raw(copy, (uint64_t)a->key,
+		    rx->buf + rx->hdr.hdrlen + a->off, a->len);
+	}
+	(void)cbl_fw_error(copy, ENOBUFS, NULL, NULL, 0, -1);
 	cbl_msg_free(rx);
 	if (cbl_msg_encode(copy, NULL, NULL) != 0) {
 		cbl_msg_free(copy);
@@ -279,59 +287,26 @@ cbl_conn_notify(cbl_conn *conn, cbl_family *fam, uint32_t group_idx,
 	return (error);
 }
 
-/* newfamily/delfamily on the control family's "notify" group. */
-void
-cbl_ctrl_notify_family(cbl_ctx *ctx, cbl_family *fam, bool added)
+/*
+ * Whether conn has subscribed to the family's group: so that a server
+ * sends what a peer asked to be told on its own connection only to one
+ * that asked.  Thread-safe.
+ */
+bool
+cbl_conn_subscribed(cbl_conn *conn, cbl_family *fam, uint32_t group_idx)
 {
-	const struct cbl_family_def *def = fam->def;
-	struct cbl_ctrl_op_info *ops = NULL;
-	struct cbl_ctrl_group_info *grps = NULL;
+	struct cbl_member *m;
+	uint32_t gid;
 
-	if (ctx->ctrl == NULL)
-		return;
-	if (!added) {
-		struct cbl_ctrl_delfamily_ntf n = {
-			.has_family_id = true, .family_id = fam->id,
-			.family_name = def->name,
-		};
-
-		cbl_notify_family_gone(ctx, fam);
-		(void)cbl_ctrl_delfamily_notify(ctx->ctrl, &n);
-		return;
-	}
-	if ((def->nops > 0 &&
-	    (ops = calloc(def->nops, sizeof(*ops))) == NULL) ||
-	    (def->nmcgrps > 0 &&
-	    (grps = calloc(def->nmcgrps, sizeof(*grps))) == NULL)) {
-		free(ops);
-		return;
-	}
-	for (uint32_t i = 0; i < def->nops; i++) {
-		ops[i].has_cmd = true;
-		ops[i].cmd = def->ops[i].cmd;
-		ops[i].name = def->ops[i].name;
-		ops[i].has_flags = true;
-		ops[i].flags = def->ops[i].flags;
-	}
-	for (uint32_t i = 0; i < def->nmcgrps; i++) {
-		grps[i].has_id = true;
-		grps[i].id = fam->group_base + i;
-		grps[i].name = def->mcgrps[i].name;
-		grps[i].has_flags = true;
-		grps[i].flags = def->mcgrps[i].flags;
-	}
-	struct cbl_ctrl_newfamily_ntf n = {
-		.has_family_id = true, .family_id = fam->id,
-		.family_name = def->name,
-		.has_version = true, .version = def->version,
-	};
-	n.ops.n = def->nops;
-	n.ops.v = ops;
-	n.mcast_groups.n = def->nmcgrps;
-	n.mcast_groups.v = grps;
-	(void)cbl_ctrl_newfamily_notify(ctx->ctrl, &n);
-	free(ops);
-	free(grps);
+	if (conn == NULL || fam == NULL || group_idx >= fam->def->nmcgrps)
+		return (false);
+	gid = fam->group_base + group_idx;
+	pthread_mutex_lock(&conn->ctx->submtx);
+	LIST_FOREACH(m, &conn->memberships, clink)
+		if (m->g->gid == gid)
+			break;
+	pthread_mutex_unlock(&conn->ctx->submtx);
+	return (m != NULL);
 }
 
 /*
@@ -378,12 +353,8 @@ int
 cbl_subscribe_id(cbl_conn *conn, uint16_t family, uint32_t group,
     cbl_notify_f *cb, void *arg, cbl_sub **subp)
 {
-	struct cbl_ctrl_subscribe_req rq = {
-		.has_family_id = true, .family_id = family,
-		.has_group_id = true, .group_id = group,
-	};
-	struct cbl_ctrl_client cl;
 	struct cbl_sub *s;
+	cbl_msg *msg;
 	int error;
 
 	if (conn == NULL || cb == NULL || subp == NULL || group == 0)
@@ -399,9 +370,8 @@ cbl_subscribe_id(cbl_conn *conn, uint16_t family, uint32_t group,
 	pthread_mutex_lock(&conn->mtx);
 	LIST_INSERT_HEAD(&conn->subs, s, link);
 	pthread_mutex_unlock(&conn->mtx);
-	(void)cbl_ctrl_client_init(&cl, conn);
-	error = cbl_ctrl_subscribe(&cl, &rq);
-	cbl_ctrl_client_fini(&cl);
+	if ((error = cbl_ctrl_sub_msg(conn, true, family, group, &msg)) == 0)
+		error = cbl_request(conn, msg, NULL, -1);
 	if (error != 0) {
 		pthread_mutex_lock(&conn->mtx);
 		LIST_REMOVE(s, link);
@@ -468,12 +438,9 @@ cbl_unsubscribe(cbl_sub *s)
 	/* Otherwise a callback still running frees it when it returns. */
 	free_now = s->refs == 0;
 	pthread_mutex_unlock(&conn->mtx);
-	if (conn->state == CBL_CS_OPEN && cbl_msg_new(conn->ctx,
-	    CBL_CTRL_FAMILY, CBL_CTRL_CMD_UNSUBSCRIBE, 0, &msg) == 0) {
-		(void)cbl_ctrl_put_family_id(msg, s->family);
-		(void)cbl_ctrl_put_group_id(msg, s->group);
+	if (conn->state == CBL_CS_OPEN && cbl_ctrl_sub_msg(conn, false,
+	    s->family, s->group, &msg) == 0)
 		(void)cbl_request_async(conn, msg, unsub_done, NULL);
-	}
 	if (free_now)
 		free(s);
 	return (0);
@@ -506,7 +473,6 @@ cbl_sub_free_all(cbl_conn *conn)
  * the I/O thread with the subscription, or an error.
  */
 struct sub_call {
-	struct cbl_ctrl_client	 cl;
 	struct cbl_sub		*s;
 	cbl_subscribed_f	*done;
 	void			*arg;
@@ -516,12 +482,14 @@ struct sub_call {
 };
 
 static void
-sub_done(struct cbl_ctrl_client *cl, int error, void *arg)
+sub_done(cbl_conn *conn, cbl_msg *m __unused, bool final, int error,
+    void *arg)
 {
 	struct sub_call *sc = arg;
-	cbl_conn *conn = cl->conn;
 	struct cbl_sub *s = sc->s;
 
+	if (!final)
+		return;
 	if (error != 0) {
 		/* On the I/O thread: no notification runs for it now. */
 		pthread_mutex_lock(&conn->mtx);
@@ -531,7 +499,6 @@ sub_done(struct cbl_ctrl_client *cl, int error, void *arg)
 		s = NULL;
 	}
 	sc->done(conn, error, s, sc->arg);
-	cbl_ctrl_client_fini(&sc->cl);
 	free(sc);
 }
 
@@ -539,11 +506,8 @@ static int
 sub_start(struct sub_call *sc, cbl_conn *conn, uint16_t family,
     uint32_t group, cbl_notify_f *cb, void *arg)
 {
-	struct cbl_ctrl_subscribe_req rq = {
-		.has_family_id = true, .family_id = family,
-		.has_group_id = true, .group_id = group,
-	};
 	struct cbl_sub *s;
+	cbl_msg *msg;
 	int error;
 
 	if ((s = calloc(1, sizeof(*s))) == NULL)
@@ -558,14 +522,12 @@ sub_start(struct sub_call *sc, cbl_conn *conn, uint16_t family,
 	LIST_INSERT_HEAD(&conn->subs, s, link);
 	pthread_mutex_unlock(&conn->mtx);
 	sc->s = s;
-	(void)cbl_ctrl_client_init(&sc->cl, conn);
-	if ((error = cbl_ctrl_subscribe_async(&sc->cl, &rq, sub_done,
-	    sc)) != 0) {
+	if ((error = cbl_ctrl_sub_msg(conn, true, family, group, &msg)) != 0 ||
+	    (error = cbl_request_async(conn, msg, sub_done, sc)) != 0) {
 		pthread_mutex_lock(&conn->mtx);
 		LIST_REMOVE(s, link);
 		pthread_mutex_unlock(&conn->mtx);
 		free(s);
-		cbl_ctrl_client_fini(&sc->cl);
 	}
 	return (error);
 }

@@ -1,0 +1,29 @@
+module yangwalk-augment-structure {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:yangwalk-augment-structure";
+  prefix yas;
+
+  import ietf-yang-structure-ext {
+    prefix sx;
+  }
+  import ietf-sid-file {
+    prefix sid;
+  }
+
+  description
+    "A fixture for yangwalk's extcheck.sh: no module of Arcana's corpus
+     augments a structure, so this one augments ietf-sid-file's.";
+
+  revision 2026-10-13 {
+    description
+      "Initial revision.";
+  }
+
+  sx:augment-structure "/sid:sid-file/sid:item" {
+    leaf note {
+      type string;
+      description
+        "A note on the item.";
+    }
+  }
+}

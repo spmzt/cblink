@@ -37,6 +37,7 @@ char	*xasprintf(const char *fmt, ...) __printflike(1, 2);
 char	*xstrndup(const char *s, size_t len);
 void	*xcalloc(size_t n, size_t size);
 void	*xreallocarray(void *p, size_t n, size_t size);
+int	 write_file(int dirfd, const char *name, const struct buf *b);
 
 /* Diagnostics: "file:line:col: error: msg". */
 struct diag {
@@ -59,43 +60,7 @@ void	diag_add(struct diags *d, int line, int col, const char *fmt, ...)
 void	diag_print(struct diags *d);
 void	diag_free(struct diags *d);
 
-/* YAML subset (docs/SPEC-FORMAT.md part 1). */
-enum ytype {
-	Y_SCALAR,
-	Y_MAP,
-	Y_SEQ,
-};
-
-struct ynode;
-
-struct ypair {
-	char		*key;
-	int		 line;
-	int		 col;
-	struct ynode	*val;
-};
-
-struct ynode {
-	enum ytype	 type;
-	int		 line;
-	int		 col;
-	char		*str;		/* scalar */
-	size_t		 len;
-	bool		 quoted;
-	struct ypair	*pairs;		/* map */
-	size_t		 npairs;
-	struct ynode	**items;	/* seq */
-	size_t		 nitems;
-};
-
-#define	YAML_MAX_FILE		(1024 * 1024)
-#define	YAML_MAX_LINE		4096
-#define	YAML_MAX_DEPTH		32
-#define	YAML_MAX_SCALAR		(64 * 1024)
-#define	YAML_MAX_NODES		100000
-
-struct ynode	*yaml_parse(const char *data, size_t len, struct diags *d);
-void		 yaml_free(struct ynode *n);
-const struct ynode *ymap_get(const struct ynode *map, const char *key);
+/* The largest file read: a .sid file. */
+#define	MAX_FILE	(16 * 1024 * 1024)
 
 #endif /* !_CBLINK_GEN_H_ */

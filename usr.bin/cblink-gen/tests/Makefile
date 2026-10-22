@@ -138,6 +138,9 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/mdex@2026-10-14.yang yang/mdex@2026-10-14.sid \
 		yang/foo@2026-10-14.yang yang/foo@2026-10-14.sid \
 		yang/bibliomod@2026-10-14.yang yang/bibliomod@2026-10-14.sid \
+		yang/shared@2026-10-22.yang yang/shared@2026-10-22.sid \
+		yang/shared-bad@2026-10-22.yang \
+		${.CURDIR}/../../../share/yang/cblink-gen@2026-10-22.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.sid \
 		${.CURDIR}/../../../share/yang/cblink@2026-10-13.yang \

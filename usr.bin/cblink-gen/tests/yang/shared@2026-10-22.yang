@@ -1,0 +1,51 @@
+module shared {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:shared";
+  prefix sh;
+
+  import cblink-gen {
+    prefix cg;
+  }
+
+  revision 2026-10-22;
+
+  grouping step {
+    list step {
+      cg:struct "step";
+      leaf kind {
+        type enumeration {
+          enum exec;
+          enum file;
+        }
+      }
+      leaf text {
+        type string;
+      }
+      container more {
+        leaf n {
+          type uint32;
+        }
+      }
+    }
+  }
+
+  rpc run {
+    output {
+      leaf ok {
+        type boolean;
+      }
+      uses step;
+    }
+  }
+
+  rpc undo {
+    output {
+      uses step;
+    }
+  }
+
+  container log {
+    config false;
+    uses step;
+  }
+}

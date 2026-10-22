@@ -1,0 +1,34 @@
+module cblink-gen {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:cblink-gen";
+  prefix cg;
+
+  organization
+    "cblink";
+  contact
+    "Pouria Mousavizadeh Tehrani <pouria@FreeBSD.org>";
+  description
+    "What a module tells cblink-gen about the C it writes for it.  No
+     data nodes: the module is imported for its extensions alone, and
+     has no SIDs.";
+
+  revision 2026-10-22 {
+    description
+      "Initial revision: the struct extension.";
+    reference
+      "cblink docs/GENERATOR.md, 'Names'.";
+  }
+
+  extension struct {
+    argument name;
+    description
+      "On a container, a list, an rpc's or action's input or output,
+       or a notification: the C struct cblink-gen writes for the node
+       is named <module>_<name> instead of after the node's path, and
+       the nodes under it after that name.  Every node that names the
+       same struct must have the same children, which a grouping used
+       in several places gives: one struct for all of them, each place
+       with its own schema table (its own SIDs).  The struct and its
+       encoder are written once, for the first place met.";
+  }
+}

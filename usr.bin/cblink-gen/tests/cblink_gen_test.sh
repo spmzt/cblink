@@ -530,6 +530,28 @@ yang_h_body()
 	# Parts not written for YANG yet.
 	atf_check -s exit:2 -e match:'-m c: not written for YANG yet' \
 	    $gen -m h,c "$y/good@2026-10-13.yang"
+	# cg:struct (cblink-gen.yang): one struct for the nodes that name
+	# it, a grouping's list used thrice here; the nodes under it named
+	# after it; its encoder once; two nodes naming it with different
+	# children refused.
+	atf_check $gen -m h -o out -p "$y" \
+	    "$y/shared@2026-10-22.yang"
+	atf_check -o inline:'1\n' sh -c "grep -c '^struct shared_step {' out/shared.h"
+	atf_check -o inline:'1\n' sh -c "grep -c '^struct shared_step_more {' out/shared.h"
+	atf_check -o inline:'3\n' sh -c "grep -c 'const struct shared_step[[:space:]]*[*]v;' out/shared.h"
+	atf_check -o inline:'1\n' sh -c "grep -c '^int[[:space:]]*shared_step_encode(' out/shared.h"
+	atf_check -s exit:1 -o empty grep -e shared_run_output_step out/shared.h
+	atf_check -o match:'^enum shared_step_kind [{]' cat out/shared.h
+	cp "$y/shared@2026-10-22.sid" out/ && chmod 644 out/shared@2026-10-22.sid
+	atf_check -o ignore $gen -n -a -s out/shared@2026-10-22.sid -p "$y" \
+	    "$y/shared@2026-10-22.yang"
+	atf_check -o ignore $gen -m schema -o out -s out/shared@2026-10-22.sid \
+	    -p "$y" "$y/shared@2026-10-22.yang"
+	atf_check -o inline:'1\n' sh -c "grep -c '^shared_step_encode(' out/shared_schema.c"
+	atf_check -o inline:'3\n' sh -c "grep -c 'sizeof(struct shared_step),' out/shared_schema.c"
+	atf_check -s exit:1 -e match:'struct shared_bad_same: two nodes name it' \
+	    $gen -m h -o out -p "$y" \
+	    "$y/shared-bad@2026-10-22.yang"
 }
 
 atf_test_case yang_tree

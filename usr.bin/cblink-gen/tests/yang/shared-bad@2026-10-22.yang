@@ -1,0 +1,25 @@
+module shared-bad {
+  yang-version 1.1;
+  namespace "urn:cblink:yang:test:shared-bad";
+  prefix sb;
+
+  import cblink-gen {
+    prefix cg;
+  }
+
+  revision 2026-10-22;
+
+  container a {
+    cg:struct "same";
+    leaf x {
+      type string;
+    }
+  }
+
+  container b {
+    cg:struct "same";
+    leaf y {
+      type string;
+    }
+  }
+}

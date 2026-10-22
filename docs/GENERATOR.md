@@ -73,6 +73,16 @@ that is a C keyword, or a macro a header may define in lower case
 (`errno`, `assert`, `offsetof`, `unix`, ...), gets a `_` after it
 (`errno_`). Two nodes that would have one name are an error.
 
+A node may name its struct itself: `cg:struct "step"` on a container,
+list, input, output or notification (the extension of `cblink-gen.yang`,
+`share/yang`) makes it `struct <module>_step`, wherever the node is, and
+the nodes under it are named after it. Several nodes naming one struct
+must have the same children, which a grouping used in several places
+gives: the struct, its enums and its encoder are written once, for the
+first place, and each place keeps a schema table of its own (its own
+SIDs). A program that puts one grouping in many replies then has one C
+type for it; two nodes naming it with different children are refused.
+
 ## 3. What it writes
 
 The examples use the module `kv` (`examples/kv/kv@2026-10-13.yang`).

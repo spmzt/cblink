@@ -1,0 +1,15 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "shared",
+    "module-revision": "2026-10-22",
+    "description": "cblink's test SIDs for the shared struct module, never on a wire.",
+    "assignment-range": [
+      {
+        "entry-point": "61700",
+        "size": "40"
+      }
+    ],
+    "item": [
+    ]
+  }
+}

@@ -35,6 +35,9 @@ struct yg {
 	struct buf	 codec;		/* their encoders and decoders */
 	char		**names;	/* every global name, for collisions */
 	size_t		 nnames;
+	char		**shared;	/* cg:struct names written, each with
+					   its children's names after a tab */
+	size_t		 nshared;
 };
 
 /*
@@ -110,12 +113,32 @@ step(struct buf *b, const struct snode *n, bool upper)
 	mangle(b, n->name, upper);
 }
 
+/* The name cg:struct gives n's struct, or NULL (cblink-gen.yang). */
+static const char *
+shared_name(const struct snode *n)
+{
+
+	for (size_t i = 0; i < n->nexts; i++)
+		if (strcmp(n->exts[i].ext, "cblink-gen:struct") == 0 &&
+		    n->exts[i].arg != NULL)
+			return (n->exts[i].arg);
+	return (NULL);
+}
+
 /* The C name of the struct for n, or the prefix of names under it. */
 static void
 cname(struct buf *b, const struct snode *n, bool upper)
 {
 	const struct snode *p = data_parent(n);
 
+	/* One named by cg:struct: its module and that name, wherever the
+	 * node is; the nodes under it are named after it. */
+	if (shared_name(n) != NULL) {
+		mangle(b, n->module->name, upper);
+		buf_puts(b, "_");
+		mangle(b, shared_name(n), upper);
+		return;
+	}
 	if (p != NULL)
 		cname(b, p, upper);
 	else if (n->in != NULL) {
@@ -460,6 +483,33 @@ emit_struct(struct yg *g, const struct snode *n, const struct snode *first,
 	struct mset ms = { 0 };
 	struct buf b;
 
+	/* A struct several nodes share (cg:struct): written once, the
+	 * others' children checked to be the same by name. */
+	if (n != NULL && shared_name(n) != NULL) {
+		struct buf sig;
+		size_t i;
+
+		buf_init(&sig);
+		buf_printf(&sig, "%s\t", sname);
+		for (const struct snode *c = first; c != NULL; c = c->next)
+			buf_printf(&sig, "%s %s,", snode_kind_name(c->kind),
+			    c->name);
+		for (i = 0; i < g->nshared; i++)
+			if (strncmp(g->shared[i], sname, strlen(sname)) == 0 &&
+			    g->shared[i][strlen(sname)] == '\t')
+				break;
+		if (i < g->nshared) {
+			if (strcmp(g->shared[i], sig.p) != 0)
+				diag_add(g->d, 0, 0, "struct %s: two nodes name it "
+				    "(cg:struct) with different children", sname);
+			buf_free(&sig);
+			return;
+		}
+		g->shared = xreallocarray(g->shared, g->nshared + 1,
+		    sizeof(*g->shared));
+		g->shared[g->nshared++] = xstrdup(sig.p);
+		buf_free(&sig);
+	}
 	buf_init(&b);
 	members(g, &b, &ms, sname, first);
 	if (n != NULL)
@@ -588,6 +638,9 @@ gen_yang_h(struct schema *s, const char *base, const char *from,
 	for (size_t i = 0; i < g.nnames; i++)
 		free(g.names[i]);
 	free(g.names);
+	for (size_t i = 0; i < g.nshared; i++)
+		free(g.shared[i]);
+	free(g.shared);
 	buf_free(&guard);
 	buf_free(&gname);
 	buf_free(&g.enums);

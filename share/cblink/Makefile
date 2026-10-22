@@ -25,7 +25,8 @@ YANG=		${.CURDIR}/../yang/cblink@2026-10-13.yang \
 		${.CURDIR}/../yang/cblink-ctrl@2026-10-13.yang \
 		${.CURDIR}/../yang/cblink-ctrl@2026-10-13.sid \
 		${.CURDIR}/../yang/ietf-sid-file@2024-07-31.yang \
-		${.CURDIR}/../yang/ietf-sid-file@2024-07-31.sid
+		${.CURDIR}/../yang/ietf-sid-file@2024-07-31.sid \
+		${.CURDIR}/../yang/cblink-gen@2026-10-22.yang
 YANGDIR=	${SHAREDIR}/cblink/yang
 MK=		cblink.mk
 MKDIR=		${SHAREDIR}/cblink

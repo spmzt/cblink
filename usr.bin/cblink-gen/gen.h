@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define	CBLGEN_VERSION	"0.2.0"
+#define	CBLGEN_VERSION	"0.2.1"
 /* The libcblink major version the generated code is written for. */
 #define	CBLGEN_LIB_MAJOR	0
 

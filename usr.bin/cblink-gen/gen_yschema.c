@@ -60,6 +60,8 @@ struct ys {
 	size_t		 nxp;
 	const struct smodule *m;	/* the module whose tables these are */
 	size_t		 mnodes, mtypes, mbytes;	/* its counts */
+	char		**codecs;	/* the structs whose codec is written */
+	size_t		 ncodecs;
 };
 
 static void	top_add(struct topn **, size_t *, size_t, uint64_t);
@@ -970,7 +972,21 @@ node_ref(struct ys *y, const struct snode *n)
 		buf_init(&list);
 		yc_struct(&list, n);
 		buf_printf(&init, "\t.size = sizeof(struct %s),\n", list.p);
-		codec_emit(y, list.p, nn);
+		/* A struct several nodes share (cg:struct) has the codec of
+		 * the first of them. */
+		{
+			size_t i;
+
+			for (i = 0; i < y->ncodecs; i++)
+				if (strcmp(y->codecs[i], list.p) == 0)
+					break;
+			if (i == y->ncodecs) {
+				y->codecs = xreallocarray(y->codecs, y->ncodecs + 1,
+				    sizeof(*y->codecs));
+				y->codecs[y->ncodecs++] = xstrdup(list.p);
+				codec_emit(y, list.p, nn);
+			}
+		}
 		/* A notification as a server sends it: {SID: value}. */
 		if (n->kind == SN_NOTIF)
 			buf_printf(&y->codec, "int\n%s_notification(const struct "
@@ -1580,6 +1596,9 @@ gen_yang_schema(struct schema *s, const char *base, const char *from,
 	for (i = 0; i < y.nxp; i++)
 		free(y.xp[i]);
 	free(y.xp);
+	for (size_t fcod = 0; fcod < y.ncodecs; fcod++)
+		free(y.codecs[fcod]);
+	free(y.codecs);
 	free(y.mref);
 	free(y.nodes.k);
 	free(y.nodes.v);

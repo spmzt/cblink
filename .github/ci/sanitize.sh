@@ -99,9 +99,9 @@ run_tests()
 	results=${work}/results.db
 
 	cd "${top}"
-	make obj >/dev/null
-	make -j "${jobs}"
-	make install DESTDIR="${dest}"
+	make WITH_TESTS=yes obj >/dev/null
+	make WITH_TESTS=yes -j "${jobs}"
+	make WITH_TESTS=yes install DESTDIR="${dest}"
 
 	cd "${dest}/usr/local/tests/cblink"
 	rm -f "${results}"

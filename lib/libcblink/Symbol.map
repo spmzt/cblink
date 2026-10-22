@@ -145,6 +145,7 @@ CBLINK_1.0 {
 	cbl_tls_reload;
 	cbl_unsubscribe;
 	cbl_version;
+	cbl_features;
 	cbl_yderived_from;
 	cbl_ynode_child;
 	cbl_yschema_ident;

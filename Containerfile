@@ -20,14 +20,14 @@ COPY . /usr/src/cblink
 WORKDIR /usr/src/cblink
 ENV MAKEOBJDIRPREFIX=/usr/obj
 RUN if [ "${CBLINK_TESTS}" = yes ]; then \
-        make -j "$(sysctl -n hw.ncpu)" && \
-        make install DESTDIR=/test && \
+        make -j "$(sysctl -n hw.ncpu)" WITH_TESTS=yes && \
+        make WITH_TESTS=yes install DESTDIR=/test && \
         cd /test/usr/local/tests/cblink && \
         env LD_LIBRARY_PATH=/test/usr/local/lib kyua test -k Kyuafile || \
         { kyua report --verbose --results-filter broken,failed; exit 1; }; \
     fi
-RUN make -j "$(sysctl -n hw.ncpu)" WITHOUT_TESTS=yes && \
-    make install WITHOUT_TESTS=yes DESTDIR=/dist
+RUN make -j "$(sysctl -n hw.ncpu)" && \
+    make install DESTDIR=/dist
 
 FROM ghcr.io/spmzt/freebsd-base:latest
 LABEL org.opencontainers.image.source="https://github.com/spmzt/cblink" \

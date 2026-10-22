@@ -44,7 +44,13 @@ Messages travel over TCP, SCTP and
 .Ux Ns -domain
 sockets.
 TCP uses TLS 1.3 and SCTP uses DTLS 1.2
-.Pq RFC 6083 ;
+.Pq RFC 6083 ,
+when OpenSSL was built with SCTP support, as the base system's is
+.Po
+.Fn cbl_features
+reports
+.Dv CBL_FEAT_DTLS_SCTP
+.Pc ;
 both ends present certificates
 .Pq mutual TLS
 unless plaintext is explicitly requested with

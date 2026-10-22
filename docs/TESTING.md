@@ -9,18 +9,18 @@ themselves when SCTP is not available.
 From a build:
 
 ```sh
-make && make install DESTDIR=/tmp/cblink-root
+make WITH_TESTS=yes && make WITH_TESTS=yes install DESTDIR=/tmp/cblink-root
 cd /tmp/cblink-root/usr/local/tests/cblink
 LD_LIBRARY_PATH=/tmp/cblink-root/usr/local/lib kyua test -k Kyuafile
 kyua report --verbose --results-filter broken,failed
 ```
 
-From the port: `make -C devel/cblink test`. This builds everything with
-the tests, installs it into a scratch root under `WRKDIR`, and runs the
-same suite.
+From the port: `make -C /usr/ports/devel/cblink test`. This builds
+everything with the tests, installs it into a scratch root under
+`WRKDIR`, and runs the same suite.
 
-An installed package does not include the tests: the port builds without
-them.
+An installed package does not include the tests: without `WITH_TESTS=yes`
+the tree builds without them.
 
 ## 2. What is tested
 
@@ -41,7 +41,7 @@ The suite has about 155 test cases.
 | `proxy_test` | The PROXY protocol on `CBL_LF_PROXY` listeners: the allowed proxies, versions 1 and 2 over IPv4 and IPv6, TLVs, `LOCAL` and `UNKNOWN`, headers in pieces and together with the first frame, malformed and oversized headers, missing headers, the timeout, and which endpoints accept the flag. |
 | `sctp_raw_test` | SCTP seen from a raw socket: cblink streams on their own SCTP streams, messages larger than one SCTP chunk, messages over `max_frame` dropped while the association stays up. |
 | `tls_test.sh` | mTLS over TCP with openssl(1)-made certificates: identity, a missing client certificate, a wrong CA, expired certificates, a chain with an intermediate CA and a CRL for each CA, revocation picked up by `cbl_tls_reload()`, plaintext rules, mTLS end to end through a relay that sends PROXY headers. |
-| `sctp_test.sh` | SCTP plain (requests, dumps, streams, frames of 900 KB), multihoming over 127.0.0.1 and ::1 (two paths), and DTLS over SCTP with mTLS. |
+| `sctp_test.sh` | (DTLS skipped when the library's OpenSSL has no SCTP) SCTP plain (requests, dumps, streams, frames of 900 KB), multihoming over 127.0.0.1 and ::1 (two paths), and DTLS over SCTP with mTLS. |
 | `unix_test.sh` | AF_UNIX: credentials, `CBL_LF_UNIX_TRUSTED`, the default `0600` mode, stale socket files. |
 
 `cbl_testpeer` is the program the shell tests drive. It serves the

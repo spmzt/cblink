@@ -807,7 +807,9 @@ the way to the sender.
   opaque.
 - Enumerations and flag values are append-only.
 - `cbl_version()` returns the run-time library version string. The header
-  defines `CBLINK_VERSION_MAJOR`, `_MINOR` and `_PATCH`.
+  defines `CBLINK_VERSION_MAJOR`, `_MINOR` and `_PATCH`. `cbl_features()`
+  returns what this build can do: `CBL_FEAT_DTLS_SCTP` when its OpenSSL
+  has SCTP.
 - Generated code records the version of `cblink-gen` that produced it.
   Its tables are written with designated initializers against
   `<cbl_schema.h>`, so they compile against the header they are built

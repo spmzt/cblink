@@ -706,6 +706,32 @@ cbl_tls_attach(cbl_conn *conn, cbl_tls *tls, bool server)
 	return (0);
 }
 
+uint32_t
+cbl_features(void)
+{
+	uint32_t f = 0;
+
+#ifndef OPENSSL_NO_SCTP
+	f |= CBL_FEAT_DTLS_SCTP;
+#endif
+	return (f);
+}
+
+#ifdef OPENSSL_NO_SCTP
+/*
+ * This OpenSSL has no SCTP BIO (LibreSSL, or an OpenSSL port with its
+ * SCTP option off; base OpenSSL has it): sctp:// works in plaintext only.
+ */
+int
+cbl_dtls_sctp_attach(cbl_conn *conn, cbl_tls *tls __unused,
+    bool server __unused)
+{
+
+	return (cbl_conn_seterr(conn, EPROTONOSUPPORT, "DTLS over SCTP is not "
+	    "available: this OpenSSL was built without SCTP"));
+}
+#else
+
 #define	DTLS_SCTP_RECORD	16384	/* the most plaintext in a record */
 
 /*
@@ -852,4 +878,4 @@ cbl_dtls_sctp_attach(cbl_conn *conn, cbl_tls *tls, bool server)
 	conn->want = server ? CBL_EV_READ : CBL_EV_WRITE;
 	return (0);
 }
-
+#endif /* !OPENSSL_NO_SCTP */

@@ -102,6 +102,9 @@ struct cbl_path_elem {
 };
 
 const char	*cbl_version(void);
+/* What this build of the library can do. */
+#define	CBL_FEAT_DTLS_SCTP	0x1	/* sctp:// with DTLS (OpenSSL with SCTP) */
+uint32_t	 cbl_features(void);
 
 /* Context. */
 int		 cbl_ctx_new(cbl_ctx **ctxp);

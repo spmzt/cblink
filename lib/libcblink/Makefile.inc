@@ -4,7 +4,9 @@
 #   - in-tree (/usr/src/lib/libcblink): SRCTOP is defined; libcbor is the
 #     base private library (LIBADD cbor, headers from contrib/libcbor);
 #   - out-of-tree with base make(1) and bsd.*.mk;
-#   - as the devel/cblink port (out-of-tree with PREFIX/LOCALBASE).
+#   - as the devel/cblink port: out of tree, with PREFIX, LOCALBASE,
+#     CFLAGS, LDFLAGS and OPENSSLINC/OPENSSLLIB (USES=ssl) from the
+#     port's environment.
 # Out of tree, libcbor comes from devel/libcbor in ${LOCALBASE}.
 
 CSTD?=		c23
@@ -30,8 +32,17 @@ CBOR_LDADD=	${LOCALBASE}/lib/libcbor.so
     !make(cleandir) && !make(cleanobj) && !make(obj)
 .error libcbor not found in ${LOCALBASE}: pkg install libcbor, or set LOCALBASE
 .endif
-# OpenSSL: base by default.  The port passes its USES=ssl choice here, so
-# a ports OpenSSL is used consistently when one is selected.
+# OpenSSL: base by default, which has the SCTP support DTLS over SCTP
+# needs.  USES=ssl in the port names its choice in OPENSSLINC and
+# OPENSSLLIB; with one built without SCTP (LibreSSL, or an OpenSSL port
+# with its SCTP option off) the library has no DTLS over SCTP
+# (cbl_features()).
+.if defined(OPENSSLINC) && ${OPENSSLINC} != "/usr/include"
+SSL_CFLAGS=	-I${OPENSSLINC}
+.endif
+.if defined(OPENSSLLIB) && ${OPENSSLLIB} != "/usr/lib"
+SSL_LDFLAGS=	-L${OPENSSLLIB}
+.endif
+.endif
 SSL_CFLAGS?=
 SSL_LDFLAGS?=
-.endif

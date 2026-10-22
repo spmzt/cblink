@@ -108,7 +108,7 @@ The tree builds three ways, all with base `make(1)` and `bsd.*.mk`:
 | How | Command | libcbor |
 |-----|---------|---------|
 | Out of the source tree | `make && make install` (`PREFIX`, `DESTDIR` as usual) | `devel/libcbor` in `${LOCALBASE}` |
-| As the port | `port/devel/cblink`: `make install` | `devel/libcbor` |
+| As the port | `devel/cblink` in the ports tree: `make install` | `devel/libcbor` |
 | In `/usr/src` | `lib/libcblink`, `usr.bin/cblink-gen` as base directories | base's private libcbor (`LIBADD+= cbor`) |
 
 Out of tree, install libcbor first: `pkg install libcbor` (or build
@@ -117,13 +117,17 @@ Out of tree, install libcbor first: `pkg install libcbor` (or build
 Out of tree, everything is built under `obj/` at the top of the tree, never
 in the source directories, unless `MAKEOBJDIRPREFIX` or `MAKEOBJDIR` says
 otherwise. Build from the top: a `make` started in a subdirectory uses that
-directory.
+directory. The test suite and the example programs are built only with
+`WITH_TESTS=yes`.
 
 Dependencies:
 - libc;
 - libcbor;
 - libyang 3, for cblink-gen (`pkg install libyang3`);
-- OpenSSL (base by default, or the port's `USES=ssl` choice);
+- OpenSSL (base by default, or the port's `USES=ssl` choice). DTLS over
+  SCTP needs an OpenSSL built with SCTP: base has it, the OpenSSL ports
+  have it as an option (on by default), LibreSSL has none; a library
+  built without it has plaintext SCTP only (`cbl_features()` tells);
 - libpthread;
 - kqueue;
 - SCTP, which is optional at run time.
@@ -134,7 +138,7 @@ OpenSSL types. The library is `libcblink.so.1`, with symbol versioning.
 ## Testing
 
 ```sh
-make && make install DESTDIR=/tmp/r
+make WITH_TESTS=yes && make WITH_TESTS=yes install DESTDIR=/tmp/r
 cd /tmp/r/usr/local/tests/cblink
 LD_LIBRARY_PATH=/tmp/r/usr/local/lib kyua test -k Kyuafile
 ```
@@ -178,10 +182,16 @@ share/yang/           cblink's own YANG modules and their .sid files
 share/cblink/         cblink.mk, cblink.pc
 examples/             echo, kv, stream, notify, and their tests
 fuzz/                 libFuzzer harnesses and seed corpora
-port/devel/cblink/    the FreeBSD port
 docs/                 documentation
 ```
+
+The FreeBSD port is `devel/cblink` in the ports tree.
 
 ## License
 
 BSD-2-Clause. See [LICENSE](LICENSE).
+
+## Disclosure
+
+Claude Fable 5.1 and Claude Opus 5.5 were used during cblink's
+development.

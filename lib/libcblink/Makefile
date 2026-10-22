@@ -1,7 +1,7 @@
 .include "${.CURDIR}/Makefile.inc"
 
 LIB=		cblink
-SHLIB_MAJOR=	1
+SHLIB_MAJOR=	2
 INCS=		cblink.h cbl_schema.h cbl_data.h
 MAN=		cblink.3
 

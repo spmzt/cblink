@@ -133,7 +133,7 @@ Dependencies:
 - SCTP, which is optional at run time.
 
 The public headers `<cblink.h>` and `<cbl_schema.h>` expose no libcbor or
-OpenSSL types. The library is `libcblink.so.1`, with symbol versioning.
+OpenSSL types. The library is `libcblink.so.2`, with symbol versioning.
 
 ## Testing
 

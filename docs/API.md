@@ -1,6 +1,6 @@
 # libcblink API
 
-The shape of `<cblink.h>` in cblink 0.1.0: the types, the functions and
+The shape of `<cblink.h>` in cblink 0.2.0: the types, the functions and
 the rules for using them across threads. The header itself has the exact
 prototypes. For the protocol, see WIRE-FORMAT.md.
 
@@ -794,7 +794,7 @@ the way to the sender.
 
 ## 12. Versioning and ABI policy
 
-- The shared library is `libcblink.so.1` (`SHLIB_MAJOR=1`). Symbols are
+- The shared library is `libcblink.so.2` (`SHLIB_MAJOR=2`; version 1 spoke wire version 1 and had another API). Symbols are
   versioned with `Symbol.map` and `Versions.def` (bsd.symver.mk), starting at
   `CBLINK_1.0`.
 - Adding functions is allowed within a major version; new symbols go in a

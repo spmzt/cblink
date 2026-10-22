@@ -23,7 +23,7 @@
 #include "cbl_yctrl.h"
 #include "cbl_ymod.h"
 
-#define	CBL_IMPL_NAME	"libcblink/0.1.0"
+#define	CBL_IMPL_NAME	"libcblink/0.2.0"
 #define	CBL_PEER_MIN_FRAME	4096
 
 /* The module's rpc or notification named name. */

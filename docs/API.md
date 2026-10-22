@@ -642,7 +642,9 @@ the way to the sender.
   Every other type is opaque.
 - Enumerations and flag values are append-only.
 - `cbl_version()` returns the run-time library version string. The header
-  defines `CBLINK_VERSION_MAJOR`, `_MINOR` and `_PATCH`.
+  defines `CBLINK_VERSION_MAJOR`, `_MINOR` and `_PATCH`. `cbl_features()`
+  returns what this build can do: `CBL_FEAT_DTLS_SCTP` when its OpenSSL
+  has SCTP.
 - Generated code records the version of `cblink-gen` that produced it.
   Generated code compiled against a header with a newer **major** version
   fails to compile (a `_Static_assert` in the generated `.c`).

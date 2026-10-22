@@ -114,6 +114,8 @@ dtls_head()
 dtls_body()
 {
 	sctp_available
+	${PEER} features | grep -q '^dtls-sctp$' ||
+	    atf_skip "libcblink was built with an OpenSSL without SCTP"
 	mkcerts
 	start_server -c server.crt -k server.key -a ca.crt \
 	    sctp://127.0.0.1:0

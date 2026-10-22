@@ -197,4 +197,5 @@ CBLINK_1.0 {
 	cbl_unsubscribe;
 	cbl_validate;
 	cbl_version;
+	cbl_features;
 };

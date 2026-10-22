@@ -81,7 +81,6 @@ cbl_sctp_socket(const struct cbl_uri *u, bool dtls, int *fdp)
 	int family = u->addr[0].ss_family;
 	int fd, one = 1, zero = 0, level = 2, error;
 	bool mixed = false;
-	BIO *tmp;
 
 	for (int i = 1; i < u->naddr; i++)
 		if (u->addr[i].ss_family != family)
@@ -117,6 +116,13 @@ cbl_sctp_socket(const struct cbl_uri *u, bool dtls, int *fdp)
 	}
 	(void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 	if (dtls) {
+#ifdef OPENSSL_NO_SCTP
+		/* No SCTP BIO in this OpenSSL (cbl_features()). */
+		close(fd);
+		return (EPROTONOSUPPORT);
+#else
+		BIO *tmp;
+
 		/*
 		 * The SCTP BIO turns on SCTP-AUTH for DATA chunks; that has to
 		 * happen before the association exists (as openssl s_server).
@@ -126,6 +132,7 @@ cbl_sctp_socket(const struct cbl_uri *u, bool dtls, int *fdp)
 			return (EPROTONOSUPPORT);
 		}
 		BIO_free(tmp);
+#endif
 	}
 	*fdp = fd;
 	return (0);

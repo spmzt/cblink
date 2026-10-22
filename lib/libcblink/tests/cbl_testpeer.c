@@ -220,7 +220,8 @@ usage(void)
 	    "           [-c cert -k key -a ca [-r crl]] uri\n"
 	    "       cbl_testpeer call [-p] [-c cert -k key -a ca] [-n name]\n"
 	    "           [-o op] [-N n] [-B bytes] uri\n"
-	    "       cbl_testpeer relay [-1] [-d pidfile] port\n");
+	    "       cbl_testpeer relay [-1] [-d pidfile] port\n"
+	    "       cbl_testpeer features\n");
 	exit(2);
 }
 
@@ -764,6 +765,12 @@ main(int argc, char **argv)
 		return (call(argc - 1, argv + 1));
 	if (strcmp(argv[1], "relay") == 0)
 		return (relay(argc - 1, argv + 1));
+	if (strcmp(argv[1], "features") == 0) {
+		/* One per line, for the shell tests to grep. */
+		if ((cbl_features() & CBL_FEAT_DTLS_SCTP) != 0)
+			printf("dtls-sctp\n");
+		return (0);
+	}
 	usage();
 	return (2);
 }

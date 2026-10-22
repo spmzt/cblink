@@ -31,7 +31,10 @@ data they receive.
 
 - **Base OpenSSL.** Base OpenSSL 3.5 has no DTLS 1.3, so DTLS is 1.2,
   limited to forward-secret AEAD suites. Renegotiation and compression
-  are disabled.
+  are disabled. DTLS over SCTP exists only when OpenSSL was built with
+  SCTP, as base is (the OpenSSL ports have it as an option, LibreSSL
+  not at all); without it the library reports `EPROTONOSUPPORT`, and
+  `cbl_features()` lacks `CBL_FEAT_DTLS_SCTP`.
 - **No resumption.** Session caches and tickets are off, so every
   connection does the full mutual verification, CRL check included.
 - **Mutual TLS by default.** A server requests a client certificate and
@@ -132,4 +135,4 @@ data they receive.
 ## 6. Reporting problems
 
 Send reports about security problems to the maintainer listed in the
-port (`port/devel/cblink/Makefile`) rather than to a public tracker.
+port (`devel/cblink` in the ports tree) rather than to a public tracker.

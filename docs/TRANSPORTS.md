@@ -98,7 +98,10 @@ association is one `cbl_conn`.
 
 ### 3.2 DTLS 1.2 over SCTP (RFC 6083)
 
-- This mode uses OpenSSL's SCTP BIO (`BIO_new_dgram_sctp`). SCTP-AUTH must
+- This mode uses OpenSSL's SCTP BIO (`BIO_new_dgram_sctp`), so it needs an
+  OpenSSL built with SCTP: base OpenSSL is, the OpenSSL ports have an SCTP
+  option (on by default), LibreSSL has none. A library built without it refuses `sctp://` with TLS (`EPROTONOSUPPORT`)
+  and leaves `CBL_FEAT_DTLS_SCTP` out of `cbl_features()`. SCTP-AUTH must
   be enabled (`net.inet.sctp.auth_enable=1`, the FreeBSD default). The
   socket is prepared for SCTP-AUTH before `listen()` and `connect()`,
   because auth chunks must be negotiated when the association is set up.

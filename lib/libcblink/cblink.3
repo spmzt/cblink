@@ -201,6 +201,14 @@ of its own, it hands to
 called when the arena is freed, after the answer is encoded.
 .Fn cbl_msg_put_yget
 puts a GET's targets.
+An action is called as an rpc, its input put by its input node, with
+what it acts on beside it,
+.Fn cbl_msg_put_yaction :
+an instance of the action's parent, a list entry's instance-identifier
+that
+.Fn cbl_yiid_write
+makes of the keys of every list from the top down; its handler gets it
+as its target.
 .Pp
 An operation's handler receives a
 .Vt cbl_req

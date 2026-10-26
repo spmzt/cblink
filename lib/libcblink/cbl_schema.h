@@ -373,6 +373,14 @@ void		 cbl_yarena_set_limit(cbl_yarena *a, size_t limit);
  */
 int		 cbl_yarena_atfree(cbl_yarena *a, void (*fn)(void *),
 		    void *arg);
+/*
+ * n's instance-identifier (RFC 9254 section 6.13.1) into b: the SID, or
+ * [SID, values...], the keys of every list from the top down to n, then
+ * a leaf-list entry's value, nvals of them, each pointing at a value as
+ * its member is (a string key's const char *, an integer's).
+ */
+int		 cbl_yiid_write(const struct cbl_ynode *n,
+		    const void *const *vals, size_t nvals, struct cbl_ybuf *b);
 
 /* n's value from its struct p, appended to b.  0, or an errno. */
 int		 cbl_yencode(const struct cbl_ynode *n, const void *p,
@@ -586,6 +594,13 @@ int		 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt,
 int		 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv,
 		    void *arg);
 int		 cbl_yserver_threads(cbl_ctx *ctx, bool on);
+/*
+ * An action: its input put as an rpc's (cbl_msg_put_ynode() of its
+ * input node), and what it acts on beside it, target an instance of
+ * the action's parent (cbl_yiid_write()).
+ */
+int		 cbl_msg_put_yaction(cbl_msg *msg, const void *target,
+		    size_t len);
 int		 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids,
 		    size_t n);
 void		*cbl_req_yarg(const cbl_req *req);

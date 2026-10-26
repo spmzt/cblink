@@ -433,6 +433,26 @@ module cblink {
     }
   }
 
+  sx:structure action {
+    description
+      "The node an RPC of family 1 invokes an action on, beside the
+       action's input: the instance of the action's parent, a list
+       entry with the keys of every list from the top down, as
+       CORECONF's POST names the resource it acts on.";
+    reference
+      "draft-ietf-core-comi: CoAP Management Interface (CORECONF),
+       Section 3.6; RFC 9254, Section 6.13.1";
+    leaf target {
+      type instance-identifier {
+        require-instance false;
+      }
+      mandatory true;
+      description
+        "The action's parent: a container's SID, or a list entry's
+         [SID, keys...].";
+    }
+  }
+
   sx:structure notification {
     description
       "The envelope of a NOTIFY frame: when the event happened, and

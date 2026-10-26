@@ -451,7 +451,7 @@ flags `MULTI` (`0x08`), one object each, then a header-only frame with flags
 
 ### 7.6 The YANG family (`family = 1`)
 
-`"cblink.yang"` serves the data, rpcs and (later) actions of the YANG
+`"cblink.yang"` serves the data, rpcs and actions of the YANG
 modules a program implements, by SID, in the shape of CORECONF's methods
 (draft-ietf-core-comi, section 3). Its bodies are version 2's: top-level
 keys are SIDs, values YANG-CBOR (RFC 9254).
@@ -460,7 +460,7 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 |----:|--------|----------|---------|-------|
 | 1   | `GET`  | do, dump | `{cblink:get: {target: [SID, ...]}}`, or empty: every top-level data node served | do: `{SID: value, ...}`; dump: one `MULTI` frame per node, `{SID: value}` |
 | 2   | `EDIT` | do       | `{SID: value or null, ...}` | ack |
-| 3   | `RPC`  | do       | `{SID(rpc): input or null}` | `{SID(rpc): output}`, or `{SID(rpc): null}` when the rpc has no output |
+| 3   | `RPC`  | do       | `{SID(rpc): input or null}`; an action's, `{SID(action): input or null, cblink:action: {target: instance-identifier}}` | `{SID(rpc): output}`, or `{SID(rpc): null}` when the rpc has no output; an action's likewise |
 | 4   | `NOTIFY` | notification, group `notify` | — | `{cblink:notification: {event-time, event: {delta: content}}}` |
 | 5   | `GET-SID` | dump | empty | one `MULTI` frame per module: `{1301: sid-file}` |
 
@@ -476,7 +476,13 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 - **RPC** is CORECONF's POST, its input validated. An rpc's input and
   output are keyed by the
   rpc's SID, and their children's deltas are from the rpc's SID, not the
-  `input` or `output` node's (RFC 9254 section 3.2).
+  `input` or `output` node's (RFC 9254 section 3.2). An action is
+  called likewise, keyed by its SID, with `cblink:action`'s `target`
+  beside it: the instance-identifier (RFC 9254 section 6.13.1) of the
+  node it acts on, its parent, a list entry as `[SID, keys...]` with the
+  keys of every list from the top down. A target that is no instance of
+  the action's parent is refused (`bad-element`), as is an action
+  without one (`missing-element`).
 - **NOTIFY** frames carry YANG notifications to the subscribers of group
   `notify` (section 9). The envelope is the `cblink:notification`
   structure: `event-time` (RFC 3339, UTC) and the anydata `event`, whose

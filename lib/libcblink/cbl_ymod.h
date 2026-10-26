@@ -23,6 +23,7 @@ struct cblink_hello_limits;
 struct cblink_hello;
 struct cblink_close;
 struct cblink_get;
+struct cblink_action;
 struct cblink_notification;
 
 enum cblink_error_error_type {
@@ -90,6 +91,11 @@ struct cblink_get {
 };
 
 /* structure */
+struct cblink_action {
+	struct cbl_bytes	 target;	/* instance-identifier, in CBOR */
+};
+
+/* structure */
 struct cblink_notification {
 	const char	*event_time;
 	struct cbl_bytes	 event;	/* anydata, in CBOR */
@@ -140,6 +146,13 @@ int	cblink_get_decode(const void *, size_t, struct cblink_get *,
 	    cbl_yarena *, int, char *, size_t);
 int	cblink_get_put(cbl_msg *, const struct cblink_get *);
 int	cblink_get_parse(const cbl_msg *, struct cblink_get *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_action_encode(const struct cblink_action *,
+	    struct cbl_ybuf *);
+int	cblink_action_decode(const void *, size_t, struct cblink_action *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_action_put(cbl_msg *, const struct cblink_action *);
+int	cblink_action_parse(const cbl_msg *, struct cblink_action *, cbl_yarena *,
 	    int, char *, size_t);
 int	cblink_notification_encode(const struct cblink_notification *,
 	    struct cbl_ybuf *);

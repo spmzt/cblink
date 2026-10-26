@@ -1377,6 +1377,53 @@ cbl_ydecode_member(const struct cbl_ynode *n, const void *data, size_t len,
 	return (0);
 }
 
+/*
+ * cbl_yiid_read()'s other way: n's instance-identifier, the SID alone or
+ * [SID, values...], the keys of the lists from the top down to it, then
+ * a leaf-list entry's value, each pointing at a value as its member is.
+ */
+int
+cbl_yiid_write(const struct cbl_ynode *n, const void *const *vals,
+    size_t nvals, struct cbl_ybuf *b)
+{
+	const struct cbl_ynode *chain[YDEPTH_MAX + 1], *x, *c;
+	size_t nc = 0, need = 0, j = 0;
+	int error;
+
+	if (n == NULL || b == NULL || (nvals > 0 && vals == NULL))
+		return (EINVAL);
+	for (x = n; x != NULL; x = x->parent) {
+		if (nc == sizeof(chain) / sizeof(chain[0]))
+			return (ELOOP);
+		chain[nc++] = x;
+		if (x->kind == CBL_YN_LIST)
+			need += x->nkeys;
+	}
+	if (n->kind == CBL_YN_LEAFLIST)
+		need++;
+	if (nvals != need)
+		return (EINVAL);
+	if (need == 0)
+		return (put_head(b, 0, n->sid));
+	if ((error = put_head(b, 4, 1 + need)) != 0 ||
+	    (error = put_head(b, 0, n->sid)) != 0)
+		return (error);
+	while (nc-- > 0) {
+		x = chain[nc];
+		if (x->kind != CBL_YN_LIST)
+			continue;
+		for (uint16_t k = 0; k < x->nkeys; k++) {
+			c = x->child[x->keys[k]];
+			if ((error = enc_value(b, c->type, vals[j++], false)) !=
+			    0)
+				return (error);
+		}
+	}
+	if (n->kind == CBL_YN_LEAFLIST)
+		error = enc_value(b, n->type, vals[j], false);
+	return (error);
+}
+
 int
 cbl_yiid_read(const struct cbl_yschema *s, const struct cbl_bytes *v,
     const struct cbl_ynode **node, const void ***vals, size_t *nvals,

@@ -177,6 +177,8 @@ CBLINK_1.0 {
 	cbl_msg_err_sid;
 	cbl_yserver_add;
 	cbl_yserver_threads;
+	cbl_msg_put_yaction;
+	cbl_yiid_write;
 	cbl_msg_put_yget;
 	cbl_ynotify;
 	cbl_msg_ynotif;

@@ -24,6 +24,7 @@
 #include "yangh.h"
 
 static const struct cbl_ynode *n_shapes, *n_system, *n_state, *n_ping;
+static const struct cbl_ynode *n_item, *n_reset;
 static int marker;		/* the handlers' arg */
 
 /* shapes, kept as YANG-CBOR: what the last edit left. */
@@ -141,7 +142,39 @@ ping_rpc(cbl_req *req, const void *in, void *out, cbl_yarena *a)
 	return (0);
 }
 
-static struct cbl_yhandler handlers[4];
+/* reset, an action of an item: what it was given, the target kept. */
+static uint8_t reset_target[64];
+static size_t reset_len;
+
+static int
+reset_action(cbl_req *req, const struct cbl_bytes *target, const void *in,
+    void *out, cbl_yarena *a)
+{
+	const struct shapes_shapes_item_reset_input *i = in;
+	struct shapes_shapes_item_reset_output *o = out;
+
+	(void)req;
+	(void)a;
+	if (target->len > sizeof(reset_target))
+		return (EINVAL);
+	memcpy(reset_target, target->p, target->len);
+	reset_len = target->len;
+	o->has_took = true;
+	o->took = i->has_hard && i->hard ? 2 : 1;
+	return (0);
+}
+
+static const struct cbl_ynode *
+child(const struct cbl_ynode *n, const char *name)
+{
+
+	for (uint32_t i = 0; i < n->nchild; i++)
+		if (strcmp(n->child[i]->name, name) == 0)
+			return (n->child[i]);
+	atf_tc_fail("no %s under %s", name, n->name);
+}
+
+static struct cbl_yhandler handlers[5];
 static struct cbl_yserver server = { .schema = &yangh_schema };
 
 static int
@@ -175,6 +208,10 @@ setup(struct fixture *f)
 	    system_edit, NULL, NULL };
 	handlers[3] = (struct cbl_yhandler){ n_state->sid, state_get, NULL,
 	    NULL, NULL };
+	n_item = child(n_shapes, "item");
+	n_reset = child(n_item, "reset");
+	handlers[4] = (struct cbl_yhandler){ n_reset->sid, NULL, NULL, NULL,
+	    reset_action };
 	qsort(handlers, nitems(handlers), sizeof(handlers[0]), hcmp);
 	server.nhandler = nitems(handlers);
 	server.handler = handlers;
@@ -592,6 +629,66 @@ ATF_TC_BODY(notif_delta, tc)
 	cbl_ctx_free(ctx);
 }
 
+/*
+ * An action, item 7's reset: its target an item's instance-identifier,
+ * [SID, 7], cbl_yiid_write()'s, the action given it as it was sent; its
+ * output its own.  None, or one of another node, refused.
+ */
+ATF_TC_WITHOUT_HEAD(action);
+ATF_TC_BODY(action, tc)
+{
+	struct shapes_shapes_item_reset_input in = { .has_hard = true,
+	    .hard = true };
+	struct shapes_shapes_item_reset_output out;
+	const struct cbl_ynode *n_in, *n_out;
+	struct cbl_ybuf t = { NULL, 0, 0 };
+	const uint32_t id = 7;
+	const void *vals[] = { &id };
+	struct fixture f;
+	cbl_msg *m, *r;
+	cbl_yarena *a;
+
+	setup(&f);
+	n_in = child(n_reset, "input");
+	n_out = child(n_reset, "output");
+	ATF_REQUIRE_EQ(0, cbl_yiid_write(n_item, vals, 1, &t));
+	/* [SID, 7]: an array of two, the SID, then 7. */
+	ATF_REQUIRE(t.len >= 3 && ((const uint8_t *)t.p)[0] == 0x82 &&
+	    ((const uint8_t *)t.p)[t.len - 1] == 0x07);
+	ATF_REQUIRE_EQ(EINVAL, cbl_yiid_write(n_item, vals, 0, &t));
+	m = new_req(&f, CBL_YCMD_RPC);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_in, &in));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yaction(m, t.p, t.len));
+	ATF_REQUIRE_EQ(0, cbl_request(f.c, m, &r, 5000));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	memset(&out, 0, sizeof(out));
+	ATF_REQUIRE_EQ(0, cbl_msg_ydecode(r, n_out, &out, a, CBL_YD_STRICT,
+	    NULL, 0));
+	ATF_CHECK(out.has_took && out.took == 2);
+	ATF_CHECK(reset_len == t.len && memcmp(reset_target, t.p, t.len) ==
+	    0);
+	cbl_yarena_free(a);
+	cbl_msg_free(r);
+	/* No target. */
+	m = new_req(&f, CBL_YCMD_RPC);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_in, &in));
+	ATF_REQUIRE_EQ(EINVAL, cbl_request(f.c, m, &r, 5000));
+	ATF_CHECK(strstr(cbl_msg_err_str(r), "target") != NULL);
+	cbl_msg_free(r);
+	/* The target another node, shapes itself. */
+	cbl_ybuf_free(&t);
+	memset(&t, 0, sizeof(t));
+	ATF_REQUIRE_EQ(0, cbl_yiid_write(n_shapes, NULL, 0, &t));
+	m = new_req(&f, CBL_YCMD_RPC);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_in, &in));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yaction(m, t.p, t.len));
+	ATF_REQUIRE_EQ(EINVAL, cbl_request(f.c, m, &r, 5000));
+	ATF_CHECK(strstr(cbl_msg_err_str(r), "no instance") != NULL);
+	cbl_msg_free(r);
+	cbl_ybuf_free(&t);
+	teardown(&f);
+}
+
 /* GET of system-state's os-name on c, as asked: "FreeBSD", or NULL. */
 struct slowget {
 	cbl_ctx		*ctx;
@@ -671,5 +768,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, notify);
 	ATF_TP_ADD_TC(tp, notif_delta);
 	ATF_TP_ADD_TC(tp, threads);
+	ATF_TP_ADD_TC(tp, action);
 	return (atf_no_error());
 }

@@ -39,6 +39,7 @@
 
 #include "cbl_impl.h"
 #include "cbl_schema.h"
+#include "cbl_yimpl.h"
 #include "cbl_ymod.h"
 
 /* A node of a served module: its server, handlers and node. */
@@ -505,6 +506,34 @@ io_of(const struct cbl_ynode *rpc, int kind)
 	return (NULL);
 }
 
+/*
+ * An action's target, cblink:action's: an instance of the action's
+ * parent (cbl_yiid_read() over the server's schema), a list entry with
+ * its keys.  0, or an error said for the request.
+ */
+static int
+action_target(cbl_req *req, const cbl_msg *msg, const struct cbl_yserver *srv,
+    const struct cbl_ynode *act, struct cblink_action *ac, cbl_yarena *a)
+{
+	const struct cbl_ynode *n;
+	const void **vals;
+	size_t nvals;
+	char why[128];
+	int error;
+
+	memset(ac, 0, sizeof(*ac));
+	if ((error = cbl_msg_ydecode(msg, cbl_fw_node("action"), ac, a,
+	    CBL_YD_STRICT, why, sizeof(why))) != 0)
+		return (ysay(req, error == ENOENT ? EINVAL : error, act->sid,
+		    "missing-element", error == ENOENT ? "an action needs "
+		    "its target (cblink:action)" : why));
+	if (cbl_yiid_read(srv->schema, &ac->target, &n, &vals, &nvals,
+	    a) != 0 || n != act->parent)
+		return (ysay(req, EINVAL, act->sid, "bad-element",
+		    "the target is no instance of the action's node"));
+	return (0);
+}
+
 static int
 y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
@@ -530,12 +559,15 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	if (at == NULL)
 		return (ysay(req, EINVAL, 0, "missing-element", "no rpc"));
 	sid = (uint64_t)at->key;
-	if (!yfind(req->conn->ctx, sid, &f) || f.n->kind != CBL_YN_RPC)
+	if (!yfind(req->conn->ctx, sid, &f) || (f.n->kind != CBL_YN_RPC &&
+	    f.n->kind != CBL_YN_ACTION))
 		return (ysay(req, ENOENT, sid, "unknown-element",
-		    "no such rpc"));
-	if (f.h == NULL || f.h->rpc == NULL)
+		    "no such rpc or action"));
+	if (f.h == NULL || (f.n->kind == CBL_YN_RPC ? f.h->rpc == NULL :
+	    f.h->action == NULL))
 		return (ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
-		    "the rpc is not served"));
+		    f.n->kind == CBL_YN_RPC ? "the rpc is not served" :
+		    "the action is not served"));
 	if ((in = io_of(f.n, CBL_YN_INPUT)) == NULL ||
 	    (out = io_of(f.n, CBL_YN_OUTPUT)) == NULL)
 		return (ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
@@ -558,9 +590,18 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		return (error);
 	}
 	req->yarg = f.arg;
-	if ((error = f.h->rpc(req, pin, pout, a)) != 0) {
+	if (f.n->kind == CBL_YN_ACTION) {
+		struct cblink_action ac;
+
+		/* The node it acts on: an instance of its parent. */
+		if ((error = action_target(req, msg, f.srv, f.n, &ac, a)) == 0)
+			error = f.h->action(req, &ac.target, pin, pout, a);
+	} else
+		error = f.h->rpc(req, pin, pout, a);
+	if (error != 0) {
 		cbl_yarena_free(a);
-		return (yfailed(req, error, sid, "the rpc failed"));
+		return (yfailed(req, error, sid, f.n->kind == CBL_YN_RPC ?
+		    "the rpc failed" : "the action failed"));
 	}
 	if ((error = cbl_req_reply_new(req, 0, &reply)) == 0) {
 		error = out->nchild == 0 ? cbl_msg_put_ynull(reply, sid) :
@@ -886,6 +927,20 @@ cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv, void *arg)
 	if (error == 0)
 		ctx->yfam = fam;
 	return (error == EEXIST ? 0 : error);
+}
+
+/* {cblink:action: {target: the instance-identifier}}: what an action
+ * acts on, beside its input. */
+int
+cbl_msg_put_yaction(cbl_msg *msg, const void *target, size_t len)
+{
+	struct cblink_action ac;
+
+	if (msg == NULL || target == NULL || len == 0)
+		return (EINVAL);
+	ac.target.p = target;
+	ac.target.len = len;
+	return (cbl_msg_put_ynode(msg, cbl_fw_node("action"), &ac));
 }
 
 int

@@ -178,8 +178,8 @@ are the module `cblink`'s structures (section 6).
   what is translated.
 - **Datastores**: the YANG family edits what the handlers keep; it has no
   `startup`, no `candidate` and no locks.
-- **Actions** and **list entries as targets** are not yet carried by the
-  YANG family: an action's handler is in the server table, and a target
-  is a top-level node's SID.
+- **List entries as GET targets** are not yet carried by the YANG
+  family: a GET's target is a top-level node's SID.  (An action's target
+  is a list entry: `cblink:action`, WIRE-FORMAT.md section 7.6.)
 - A recursive grouping cannot be compiled; a tree that would need one is
   modelled flat, with a leafref to the parent.

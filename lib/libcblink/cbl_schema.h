@@ -366,6 +366,13 @@ void		 cbl_yarena_free(cbl_yarena *a);
  */
 void		*cbl_yarena_alloc(cbl_yarena *a, size_t len);
 void		 cbl_yarena_set_limit(cbl_yarena *a, size_t limit);
+/*
+ * fn(arg) when a is freed, the last given first: what an answer points
+ * to and the arena does not hold (a handler's own buffers) lives until
+ * it is encoded.  ENOMEM, and fn is not called.
+ */
+int		 cbl_yarena_atfree(cbl_yarena *a, void (*fn)(void *),
+		    void *arg);
 
 /* n's value from its struct p, appended to b.  0, or an errno. */
 int		 cbl_yencode(const struct cbl_ynode *n, const void *p,
@@ -539,7 +546,12 @@ struct cbl_yserver {
  * input} gives {SID(rpc): output}, null when it has none.
  *
  * cbl_yserver_add() serves srv's modules, arg its handlers'
- * (cbl_req_yarg()).  cbl_msg_put_yget() puts a GET's targets.  A handler names the node at fault with
+ * (cbl_req_yarg()).  The handlers run on the loop that read the request
+ * and answer on return; with cbl_yserver_threads() each GET, EDIT and
+ * RPC runs on a thread of its own instead, the request deferred, so a
+ * slow read holds no other request: its handlers must then be safe to
+ * run at once.  cbl_msg_put_yget() puts a GET's targets.  A handler
+ * names the node at fault with
  * cbl_req_set_yerr(), the error's error-path; a client reads it with
  * cbl_msg_err_sid().
  */
@@ -573,6 +585,7 @@ int		 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt,
 
 int		 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv,
 		    void *arg);
+int		 cbl_yserver_threads(cbl_ctx *ctx, bool on);
 int		 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids,
 		    size_t n);
 void		*cbl_req_yarg(const cbl_req *req);

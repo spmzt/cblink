@@ -190,6 +190,15 @@ The handlers the server defines get the argument given with
 .Fn cbl_req_yarg ,
 and name the node at fault with
 .Fn cbl_req_set_yerr .
+They run on the loop that read the request and answer on return; after
+.Fn cbl_yserver_threads ,
+each GET, EDIT and RPC runs on a thread of its own, the request
+deferred, so that a slow read holds no other request: the handlers must
+then be safe to run at once.
+What a handler's answer points to and the arena does not hold, a buffer
+of its own, it hands to
+.Fn cbl_yarena_atfree ,
+called when the arena is freed, after the answer is encoded.
 .Fn cbl_msg_put_yget
 puts a GET's targets.
 .Pp

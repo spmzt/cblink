@@ -56,10 +56,18 @@
 #define	YARENA_LIMIT	(64 * 1024 * 1024)
 #define	NOMEM		"no memory, or past the arena's limit"
 
+/* What cbl_yarena_atfree() was given, the last first. */
+struct yatfree {
+	void		(*fn)(void *);
+	void		 *arg;
+	struct yatfree	 *next;
+};
+
 struct cbl_yarena {
 	struct cbl_arena	 ar;
 	size_t			 used;
 	size_t			 limit;
+	struct yatfree		*atfree;
 };
 
 cbl_yarena *
@@ -77,11 +85,33 @@ cbl_yarena_new(void)
 void
 cbl_yarena_free(cbl_yarena *a)
 {
+	struct yatfree *t;
 
 	if (a == NULL)
 		return;
+	while ((t = a->atfree) != NULL) {
+		a->atfree = t->next;
+		t->fn(t->arg);
+		free(t);
+	}
 	cbl_arena_free(&a->ar);
 	free(a);
+}
+
+int
+cbl_yarena_atfree(cbl_yarena *a, void (*fn)(void *), void *arg)
+{
+	struct yatfree *t;
+
+	if (a == NULL || fn == NULL)
+		return (EINVAL);
+	if ((t = malloc(sizeof(*t))) == NULL)
+		return (ENOMEM);
+	t->fn = fn;
+	t->arg = arg;
+	t->next = a->atfree;
+	a->atfree = t;
+	return (0);
 }
 
 void

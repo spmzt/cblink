@@ -31,6 +31,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -319,7 +320,7 @@ get_one(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
 }
 
 static int
-y_get(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	cbl_msg *reply;
 	uint64_t *v;
@@ -408,7 +409,7 @@ struct yedit {
  * undone if one fails.
  */
 static int
-y_edit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	const cbl_attr *body = cbl_msg_body(msg), *at;
 	struct yedit *e = NULL;
@@ -505,7 +506,7 @@ io_of(const struct cbl_ynode *rpc, int kind)
 }
 
 static int
-y_rpc(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	const cbl_attr *body = cbl_msg_body(msg), *at = NULL;
 	const struct cbl_ynode *in, *out;
@@ -608,6 +609,76 @@ y_getsid_dump(cbl_req *req, const cbl_msg *msg __unused,
 	if ((error = cbl_req_send(req, item)) != 0)
 		return (error);
 	return (EAGAIN);
+}
+
+/*
+ * A request on a thread of its own (cbl_yserver_threads()): deferred,
+ * its handlers run there, its answer sent from there; the loop goes on
+ * with the others.  Without threads, or where none can be made, here.
+ */
+struct ythread {
+	cbl_req	*req;
+	int	(*fn)(cbl_req *, const cbl_msg *, void *);
+};
+
+static void *
+ythread(void *p)
+{
+	struct ythread *t = p;
+	int error;
+
+	error = t->fn(t->req, cbl_req_msg(t->req), NULL);
+	(void)cbl_req_complete(t->req, error);
+	free(t);
+	return (NULL);
+}
+
+static int
+ydefer(cbl_req *req, const cbl_msg *msg,
+    int (*fn)(cbl_req *, const cbl_msg *, void *))
+{
+	struct ythread *t;
+	pthread_t tid;
+	int error;
+
+	if (!atomic_load(&req->conn->ctx->ythreads) ||
+	    (t = malloc(sizeof(*t))) == NULL)
+		return (fn(req, msg, NULL));
+	t->req = req;
+	t->fn = fn;
+	if (cbl_req_defer(req) != 0) {
+		free(t);
+		return (fn(req, msg, NULL));
+	}
+	if (pthread_create(&tid, NULL, ythread, t) != 0) {
+		free(t);
+		error = fn(req, msg, NULL);
+		(void)cbl_req_complete(req, error);
+		return (0);
+	}
+	(void)pthread_detach(tid);
+	return (0);
+}
+
+static int
+y_get(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+{
+
+	return (ydefer(req, msg, y_get_now));
+}
+
+static int
+y_edit(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+{
+
+	return (ydefer(req, msg, y_edit_now));
+}
+
+static int
+y_rpc(cbl_req *req, const cbl_msg *msg, void *arg __unused)
+{
+
+	return (ydefer(req, msg, y_rpc_now));
 }
 
 static const struct cbl_op yops[] = {
@@ -815,6 +886,16 @@ cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv, void *arg)
 	if (error == 0)
 		ctx->yfam = fam;
 	return (error == EEXIST ? 0 : error);
+}
+
+int
+cbl_yserver_threads(cbl_ctx *ctx, bool on)
+{
+
+	if (ctx == NULL)
+		return (EINVAL);
+	atomic_store(&ctx->ythreads, on);
+	return (0);
 }
 
 /* A GET's targets: the cblink:get structure, each a SID. */

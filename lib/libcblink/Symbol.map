@@ -160,6 +160,7 @@ CBLINK_1.0 {
 	cbl_yencode_sid;
 	cbl_yarena_alloc;
 	cbl_yarena_set_limit;
+	cbl_yarena_atfree;
 	cbl_msg_put_sid_raw;
 	cbl_msg_put_ynode;
 	cbl_msg_sid_raw;
@@ -175,6 +176,7 @@ CBLINK_1.0 {
 	cbl_msg_ydecode_member;
 	cbl_msg_err_sid;
 	cbl_yserver_add;
+	cbl_yserver_threads;
 	cbl_msg_put_yget;
 	cbl_ynotify;
 	cbl_msg_ynotif;

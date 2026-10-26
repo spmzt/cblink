@@ -13,10 +13,12 @@
 #include <atf-c.h>
 #include <errno.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "cbl_net_test.h"
 #include "yangh.h"
@@ -86,18 +88,39 @@ system_edit(cbl_req *req, const void *before, const void *after)
 	return (0);
 }
 
-/* /system-state: state, read only. */
+/* A slow read (the threads case), and buffers freed with the arena. */
+static atomic_bool slow;
+static atomic_int freed;
+
+static void
+free_name(void *p)
+{
+
+	free(p);
+	atomic_fetch_add(&freed, 1);
+}
+
+/* /system-state: state, read only; its name a buffer of its own, freed
+ * when the answer's arena is (cbl_yarena_atfree()). */
 static int
 state_get(cbl_req *req, void *data, cbl_yarena *a)
 {
 	struct ietf_system_system_state *st;
 	struct ietf_system_system_state_platform *pl;
+	char *name;
 
 	(void)req;
+	if (atomic_load(&slow))
+		usleep(800000);
 	if ((st = cbl_yarena_alloc(a, sizeof(*st))) == NULL ||
-	    (pl = cbl_yarena_alloc(a, sizeof(*pl))) == NULL)
+	    (pl = cbl_yarena_alloc(a, sizeof(*pl))) == NULL ||
+	    (name = strdup("FreeBSD")) == NULL)
 		return (ENOMEM);
-	pl->os_name = "FreeBSD";
+	if (cbl_yarena_atfree(a, free_name, name) != 0) {
+		free(name);
+		return (ENOMEM);
+	}
+	pl->os_name = name;
 	st->platform = pl;
 	((struct ietf_system *)data)->system_state = st;
 	return (0);
@@ -569,6 +592,74 @@ ATF_TC_BODY(notif_delta, tc)
 	cbl_ctx_free(ctx);
 }
 
+/* GET of system-state's os-name on c, as asked: "FreeBSD", or NULL. */
+struct slowget {
+	cbl_ctx		*ctx;
+	cbl_conn	*c;
+	bool		 ok;
+};
+
+static void *
+get_state(void *p)
+{
+	struct slowget *g = p;
+	struct ietf_system s = { 0 };
+	cbl_msg *m, *r;
+	cbl_yarena *a;
+
+	g->ok = false;
+	if (cbl_msg_new(g->ctx, CBL_YANG_FAMILY, CBL_YCMD_GET, 0, &m) != 0 ||
+	    cbl_msg_put_yget(m, &n_state->sid, 1) != 0 ||
+	    cbl_request(g->c, m, &r, 5000) != 0)
+		return (NULL);
+	if ((a = cbl_yarena_new()) != NULL && cbl_msg_ydecode_member(r,
+	    n_state, &s, a, CBL_YD_STRICT, NULL, 0) == 0 &&
+	    s.system_state != NULL && s.system_state->platform != NULL &&
+	    s.system_state->platform->os_name != NULL)
+		g->ok = strcmp(s.system_state->platform->os_name,
+		    "FreeBSD") == 0;
+	cbl_yarena_free(a);
+	cbl_msg_free(r);
+	return (NULL);
+}
+
+/*
+ * cbl_yserver_threads(): a slow GET on one connection holds no other
+ * request, which is answered first; what a handler gave of its own is
+ * there in the answer, and freed after.
+ */
+ATF_TC_WITHOUT_HEAD(threads);
+ATF_TC_BODY(threads, tc)
+{
+	struct fixture f;
+	struct slowget g;
+	struct timespec t0, t1;
+	pthread_t tid;
+	int before;
+
+	setup(&f);
+	ATF_REQUIRE_EQ(0, cbl_yserver_threads(f.sctx, true));
+	ATF_REQUIRE_EQ(0, edit(&f, 100, NULL, NULL));
+	g.ctx = f.cctx;
+	ATF_REQUIRE_EQ(0, cbl_conn_new(f.cctx, f.ts.uri, CBL_PLAINTEXT, &g.c));
+	ATF_REQUIRE_EQ(0, cbl_conn_connect(g.c));
+	before = atomic_load(&freed);
+	atomic_store(&slow, true);
+	ATF_REQUIRE_EQ(0, pthread_create(&tid, NULL, get_state, &g));
+	usleep(200000);
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	ATF_CHECK_EQ(100, get_ratio(&f));
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	ATF_CHECK_MSG((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec -
+	    t0.tv_nsec) / 1000000 < 400, "the quick GET waited for the slow");
+	ATF_REQUIRE_EQ(0, pthread_join(tid, NULL));
+	atomic_store(&slow, false);
+	ATF_CHECK(g.ok);
+	ATF_CHECK_EQ(before + 1, atomic_load(&freed));
+	cbl_conn_free(g.c);
+	teardown(&f);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -579,5 +670,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, dump);
 	ATF_TP_ADD_TC(tp, notify);
 	ATF_TP_ADD_TC(tp, notif_delta);
+	ATF_TP_ADD_TC(tp, threads);
 	return (atf_no_error());
 }

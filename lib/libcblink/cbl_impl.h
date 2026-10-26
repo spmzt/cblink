@@ -184,8 +184,10 @@ struct cbl_ctx {
 	uint32_t		 next_group;
 	cbl_family		*ctrl;
 
-	/* Family 1, "cblink.yang", and the servers it serves (famlock). */
+	/* Family 1, "cblink.yang", and the servers it serves (famlock);
+	 * whether its requests run on threads of their own. */
 	cbl_family		*yfam;
+	_Atomic bool		 ythreads;
 	struct cbl_yserved {
 		const struct cbl_yserver *srv;
 		void		*arg;

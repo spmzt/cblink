@@ -622,6 +622,10 @@ int		 cbl_msg_put_yaction(cbl_msg *msg, const void *target,
 		    size_t len);
 int		 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids,
 		    size_t n);
+/* A GET's targets and an XPath filter over them (RFC 6241 section 8.9):
+ * what it selects comes back, the nodes above it and keys with it. */
+int		 cbl_msg_put_yget_xpath(cbl_msg *msg, const uint64_t *sids,
+		    size_t n, const char *xpath);
 void		*cbl_req_yarg(const cbl_req *req);
 int		 cbl_req_set_yerr(cbl_req *req, const char *text,
 		    uint64_t sid);

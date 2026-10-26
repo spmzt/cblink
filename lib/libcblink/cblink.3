@@ -200,7 +200,10 @@ of its own, it hands to
 .Fn cbl_yarena_atfree ,
 called when the arena is freed, after the answer is encoded.
 .Fn cbl_msg_put_yget
-puts a GET's targets.
+puts a GET's targets, and
+.Fn cbl_msg_put_yget_xpath
+an XPath filter with them, NETCONF's: what it selects comes back, with
+the nodes above it.
 An action is called as an rpc, its input put by its input node, with
 what it acts on beside it,
 .Fn cbl_msg_put_yaction :

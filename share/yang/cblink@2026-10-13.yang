@@ -431,6 +431,18 @@ module cblink {
         "A node to read: its SID.  A list entry's, a SID with its
          keys, is for a later revision of the protocol.";
     }
+    leaf xpath-filter {
+      type string;
+      description
+        "An XPath expression over the nodes read (the targets, or the
+         whole datastore), as NETCONF's xpath filter (RFC 6241,
+         section 8.9): what it selects comes back, with the nodes above
+         it and a list entry's keys, nothing else.  Its prefixes are
+         its modules' names (XPath-lite, cblink's YANG.md).";
+      reference
+        "RFC 6241: Network Configuration Protocol (NETCONF), Section
+         8.9";
+    }
   }
 
   sx:structure action {

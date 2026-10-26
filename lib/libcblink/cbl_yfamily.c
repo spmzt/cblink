@@ -37,6 +37,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "cbl_data.h"
 #include "cbl_impl.h"
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
@@ -228,7 +229,8 @@ sid_cmp(const void *a, const void *b)
  * top-level data node with a get handler.
  */
 static int
-get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np)
+get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
+    char **xpathp)
 {
 	cbl_ctx *ctx = req->conn->ctx;
 	struct cblink_get g;
@@ -240,6 +242,8 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np)
 
 	if ((a = cbl_yarena_new()) == NULL)
 		return (ENOMEM);
+	/* Not there (the whole datastore): nothing of it read. */
+	memset(&g, 0, sizeof(g));
 	error = cbl_msg_ydecode(msg, cbl_fw_node("get"), &g, a, CBL_YD_STRICT,
 	    why, sizeof(why));
 	if (error == 0 && g.target.n > 0) {
@@ -270,6 +274,11 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np)
 		pthread_rwlock_unlock(&ctx->famlock);
 	} else
 		error = ysay(req, error, 0, "malformed-message", why);
+	/* An xpath filter: copied, the arena goes. */
+	*xpathp = NULL;
+	if (error == 0 && g.xpath_filter != NULL &&
+	    (*xpathp = strdup(g.xpath_filter)) == NULL)
+		error = ENOMEM;
 	cbl_yarena_free(a);
 	if (error != 0) {
 		free(v);
@@ -285,6 +294,86 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np)
 	*vp = v;
 	*np = n;
 	return (0);
+}
+
+/*
+ * The nodes v read through their get handlers, made one instance tree
+ * (cbl_data.h) as their YANG-CBOR says, what xpath selects of it (with
+ * the nodes above and a list entry's keys, RFC 6241 section 8.9) into
+ * reply.  The nodes' servers are one, their schema the tree's.
+ */
+static int
+get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
+    const char *xpath)
+{
+	const struct cbl_yschema *schema = NULL;
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	cbl_dtree *t = NULL, *ft;
+	struct yfound f;
+	cbl_yarena *a;
+	cbl_dnode *c;
+	void *data;
+	char why[160];
+	int error = 0;
+
+	for (size_t i = 0; error == 0 && i < n; i++) {
+		if (!yfind(req->conn->ctx, v[i], &f) || !is_top_data(f.n))
+			return (ysay(req, ENOENT, v[i], "unknown-element",
+			    "no such node"));
+		if (f.h == NULL || f.h->get == NULL)
+			continue;
+		if (schema == NULL) {
+			schema = f.srv->schema;
+			if ((t = cbl_dtree_new(schema)) == NULL)
+				return (ENOMEM);
+		} else if (f.srv->schema != schema) {
+			cbl_dtree_free(t);
+			return (ysay(req, EOPNOTSUPP, v[i],
+			    "operation-not-supported", "a filter's nodes are "
+			    "of one server's modules"));
+		}
+		if ((a = cbl_yarena_new()) == NULL) {
+			error = ENOMEM;
+			break;
+		}
+		if ((data = cbl_yarena_alloc(a, f.n->module->size)) == NULL)
+			error = ENOMEM;
+		else {
+			req->yarg = f.arg;
+			if ((error = f.h->get(req, data, a)) != 0)
+				error = yfailed(req, error, v[i],
+				    "reading it failed");
+			else if (cbl_ymember_present(f.n, data) &&
+			    (error = cbl_yencode_member(f.n, data, &b)) == 0)
+				error = cbl_dnode_decode(cbl_dtree_root(t), f.n,
+				    b.p, b.len, 0, why, sizeof(why), NULL);
+			cbl_ybuf_free(&b);
+			memset(&b, 0, sizeof(b));
+		}
+		cbl_yarena_free(a);
+	}
+	if (error != 0 || t == NULL) {
+		cbl_dtree_free(t);
+		return (error);
+	}
+	if ((ft = cbl_dtree_filter_xpath(t, xpath, why, sizeof(why))) ==
+	    NULL) {
+		error = errno;
+		cbl_dtree_free(t);
+		return (ysay(req, error == ENOMEM ? ENOMEM : EINVAL, 0,
+		    "invalid-value", why));
+	}
+	for (c = cbl_dnode_first(cbl_dtree_root(ft)); error == 0 && c != NULL;
+	    c = cbl_dnode_next(c)) {
+		if ((error = cbl_dnode_encode(c, &b)) == 0)
+			error = cbl_msg_put_sid_raw(reply,
+			    cbl_dnode_schema(c)->sid, b.p, b.len);
+		cbl_ybuf_free(&b);
+		memset(&b, 0, sizeof(b));
+	}
+	cbl_dtree_free(ft);
+	cbl_dtree_free(t);
+	return (error);
 }
 
 /* A node's value into reply, through its get handler. */
@@ -325,19 +414,24 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	cbl_msg *reply;
 	uint64_t *v;
+	char *xpath;
 	size_t n;
 	bool put;
 	int error;
 
-	if ((error = get_targets(req, msg, &v, &n)) != 0)
+	if ((error = get_targets(req, msg, &v, &n, &xpath)) != 0)
 		return (error);
 	if ((error = cbl_req_reply_new(req, 0, &reply)) != 0) {
 		free(v);
+		free(xpath);
 		return (error);
 	}
-	for (size_t i = 0; error == 0 && i < n; i++)
+	if (xpath != NULL)
+		error = get_filtered(req, reply, v, n, xpath);
+	for (size_t i = 0; xpath == NULL && error == 0 && i < n; i++)
 		error = get_one(req, reply, v[i], &put);
 	free(v);
+	free(xpath);
 	if (error != 0) {
 		cbl_msg_free(reply);
 		return (error);
@@ -366,15 +460,25 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 {
 	struct ydump *d = st->priv;
 	cbl_msg *item;
+	char *xpath;
 	bool put;
 	int error;
 
 	if (d == NULL) {
 		if ((d = calloc(1, sizeof(*d))) == NULL)
 			return (ENOMEM);
-		if ((error = get_targets(req, msg, &d->v, &d->n)) != 0) {
+		if ((error = get_targets(req, msg, &d->v, &d->n, &xpath)) !=
+		    0) {
 			free(d);
 			return (error);
+		}
+		/* A dump is a node a frame: a filter is a GET's. */
+		if (xpath != NULL) {
+			free(xpath);
+			free(d->v);
+			free(d);
+			return (ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+			    "an xpath filter is for a GET, not a dump"));
 		}
 		st->priv = d;
 		st->priv_free = ydump_free;
@@ -957,6 +1061,15 @@ cbl_yserver_threads(cbl_ctx *ctx, bool on)
 int
 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids, size_t n)
 {
+
+	return (cbl_msg_put_yget_xpath(msg, sids, n, NULL));
+}
+
+/* The same, what xpath selects of them alone (NULL: all of it). */
+int
+cbl_msg_put_yget_xpath(cbl_msg *msg, const uint64_t *sids, size_t n,
+    const char *xpath)
+{
 	struct cblink_get g = { 0 };
 	struct cbl_bytes *t;
 	uint8_t *b;
@@ -964,10 +1077,11 @@ cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids, size_t n)
 
 	if (msg == NULL || (sids == NULL && n > 0))
 		return (EINVAL);
-	if (n == 0)
+	if (n == 0 && xpath == NULL)
 		return (0);
-	if ((t = calloc(n, sizeof(*t))) == NULL ||
-	    (b = calloc(n, 9)) == NULL) {
+	g.xpath_filter = xpath;
+	if ((t = calloc(n > 0 ? n : 1, sizeof(*t))) == NULL ||
+	    (b = calloc(n > 0 ? n : 1, 9)) == NULL) {
 		free(t);
 		return (cbl_msg_fail(msg, ENOMEM, "out of memory"));
 	}

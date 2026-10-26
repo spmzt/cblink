@@ -84,6 +84,7 @@ struct cblink_close {
 
 /* structure */
 struct cblink_get {
+	const char	*xpath_filter;
 	struct {
 		size_t		 n;
 		const struct cbl_bytes	 *v;

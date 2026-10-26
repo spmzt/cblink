@@ -182,6 +182,7 @@ CBLINK_1.0 {
 	cbl_yiid_read;
 	cbl_yvalue_parse;
 	cbl_msg_put_yget;
+	cbl_msg_put_yget_xpath;
 	cbl_ynotify;
 	cbl_msg_ynotif;
 	cbl_yvalidate;

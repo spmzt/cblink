@@ -704,6 +704,52 @@ ATF_TC_BODY(action, tc)
 	teardown(&f);
 }
 
+/*
+ * A GET with an xpath filter (cblink:get's xpath-filter): of the whole
+ * datastore, what the expression selects alone; one that is no XPath
+ * refused, invalid-value; a dump with one refused.
+ */
+ATF_TC_WITHOUT_HEAD(filter);
+ATF_TC_BODY(filter, tc)
+{
+	struct ietf_system s = { 0 };
+	struct fixture f;
+	cbl_msg *m, *r;
+	cbl_yarena *a;
+	const void *v;
+	size_t len;
+
+	setup(&f);
+	ATF_REQUIRE_EQ(0, edit(&f, 100, NULL, NULL));
+	/* shapes alone. */
+	m = new_req(&f, CBL_YCMD_GET);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yget_xpath(m, NULL, 0, "/shapes:shapes"));
+	ATF_REQUIRE_EQ(0, cbl_request(f.c, m, &r, 5000));
+	ATF_CHECK_EQ(0, cbl_msg_sid_raw(r, n_shapes->sid, &v, &len));
+	ATF_CHECK_EQ(ENOENT, cbl_msg_sid_raw(r, n_state->sid, &v, &len));
+	cbl_msg_free(r);
+	/* system-state's platform: the node above it with it. */
+	m = new_req(&f, CBL_YCMD_GET);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yget_xpath(m, NULL, 0,
+	    "/ietf-system:system-state/ietf-system:platform"));
+	ATF_REQUIRE_EQ(0, cbl_request(f.c, m, &r, 5000));
+	ATF_CHECK_EQ(ENOENT, cbl_msg_sid_raw(r, n_shapes->sid, &v, &len));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_msg_ydecode_member(r, n_state, &s, a,
+	    CBL_YD_STRICT, NULL, 0));
+	ATF_REQUIRE(s.system_state != NULL &&
+	    s.system_state->platform != NULL);
+	ATF_CHECK_STREQ("FreeBSD", s.system_state->platform->os_name);
+	cbl_yarena_free(a);
+	cbl_msg_free(r);
+	/* Not an expression. */
+	m = new_req(&f, CBL_YCMD_GET);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yget_xpath(m, NULL, 0, "/["));
+	ATF_REQUIRE_EQ(EINVAL, cbl_request(f.c, m, &r, 5000));
+	cbl_msg_free(r);
+	teardown(&f);
+}
+
 /* GET of system-state's os-name on c, as asked: "FreeBSD", or NULL. */
 struct slowget {
 	cbl_ctx		*ctx;
@@ -784,5 +830,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, notif_delta);
 	ATF_TP_ADD_TC(tp, threads);
 	ATF_TP_ADD_TC(tp, action);
+	ATF_TP_ADD_TC(tp, filter);
 	return (atf_no_error());
 }

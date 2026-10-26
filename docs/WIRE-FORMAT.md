@@ -466,7 +466,12 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 
 - **GET** is CORECONF's FETCH. A node that is not instantiated is left
   out of the reply. A target is a top-level node's SID; a list entry's
-  (`[SID, keys...]`) is for a later revision.
+  (`[SID, keys...]`) is for a later revision. With `cblink:get`'s
+  `xpath-filter`, only what the expression selects of the nodes read
+  comes back, with the nodes above it and a list entry's keys (NETCONF's
+  xpath filter, RFC 6241 section 8.9; XPath-lite, its prefixes the
+  modules' names); the nodes are of one server's modules. An expression
+  that does not parse is `invalid-value`; a dump takes none.
 - **EDIT** is CORECONF's iPATCH: a value creates or replaces the node, null
   deletes it. Only configuration (`config true`) is edited. The request
   is all or nothing: every value is decoded and validated (YANG.md

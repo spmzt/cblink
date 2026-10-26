@@ -648,7 +648,7 @@ ATF_TC_BODY(action, tc)
 	struct shapes_shapes_item_reset_output out;
 	const struct cbl_ynode *n_in, *n_out;
 	struct cbl_ybuf t = { NULL, 0, 0 };
-	const uint32_t id = 7;
+	uint32_t id = 0;
 	const void *vals[] = { &id };
 	struct fixture f;
 	cbl_msg *m, *r;
@@ -657,6 +657,15 @@ ATF_TC_BODY(action, tc)
 	setup(&f);
 	n_in = child(n_reset, "input");
 	n_out = child(n_reset, "output");
+	/* The key as a person gives it, read as its member is. */
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_yvalue_parse(child(n_item, "id"),
+	    child(n_item, "id")->type, "7", &id, a));
+	ATF_REQUIRE_EQ(7, id);
+	ATF_REQUIRE(cbl_yvalue_parse(child(n_item, "id"), child(n_item,
+	    "id")->type, "seven", &id, a) != 0);
+	id = 7;
+	cbl_yarena_free(a);
 	ATF_REQUIRE_EQ(0, cbl_yiid_write(n_item, vals, 1, &t));
 	/* [SID, 7]: an array of two, the SID, then 7. */
 	ATF_REQUIRE(t.len >= 3 && ((const uint8_t *)t.p)[0] == 0x82 &&

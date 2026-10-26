@@ -374,6 +374,15 @@ void		 cbl_yarena_set_limit(cbl_yarena *a, size_t limit);
 int		 cbl_yarena_atfree(cbl_yarena *a, void (*fn)(void *),
 		    void *arg);
 /*
+ * A value of type t, leaf or leaf-list n's, from its canonical string s
+ * into out, as its member is (what it points to in a; a string's, s
+ * itself): what a program reads from a person, a list's key or an
+ * rpc's input.  EOPNOTSUPP: a type not read from a string.
+ */
+int		 cbl_yvalue_parse(const struct cbl_ynode *n,
+		    const struct cbl_ytype *t, const char *s, void *out,
+		    cbl_yarena *a);
+/*
  * An instance-identifier's YANG-CBOR (RFC 9254 section 6.13.1): a SID,
  * or [SID, values...]: *node, the node of schema s it names, and *vals,
  * the keys of the lists from the top down to it, then a leaf-list

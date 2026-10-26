@@ -180,6 +180,7 @@ CBLINK_1.0 {
 	cbl_msg_put_yaction;
 	cbl_yiid_write;
 	cbl_yiid_read;
+	cbl_yvalue_parse;
 	cbl_msg_put_yget;
 	cbl_ynotify;
 	cbl_msg_ynotif;

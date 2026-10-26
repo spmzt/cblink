@@ -166,6 +166,9 @@ CBLINK_1.0 {
 	cbl_msg_ydecode;
 	cbl_yencode_member;
 	cbl_ymember_present;
+	cbl_yjson;
+	cbl_yjson_module;
+	cbl_yjson_members;
 	cbl_ydecode_member;
 	cbl_msg_put_ymember;
 	cbl_msg_put_ynull;

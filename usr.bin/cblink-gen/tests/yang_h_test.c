@@ -679,6 +679,74 @@ ATF_TC_BODY(kinds, tc)
 	cbl_yarena_free(a);
 }
 
+/* json's text has want in it. */
+static void
+check_json(const struct cbl_ybuf *b, const char *want)
+{
+
+	ATF_CHECK_MSG(memmem(b->p, b->len, want, strlen(want)) != NULL,
+	    "%s not in %.*s", want, (int)b->len, (const char *)b->p);
+}
+
+/*
+ * RFC 7951's JSON of a value (cbl_yjson()): names qualified at the top,
+ * decimal64 and 64-bit integers as strings, empty [null], bits and
+ * enumerations by name, an identity with its module, binary base64,
+ * strings escaped, a union as its member, leaf-lists as arrays.
+ */
+ATF_TC_WITHOUT_HEAD(json);
+ATF_TC_BODY(json, tc)
+{
+	static uint8_t perms[] = { 0x11 };
+	static const char *const names[] = { "x", "y" };
+	struct shapes_shapes sh;
+	struct shapes data = { &sh };
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	const struct cbl_ymodule *m;
+
+	ATF_REQUIRE((m = module("shapes")) != NULL);
+	memset(&sh, 0, sizeof(sh));
+	sh.default_ = "a \"q\"\n";
+	sh.has_ratio = true;
+	sh.ratio = -5;
+	sh.flag = true;
+	sh.blob.p = "abc";
+	sh.blob.len = 3;
+	sh.perms.p = perms;
+	sh.perms.len = sizeof(perms);
+	sh.has_level = true;
+	sh.level = SHAPES_SHAPES_LEVEL_VERY_HIGH;
+	sh.has_colour = true;
+	sh.colour = UINT64_C(1099511727778);
+	sh.has_either = true;
+	sh.either.which = 0;
+	sh.either.v.m0 = -5;
+	sh.names.n = 2;
+	sh.names.v = names;
+	ATF_REQUIRE_EQ(0, cbl_yjson_module(m, &data, &b));
+	ATF_CHECK(b.len > 2 && memcmp(b.p, "{\"shapes:shapes\":{", 18) == 0 &&
+	    ((const char *)b.p)[b.len - 1] == '}');
+	check_json(&b, "\"default\":\"a \\\"q\\\"\\u000a\"");
+	check_json(&b, "\"ratio\":\"-0.05\"");
+	check_json(&b, "\"flag\":[null]");
+	check_json(&b, "\"blob\":\"YWJj\"");
+	check_json(&b, "\"perms\":\"read write\"");
+	check_json(&b, "\"level\":\"very high\"");
+	check_json(&b, "\"colour\":\"shapes:red\"");
+	check_json(&b, "\"either\":-5");
+	check_json(&b, "\"names\":[\"x\",\"y\"]");
+	/* Absent members are left out. */
+	ATF_CHECK(memmem(b.p, b.len, "\"wide\"", 6) == NULL &&
+	    memmem(b.p, b.len, "\"tuned\"", 7) == NULL);
+	cbl_ybuf_free(&b);
+	/* A node's children, unqualified below the top. */
+	ATF_REQUIRE_EQ(0, cbl_yjson(top(m, "shapes"), &sh, &b));
+	ATF_CHECK(b.len > 0 && ((const char *)b.p)[0] == '{' &&
+	    memmem(b.p, b.len, "\"shapes:shapes\"", 15) == NULL &&
+	    memmem(b.p, b.len, "\"default\":", 10) != NULL);
+	cbl_ybuf_free(&b);
+}
+
 /*
  * A version 2 message: {SID of shapes: its value}, through a frame and
  * back, its decimal64 tagged 4 and its union's enumeration 44, which the
@@ -785,6 +853,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, roundtrip);
 	ATF_TP_ADD_TC(tp, arena_limit);
 	ATF_TP_ADD_TC(tp, kinds);
+	ATF_TP_ADD_TC(tp, json);
 	ATF_TP_ADD_TC(tp, rpc_deltas);
 	ATF_TP_ADD_TC(tp, message);
 	return (atf_no_error());

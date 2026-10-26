@@ -397,6 +397,20 @@ int		 cbl_yencode_member(const struct cbl_ynode *n,
 		    const void *parent, struct cbl_ybuf *b);
 bool		 cbl_ymember_present(const struct cbl_ynode *n,
 		    const void *parent);
+
+/*
+ * A value as RFC 7951's JSON (cbl_yjson.c says how), appended to b:
+ * cbl_yjson() n's children in struct p, an object; cbl_yjson_module() a
+ * module's data at the top, its data struct's, an object;
+ * cbl_yjson_members() the same members alone, a comma before each but
+ * the first of all (*first), so that several modules' make one object.
+ */
+int		 cbl_yjson(const struct cbl_ynode *n, const void *p,
+		    struct cbl_ybuf *b);
+int		 cbl_yjson_module(const struct cbl_ymodule *m,
+		    const void *data, struct cbl_ybuf *b);
+int		 cbl_yjson_members(const struct cbl_ymodule *m,
+		    const void *data, struct cbl_ybuf *b, bool *first);
 int		 cbl_ydecode_member(const struct cbl_ynode *n,
 		    const void *data, size_t len, void *parent, cbl_yarena *a,
 		    int flags, char *why, size_t whylen);

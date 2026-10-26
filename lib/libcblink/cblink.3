@@ -383,6 +383,22 @@ arena holds is bounded,
 64 MiB unless set, and a decode past it fails with
 .Er ENOMEM .
 It checks what the CBOR is, not what the schema further says.
+.Fn cbl_yjson
+writes the same struct as RFC 7951's JSON into a
+.Vt struct cbl_ybuf ,
+an object of the node's children;
+.Fn cbl_yjson_module
+a module's data at the top, its names qualified by the module's, as
+those of an augment are;
+.Fn cbl_yjson_members
+those members alone, so that several modules' make one object.
+64-bit integers and decimal64 are strings, bits and enumerations their
+names, an identity
+.Dq module:name ,
+binary base64, empty
+.Li [null] ;
+an instance-identifier, anydata and anyxml are
+.Li null .
 .Sh LIMITS
 Every limit has a default, a minimum and a maximum, and applies per
 context, listener or connection

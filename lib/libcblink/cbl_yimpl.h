@@ -33,14 +33,5 @@ int	cbl_yvalue_parse(const struct cbl_ynode *n, const struct cbl_ytype *t,
 int	cbl_ydefault_parse(const struct cbl_ynode *n, uint16_t k, void *out,
 	    cbl_yarena *a);
 
-/*
- * An instance-identifier's YANG-CBOR (RFC 9254 section 6.13.1): a SID,
- * or [SID, values...]: *node, the node of schema s it names, and *vals,
- * the keys of the lists from the top down to it, then a leaf-list
- * entry's value, each as its member is, allocated in a.
- */
-int	cbl_yiid_read(const struct cbl_yschema *s, const struct cbl_bytes *v,
-	    const struct cbl_ynode **node, const void ***vals, size_t *nvals,
-	    cbl_yarena *a);
 
 #endif /* !_CBL_YIMPL_H_ */

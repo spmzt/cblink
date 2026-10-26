@@ -152,15 +152,21 @@ reset_action(cbl_req *req, const struct cbl_bytes *target, const void *in,
 {
 	const struct shapes_shapes_item_reset_input *i = in;
 	struct shapes_shapes_item_reset_output *o = out;
+	const struct cbl_ynode *n;
+	const void **vals;
+	size_t nvals;
 
 	(void)req;
-	(void)a;
 	if (target->len > sizeof(reset_target))
 		return (EINVAL);
 	memcpy(reset_target, target->p, target->len);
 	reset_len = target->len;
+	/* Its item's id, the key, as a handler reads it; hard: doubled. */
+	if (cbl_yiid_read(&yangh_schema, target, &n, &vals, &nvals, a) != 0 ||
+	    n != n_item || nvals != 1)
+		return (EINVAL);
 	o->has_took = true;
-	o->took = i->has_hard && i->hard ? 2 : 1;
+	o->took = *(const uint32_t *)vals[0] * (i->has_hard && i->hard ? 2 : 1);
 	return (0);
 }
 
@@ -664,7 +670,7 @@ ATF_TC_BODY(action, tc)
 	memset(&out, 0, sizeof(out));
 	ATF_REQUIRE_EQ(0, cbl_msg_ydecode(r, n_out, &out, a, CBL_YD_STRICT,
 	    NULL, 0));
-	ATF_CHECK(out.has_took && out.took == 2);
+	ATF_CHECK(out.has_took && out.took == 14);
 	ATF_CHECK(reset_len == t.len && memcmp(reset_target, t.p, t.len) ==
 	    0);
 	cbl_yarena_free(a);

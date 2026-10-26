@@ -208,7 +208,8 @@ an instance of the action's parent, a list entry's instance-identifier
 that
 .Fn cbl_yiid_write
 makes of the keys of every list from the top down; its handler gets it
-as its target.
+as its target and reads its keys with
+.Fn cbl_yiid_read .
 .Pp
 An operation's handler receives a
 .Vt cbl_req

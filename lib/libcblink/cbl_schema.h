@@ -374,6 +374,16 @@ void		 cbl_yarena_set_limit(cbl_yarena *a, size_t limit);
 int		 cbl_yarena_atfree(cbl_yarena *a, void (*fn)(void *),
 		    void *arg);
 /*
+ * An instance-identifier's YANG-CBOR (RFC 9254 section 6.13.1): a SID,
+ * or [SID, values...]: *node, the node of schema s it names, and *vals,
+ * the keys of the lists from the top down to it, then a leaf-list
+ * entry's value, each as its member is, allocated in a (an action's
+ * handler reads its target's keys so).
+ */
+int		 cbl_yiid_read(const struct cbl_yschema *s,
+		    const struct cbl_bytes *v, const struct cbl_ynode **node,
+		    const void ***vals, size_t *nvals, cbl_yarena *a);
+/*
  * n's instance-identifier (RFC 9254 section 6.13.1) into b: the SID, or
  * [SID, values...], the keys of every list from the top down to n, then
  * a leaf-list entry's value, nvals of them, each pointing at a value as

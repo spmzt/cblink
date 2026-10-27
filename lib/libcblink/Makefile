@@ -45,6 +45,11 @@ SRCS=		cbl_arena.c \
 		cbl_yvalid.c \
 		cbl_ymod_schema.c
 
+# libcblink_pic.a too, of the shared library's objects: for a program
+# that is built on one host and shipped to others whose libcblink may be
+# older, linked in whole.
+INSTALL_PIC_ARCHIVE=	yes
+
 VERSION_DEF=	${.CURDIR}/Versions.def
 SYMBOL_MAPS=	${.CURDIR}/Symbol.map
 

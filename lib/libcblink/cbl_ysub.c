@@ -882,9 +882,11 @@ change_push(struct cbl_ysub *sub)
 	if ((t = read_filtered(sub, &incomplete)) == NULL && !incomplete &&
 	    (t = cbl_dtree_new(y->srv->schema)) == NULL)
 		return (ENOMEM);
+	/* A getter failed: nothing compared, read again at the next
+	 * tick. */
 	if (incomplete) {
 		cbl_dtree_free(t);
-		return (0);
+		return (EAGAIN);
 	}
 	/* A resync (asked, or after a suspension): the whole of it. */
 	if (atomic_exchange(&sub->resync, false) && sub->last != NULL) {
@@ -1041,7 +1043,12 @@ sub_thread(void *p)
 			pthread_mutex_lock(&sub->ctx->ysublock);
 			if (error == EPIPE)
 				break;
-			sub->synced = true;
+			/* Read whole and compared; else read again, told or
+			 * not. */
+			if (error == 0)
+				sub->synced = true;
+			else if (sub->onchange)
+				sub->dirty = true;
 			(void)clock_gettime(CLOCK_REALTIME, &now);
 			now.tv_nsec++;
 			next_tick(sub, &now, &due);

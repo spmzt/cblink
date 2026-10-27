@@ -67,7 +67,7 @@ ident(const char *mod, const char *name)
 }
 
 /* The ports counters has: em0, em1 where it is there; em0's octets. */
-static atomic_bool em1;
+static atomic_bool em1, counters_fail;
 static atomic_uint_fast64_t em0_octets;
 
 /* counters: ticks counts the reads. */
@@ -78,6 +78,8 @@ counters_get(cbl_req *req, void *data, cbl_yarena *a)
 	struct subdemo_counters_port *p;
 
 	(void)req;
+	if (atomic_load(&counters_fail))
+		return (EIO);
 	if ((c = cbl_yarena_alloc(a, sizeof(*c))) == NULL ||
 	    (p = cbl_yarena_alloc(a, 2 * sizeof(*p))) == NULL)
 		return (ENOMEM);
@@ -292,6 +294,7 @@ setup(struct fixture *f)
 	server.handler = handlers;
 	atomic_store(&ticks, 0);
 	atomic_store(&em1, false);
+	atomic_store(&counters_fail, false);
 	atomic_store(&em0_octets, 1500);
 
 	f->sctx = test_ctx();
@@ -585,6 +588,17 @@ ATF_TC_BODY(told, tc)
 	ATF_REQUIRE_EQ(2, c.records);
 	ATF_REQUIRE_MATCH("\"target\":\"/subdemo:counters/port=em0/octets\"",
 	    c.json[1]);
+	/* Told while its read fails: read again at the next tick, untold,
+	 * once it reads. */
+	atomic_store(&counters_fail, true);
+	atomic_store(&em0_octets, 4500);
+	cbl_ysub_changed(f.sctx, n_counters);
+	usleep(1300000);
+	ATF_REQUIRE_EQ(2, c.records);
+	atomic_store(&counters_fail, false);
+	wait_for(&c.records, 3, 3000);
+	ATF_REQUIRE_EQ(3, c.records);
+	ATF_REQUIRE_MATCH("\"subdemo:octets\":\"4500\"", c.json[2]);
 	cli_fini(&c);
 	teardown(&f);
 }

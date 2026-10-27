@@ -168,8 +168,8 @@ a complement inside a class, counts over `RE_DUP_MAX`. `\d`, `\p{L}`,
 The YANG family (family 1, WIRE-FORMAT.md section 7.6) serves a
 program's modules in CORECONF's shape: GET, EDIT (create, replace,
 delete; all or nothing), RPC, NOTIFY, GET-SID, and SUBSCRIBE: RFC
-8639's dynamic subscriptions and RFC 8641's periodic YANG-Push on a push
-stream. Anydata is shown in RFC 7951's JSON as its members, where the
+8639's dynamic subscriptions and RFC 8641's YANG-Push, periodic and
+on-change (changes as a YANG Patch), on a push stream. Anydata is shown in RFC 7951's JSON as its members, where the
 tables have its nodes. The control family (family
 0, section 7.2) is the module `cblink-ctrl`; errors, credit and closes
 are the module `cblink`'s structures (section 6).

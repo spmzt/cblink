@@ -644,7 +644,10 @@ uint64_t	 cbl_msg_err_sid(const cbl_msg *msg);
  * stream-xpath-filter selects of it.  The operational datastore,
  * periodic (period, anchor-time): a push-update every period of what
  * datastore-xpath-filter selects, read by the get handlers on the
- * stream's connection.  A stop-time ends it, the stream closed.  A
+ * stream's connection; or on-change, where ietf-yang-push's on-change
+ * is on: read every dampening-period (a second at least) and compared
+ * with the last read, its changes a push-change-update's YANG Patch,
+ * the first read a push-update (sync-on-start).  A stop-time ends it, the stream closed.  A
  * record that does not fit in the stream's credit is left out, and
  * counted.  The subscription ends with its stream (the subscriber's
  * close), cbl_ysub_delete() (the subscriber's, from the request of a
@@ -658,7 +661,9 @@ struct cbl_ysub_info {
 	const char	*stream;	/* or NULL: a datastore's */
 	uint64_t	 datastore;	/* its identity's SID */
 	const char	*xpath;		/* the filter, or NULL */
-	uint32_t	 period;	/* centiseconds */
+	uint32_t	 period;	/* centiseconds; 0: on-change */
+	bool		 on_change;
+	uint32_t	 dampening;	/* centiseconds */
 	const char	*anchor_time;	/* or NULL */
 	const char	*stop_time;	/* or NULL */
 	uint64_t	 sent;		/* records */

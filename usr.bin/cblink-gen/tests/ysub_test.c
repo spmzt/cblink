@@ -65,7 +65,11 @@ ident(const char *mod, const char *name)
 	atf_tc_fail("no identity %s:%s", mod, name);
 }
 
-/* counters: ticks counts the reads; one port. */
+/* The ports counters has: em0, em1 where it is there; em0's octets. */
+static atomic_bool em1;
+static atomic_uint_fast64_t em0_octets;
+
+/* counters: ticks counts the reads. */
 static int
 counters_get(cbl_req *req, void *data, cbl_yarena *a)
 {
@@ -74,14 +78,17 @@ counters_get(cbl_req *req, void *data, cbl_yarena *a)
 
 	(void)req;
 	if ((c = cbl_yarena_alloc(a, sizeof(*c))) == NULL ||
-	    (p = cbl_yarena_alloc(a, sizeof(*p))) == NULL)
+	    (p = cbl_yarena_alloc(a, 2 * sizeof(*p))) == NULL)
 		return (ENOMEM);
 	c->has_ticks = true;
 	c->ticks = atomic_fetch_add(&ticks, 1) + 1;
-	p->name = "em0";
-	p->has_octets = true;
-	p->octets = 1500;
-	c->port.n = 1;
+	p[0].name = "em0";
+	p[0].has_octets = true;
+	p[0].octets = atomic_load(&em0_octets);
+	p[1].name = "em1";
+	p[1].has_octets = true;
+	p[1].octets = 0;
+	c->port.n = atomic_load(&em1) ? 2 : 1;
 	c->port.v = p;
 	((struct subdemo *)data)->counters = c;
 	return (0);
@@ -232,6 +239,8 @@ setup(struct fixture *f)
 	server.nhandler = nitems(handlers);
 	server.handler = handlers;
 	atomic_store(&ticks, 0);
+	atomic_store(&em1, false);
+	atomic_store(&em0_octets, 1500);
 
 	f->sctx = test_ctx();
 	f->cctx = test_ctx();
@@ -422,6 +431,62 @@ ATF_TC_BODY(stream, tc)
 	teardown(&f);
 }
 
+/*
+ * On-change: the first read pushed whole (sync-on-start), then what
+ * changed as a YANG Patch: a port made and another's octets changed in
+ * one, the port gone in the next.
+ */
+ATF_TC_WITHOUT_HEAD(on_change);
+ATF_TC_BODY(on_change, tc)
+{
+	struct ietf_subscribed_notifications_establish_subscription_input_yp_on_change
+	    oc = { 0 };
+	struct fixture f;
+	struct cli c;
+	est_per per;
+	est_in in;
+	cbl_stream *s;
+
+	setup(&f);
+	cli_init(&c);
+	for_datastore(&in, "operational", "/subdemo:counters/port", &per, 0);
+	in.yp_update_trigger = SN(YP_UPDATE_TRIGGER_ON_CHANGE);
+	in.yp_on_change = &oc;
+	s = subscribe(&f, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	wait_for(&c.records, 1, 3000);
+	ATF_REQUIRE_EQ(1, c.records);
+	ATF_REQUIRE_MATCH("^\\{\"datastore-contents\":\\{\"subdemo:counters\":"
+	    "\\{\"port\":\\[\\{\"name\":\"em0\",\"octets\":\"1500\"\\}\\]\\}"
+	    "\\},\"id\":[0-9]+\\}$", c.json[0]);
+	/* Nothing changes: nothing pushed, though ticks does. */
+	usleep(1300000);
+	ATF_REQUIRE_EQ(1, c.records);
+	atomic_store(&em1, true);
+	atomic_store(&em0_octets, 3000);
+	wait_for(&c.records, 2, 3000);
+	ATF_REQUIRE_EQ(2, c.records);
+	pthread_mutex_lock(&c.mtx);
+	ATF_REQUIRE_MATCH("\"edit\":\\[", c.json[1]);
+	ATF_REQUIRE_MATCH("\\{\"edit-id\":\"[0-9]+\",\"operation\":"
+	    "\"replace\",\"target\":\"/subdemo:counters/port=em0/octets\","
+	    "\"value\":\\{\"subdemo:octets\":\"3000\"\\}\\}", c.json[1]);
+	ATF_REQUIRE_MATCH("\\{\"edit-id\":\"[0-9]+\",\"operation\":"
+	    "\"create\",\"target\":\"/subdemo:counters/port=em1\","
+	    "\"value\":\\{\"subdemo:port\":\\[\\{\"name\":\"em1\","
+	    "\"octets\":\"0\"\\}\\]\\}\\}", c.json[1]);
+	pthread_mutex_unlock(&c.mtx);
+	atomic_store(&em1, false);
+	wait_for(&c.records, 3, 3000);
+	ATF_REQUIRE_EQ(3, c.records);
+	ATF_REQUIRE_MATCH("\\{\"edit-id\":\"1\",\"operation\":\"delete\","
+	    "\"target\":\"/subdemo:counters/port=em1\"\\}\\]", c.json[2]);
+	ATF_REQUIRE_EQ(0, cbl_stream_close(s, 0, NULL));
+	wait_for(&c.closed, 1, 3000);
+	cli_fini(&c);
+	teardown(&f);
+}
+
 /* What is refused at the open, and why. */
 static void
 refused_by(struct fixture *f, const est_in *in, const char *why)
@@ -542,6 +607,7 @@ ATF_TP_ADD_TCS(tp)
 
 	ATF_TP_ADD_TC(tp, periodic);
 	ATF_TP_ADD_TC(tp, stream);
+	ATF_TP_ADD_TC(tp, on_change);
 	ATF_TP_ADD_TC(tp, refused);
 	ATF_TP_ADD_TC(tp, stop_time);
 	ATF_TP_ADD_TC(tp, each_kill);

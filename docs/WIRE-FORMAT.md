@@ -513,10 +513,17 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   from `anchor-time` (without one, at once), its
   `datastore-contents` what the `datastore-xpath-filter` selects of the
   data the server's get handlers read on the stream's connection, and
-  `incomplete-update` where a read failed. A `stop-time` closes the
-  stream ("stop-time reached"); the subscription ends with its stream.
-  On-change, replay, subtree filters, filters by reference, modify,
-  and suspension are not served: a record that does not fit the
+  `incomplete-update` where a read failed. With `on-change` (where
+  `ietf-yang-push`'s feature is on), the data is read every
+  `dampening-period`, a second at least, and compared with the last
+  read: the first read is a `push-update` unless `sync-on-start` is
+  false, and each change after a `push-change-update` whose
+  `yang-patch` (RFC 8072) has an edit per node made (`create`), changed
+  (`replace`) or gone (`delete`), its `target` the node's RFC 8040
+  api-path and its `value` the node; `excluded-change` leaves those types
+  out. A `stop-time` closes the stream ("stop-time reached"); the
+  subscription ends with its stream. Replay, subtree filters, filters
+  by reference, modify, and suspension are not served: a record that does not fit the
   stream's credit is left out. An input member that is not served is
   refused by name (`operation-not-supported`), and the open fails with
   the error.

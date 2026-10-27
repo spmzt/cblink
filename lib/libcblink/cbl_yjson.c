@@ -20,8 +20,8 @@
  *   an identityref "module:identity" (6.8), the module always said.
  * - A union is its member's value, as that member's type says.
  * - Anydata is an object of its content's members, each "module:name"
- *   (7.7): its YANG-CBOR's keys deltas from its own SID, top-level
- *   nodes of the tables.  Where it holds one the tables do not have,
+ *   (7.7): its YANG-CBOR's keys deltas from its own SID, nodes of the
+ *   tables.  Where it holds one the tables do not have,
  *   it is null, as anyxml and an instance-identifier are: left out of
  *   this version.
  */
@@ -335,7 +335,8 @@ cbor_head(const uint8_t **pp, const uint8_t *end, int *major, uint64_t *v)
 
 /*
  * Anydata's YANG-CBOR, {delta: value}, as an object of its members,
- * each a top-level node of the tables, decoded and said as one; null
+ * each a node of the tables decoded and said as one, "module:name"
+ * (a top-level node, or one below, as a YANG Patch's value has); null
  * where it is not so.
  */
 static int
@@ -372,9 +373,11 @@ json_anydata(struct cbl_ybuf *b, const struct cbl_ynode *n,
 		}
 		delta = major == 0 ? (int64_t)d : -1 - (int64_t)d;
 		c = cbl_yschema_node(s, (uint64_t)((int64_t)n->sid + delta));
-		if (c == NULL || c->module == NULL || c->module->size == 0 ||
+		if (c == NULL || c->module == NULL || (c->parent == NULL ?
+		    c->module->size : c->parent->size) == 0 ||
 		    (len = cbl_ycbor_skip(p, end)) == 0 ||
-		    (data = cbl_yarena_alloc(a, c->module->size)) == NULL ||
+		    (data = cbl_yarena_alloc(a, c->parent == NULL ?
+		    c->module->size : c->parent->size)) == NULL ||
 		    cbl_ydecode_member(c, p, len, data, a, 0, NULL, 0) != 0) {
 			ok = false;
 			break;

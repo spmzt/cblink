@@ -220,7 +220,9 @@ as an rpc's: the NETCONF stream, every notification
 sends that its stream-xpath-filter selects; or, with ietf-yang-push and
 ietf-datastores (RFC 8641), the operational datastore, periodic, a
 push-update every period of what its datastore-xpath-filter selects,
-read by the get handlers on the stream's connection.
+read by the get handlers on the stream's connection; or on-change, read
+every dampening period, a second at least, what changed sent as a
+push-change-update's YANG Patch.
 The accept carries the output, the id; each data message is a
 notification as group notify has it
 .Pq Fn cbl_msg_ynotif .

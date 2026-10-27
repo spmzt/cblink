@@ -6,17 +6,21 @@
 
 /*
  * Family 1's subscriptions: RFC 8639's dynamic subscriptions and RFC
- * 8641's periodic YANG-Push, each a push stream (SUBSCRIBE).
+ * 8641's YANG-Push, periodic and on-change, each a push stream
+ * (SUBSCRIBE).
  *
  *	open	{SID(establish-subscription): input}, as an rpc's: the
  *		NETCONF stream (stream, stream-xpath-filter) or the
  *		operational datastore (datastore, datastore-xpath-filter,
- *		periodic {period, anchor-time}); stop-time.  What else
+ *		periodic {period, anchor-time}, or on-change
+ *		{dampening-period, sync-on-start, excluded-change});
+ *		stop-time.  What else
  *		the input has is refused, by name.
  *	accept	{SID(establish-subscription): output}, the id.
  *	data	a cblink:notification each, as group "notify" carries
- *		them: an event of the stream, or a push-update {id,
- *		datastore-contents, incomplete-update}.
+ *		them: an event of the stream, a push-update {id,
+ *		datastore-contents, incomplete-update}, or a
+ *		push-change-update {id, datastore-changes: {yang-patch}}.
  *
  * The nodes are found by name in the tables of the server that has
  * ietf-subscribed-notifications; a datastore's needs ietf-yang-push and
@@ -25,13 +29,18 @@
  * nodes the filter's paths begin with (all of them, where it cannot
  * tell) through their get handlers, on a request of the stream's
  * connection (so a handler sees the subscriber as the peer), and pushes
- * what the filter selects.  A stop-time is kept by the same thread.  A
+ * what the filter selects.  On-change is a read at each dampening
+ * period (a second at least) compared with the last one: what changed,
+ * a YANG Patch (RFC 8072), its targets RFC 8040's api-paths.  A
+ * stop-time is kept by the same thread.  A
  * record that does not fit in the stream's credit is left out and
  * counted; RFC 8639's suspension is not done.  A subscription ends by
  * its stream, closed when stop-time comes, on delete or kill; a
  * dynamic subscription's end is its transport's (RFC 8639 section
  * 2.4.2), so no state notification is sent.
  */
+
+#include <sys/param.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -42,6 +51,7 @@
 #include <time.h>
 
 #include "cbl_data.h"
+#include "cbl_dimpl.h"
 #include "cbl_impl.h"
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
@@ -52,6 +62,10 @@ struct ynodes {
 	const struct cbl_ynode	*rpc, *in, *out, *out_id;
 	/* ietf-yang-push's push-update, its members; NULL: none. */
 	const struct cbl_ynode	*pu, *pu_id, *pu_dc, *pu_inc;
+	/* Its push-change-update and the YANG Patch in it (on-change,
+	 * RFC 8641's feature); NULL: none. */
+	const struct cbl_ynode	*pcu, *pcu_id, *pcu_dc, *yp, *yp_pid, *ed,
+				*ed_id, *ed_op, *ed_target, *ed_value;
 	uint64_t		 operational;
 };
 
@@ -70,6 +84,14 @@ struct cbl_ysub {
 	bool			 has_stop;
 	uint64_t		*top;		/* what a period reads */
 	size_t			 ntop;
+	/* On-change: read every period (the dampening period, a second
+	 * at least), its changes pushed; those of the change types
+	 * excluded (1 << CBL_DOP_*) left out; what was read last. */
+	bool			 onchange, sync;
+	uint32_t		 dampening;
+	unsigned		 excluded_ops;
+	cbl_dtree		*last;
+	uint64_t		 patches;
 	char			*receiver;
 	_Atomic uint64_t	 sent, excluded;
 	/* ysublock's. */
@@ -150,6 +172,22 @@ nodes(cbl_ctx *ctx, struct ynodes *y)
 		y->pu_inc = child_named(y->pu, "incomplete-update");
 		if (y->pu_id == NULL || y->pu_dc == NULL)
 			y->pu = NULL;
+	}
+	if ((y->pcu = top_named(mod_named(s, "ietf-yang-push"),
+	    "push-change-update")) != NULL) {
+		y->pcu_id = child_named(y->pcu, "id");
+		y->pcu_dc = child_named(y->pcu, "datastore-changes");
+		y->yp = child_named(y->pcu_dc, "yang-patch");
+		y->yp_pid = child_named(y->yp, "patch-id");
+		y->ed = child_named(y->yp, "edit");
+		y->ed_id = child_named(y->ed, "edit-id");
+		y->ed_op = child_named(y->ed, "operation");
+		y->ed_target = child_named(y->ed, "target");
+		y->ed_value = child_named(y->ed, "value");
+		if (y->pcu_id == NULL || y->ed_id == NULL || y->ed_op == NULL ||
+		    y->ed_target == NULL || y->ed_value == NULL ||
+		    y->yp_pid == NULL)
+			y->pcu = NULL;
 	}
 	for (uint32_t i = 0; i < s->nident; i++) {
 		id = &s->ident[i];
@@ -301,6 +339,7 @@ sub_rele(struct cbl_ysub *sub)
 	}
 	pthread_mutex_unlock(&sub->ctx->ysublock);
 	cbl_stream_rele(sub->s);
+	cbl_dtree_free(sub->last);
 	pthread_cond_destroy(&sub->cv);
 	free(sub->stream);
 	free(sub->xpath);
@@ -388,47 +427,108 @@ buf_int(struct cbl_ybuf *b, int64_t v)
 	return (buf_put(b, h, cbl_ycbor_int(h, v)));
 }
 
-/*
- * A push-update of what the filter selects: {id, datastore-contents:
- * {delta: value}, incomplete-update where a read failed}.
- */
+/* A text string. */
 static int
-push(struct cbl_ysub *sub)
+buf_text(struct cbl_ybuf *b, const char *t)
 {
-	const struct ynodes *y = &sub->y;
-	struct cbl_ybuf dc = { 0 }, c = { 0 }, v = { 0 };
-	struct cbl_req r;
-	cbl_dtree *t = NULL, *ft = NULL;
-	cbl_dnode *root = NULL, *n;
-	bool incomplete = false;
-	size_t count = 0;
-	char why[160];
 	int error;
 
+	if ((error = buf_head(b, 3, strlen(t))) != 0)
+		return (error);
+	return (buf_put(b, t, strlen(t)));
+}
+
+/*
+ * What the filter selects of the nodes read, a tree of its own (NULL:
+ * none read); *incomplete where a read or the filter failed.
+ */
+static cbl_dtree *
+read_filtered(struct cbl_ysub *sub, bool *incomplete)
+{
+	struct cbl_req r;
+	cbl_dtree *t = NULL, *ft;
+	char why[160];
+
+	*incomplete = false;
 	memset(&r, 0, sizeof(r));
 	r.conn = cbl_stream_conn(sub->s);
 	atomic_init(&r.refs, 1);
-	if (cbl_yread_tree(&r, sub->top, sub->ntop, &t, &incomplete) != 0)
-		incomplete = true;
+	if (cbl_yread_tree(&r, sub->top, sub->ntop, &t, incomplete) != 0)
+		*incomplete = true;
 	free(r.err_msg);
-	if (t != NULL && sub->xpath != NULL &&
-	    (ft = cbl_dtree_filter_xpath(t, sub->xpath, why,
-	    sizeof(why))) == NULL)
-		incomplete = true;
-	if (ft != NULL || t != NULL)
-		root = cbl_dtree_root(ft != NULL ? ft : t);
+	if (t == NULL || sub->xpath == NULL)
+		return (t);
+	ft = cbl_dtree_filter_xpath(t, sub->xpath, why, sizeof(why));
+	if (ft == NULL)
+		*incomplete = true;
+	cbl_dtree_free(t);
+	return (ft);
+}
+
+/* A node's value into anydata base's map: {delta: value}, a list's
+ * entry or a leaf-list's value as a list or leaf-list of one. */
+static int
+put_member(struct cbl_ybuf *b, const cbl_dnode *n, uint64_t base)
+{
+	const struct cbl_ynode *sn = cbl_dnode_schema(n);
+	struct cbl_ybuf v = { 0 };
+	int error;
+
+	if ((error = cbl_dnode_encode(n, &v)) == 0 &&
+	    (error = buf_int(b, (int64_t)(sn->sid - base))) == 0 &&
+	    ((sn->kind != CBL_YN_LIST && sn->kind != CBL_YN_LEAFLIST) ||
+	    (error = buf_head(b, 4, 1)) == 0))
+		error = buf_put(b, v.p, v.len);
+	cbl_ybuf_free(&v);
+	return (error);
+}
+
+/*
+ * A push-update of root's nodes: {id, datastore-contents: {delta:
+ * value}, incomplete-update where a read failed}.
+ */
+static int
+push_update(struct cbl_ysub *sub, const cbl_dnode *root, bool incomplete)
+{
+	const struct ynodes *y = &sub->y;
+	struct cbl_ybuf dc = { 0 }, c = { 0 };
+	const cbl_dnode *n;
+	size_t count = 0;
+	int error;
+
+	/* A member a node; a list's entries, one after another, one. */
 	for (n = root != NULL ? cbl_dnode_first(root) : NULL; n != NULL;
 	    n = cbl_dnode_next(n))
-		count++;
+		if (cbl_dnode_prev(n) == NULL || cbl_dnode_schema(
+		    cbl_dnode_prev(n)) != cbl_dnode_schema(n))
+			count++;
 	error = buf_head(&dc, 5, count);
 	for (n = root != NULL ? cbl_dnode_first(root) : NULL; error == 0 &&
 	    n != NULL; n = cbl_dnode_next(n)) {
-		if ((error = cbl_dnode_encode(n, &v)) == 0 &&
-		    (error = buf_int(&dc, (int64_t)(cbl_dnode_schema(n)->sid -
-		    y->pu_dc->sid))) == 0)
-			error = buf_put(&dc, v.p, v.len);
-		cbl_ybuf_free(&v);
-		memset(&v, 0, sizeof(v));
+		const struct cbl_ynode *sn = cbl_dnode_schema(n);
+		struct cbl_ybuf v = { 0 };
+		const cbl_dnode *e;
+		size_t k = 0;
+
+		if (sn->kind != CBL_YN_LIST && sn->kind != CBL_YN_LEAFLIST) {
+			error = put_member(&dc, n, y->pu_dc->sid);
+			continue;
+		}
+		for (e = n; e != NULL && cbl_dnode_schema(e) == sn;
+		    e = cbl_dnode_next(e))
+			k++;
+		if ((error = buf_int(&dc, (int64_t)(sn->sid -
+		    y->pu_dc->sid))) != 0 ||
+		    (error = buf_head(&dc, 4, k)) != 0)
+			break;
+		for (; error == 0; n = cbl_dnode_next(n)) {
+			if ((error = cbl_dnode_encode(n, &v)) == 0)
+				error = buf_put(&dc, v.p, v.len);
+			cbl_ybuf_free(&v);
+			memset(&v, 0, sizeof(v));
+			if (--k == 0)
+				break;
+		}
 	}
 	incomplete = incomplete && y->pu_inc != NULL;
 	if (error == 0 && (error = buf_head(&c, 5, incomplete ? 3 : 2)) == 0 &&
@@ -443,8 +543,250 @@ push(struct cbl_ysub *sub)
 		error = send_record(sub, y->pu->sid, c.p, c.len);
 	cbl_ybuf_free(&dc);
 	cbl_ybuf_free(&c);
-	cbl_dtree_free(ft);
+	return (error);
+}
+
+/* The periodic push: what the filter selects, now. */
+static int
+push(struct cbl_ysub *sub)
+{
+	cbl_dtree *t;
+	bool incomplete;
+	int error;
+
+	t = read_filtered(sub, &incomplete);
+	error = push_update(sub, t != NULL ? cbl_dtree_root(t) : NULL,
+	    incomplete);
 	cbl_dtree_free(t);
+	return (error);
+}
+
+/* RFC 8040's api-path of n, keys percent-encoded (section 3.5.3). */
+static int
+api_path(const cbl_dnode *n, struct cbl_ybuf *b)
+{
+	const cbl_dnode *v[64], *p;
+	const struct cbl_ynode *sn, *psn, *kn;
+	const struct cbl_yschema *s;
+	char *str;
+	size_t nv = 0;
+	int error = 0;
+
+	for (p = n; p != NULL && cbl_dnode_schema(p) != NULL; p =
+	    cbl_dnode_parent(p)) {
+		if (nv == nitems(v))
+			return (ELOOP);
+		v[nv++] = p;
+	}
+	while (error == 0 && nv-- > 0) {
+		sn = cbl_dnode_schema(v[nv]);
+		psn = nv + 1 < 64 && cbl_dnode_parent(v[nv]) != NULL ?
+		    cbl_dnode_schema(cbl_dnode_parent(v[nv])) : NULL;
+		s = sn->module->schema;
+		if ((error = buf_put(b, "/", 1)) != 0)
+			break;
+		if (psn == NULL || psn->module != sn->module) {
+			if ((error = buf_put(b, sn->module->name,
+			    strlen(sn->module->name))) != 0 ||
+			    (error = buf_put(b, ":", 1)) != 0)
+				break;
+		}
+		if ((error = buf_put(b, sn->name, strlen(sn->name))) != 0)
+			break;
+		for (uint16_t k = 0; error == 0 && (sn->kind == CBL_YN_LIST ?
+		    k < sn->nkeys : sn->kind == CBL_YN_LEAFLIST && k < 1);
+		    k++) {
+			const void *val;
+
+			if (sn->kind == CBL_YN_LIST) {
+				const cbl_dnode *kd;
+
+				kn = sn->child[sn->keys[k]];
+				if ((kd = cbl_dnode_child(v[nv], kn)) == NULL)
+					return (EINVAL);
+				val = cbl_dnode_value(kd);
+			} else {
+				kn = sn;
+				val = cbl_dnode_value(v[nv]);
+			}
+			if ((error = cbl_d_vstring(s, kn->type, val, &str)) !=
+			    0)
+				break;
+			error = buf_put(b, k == 0 ? "=" : ",", 1);
+			for (const char *c = str; error == 0 && *c != '\0';
+			    c++) {
+				char pct[4];
+
+				if (strchr(",/=%?#[] \"'", *c) != NULL ||
+				    (unsigned char)*c < 0x20) {
+					(void)snprintf(pct, sizeof(pct), "%%%02X",
+					    (unsigned char)*c);
+					error = buf_put(b, pct, 3);
+				} else
+					error = buf_put(b, c, 1);
+			}
+			free(str);
+		}
+	}
+	return (error);
+}
+
+/* RFC 8641's change types, by the diff's operations. */
+static const char *
+change_type(int op)
+{
+
+	switch (op) {
+	case CBL_DOP_CREATE:
+		return ("create");
+	case CBL_DOP_MERGE:
+	case CBL_DOP_REPLACE:
+		return ("replace");
+	case CBL_DOP_REMOVE:
+	case CBL_DOP_DELETE:
+		return ("delete");
+	case CBL_DOP_INSERT:
+		return ("insert");
+	case CBL_DOP_MOVE:
+		return ("move");
+	}
+	return (NULL);
+}
+
+/* An enumeration's value by its name; -1: none. */
+static int64_t
+enum_value(const struct cbl_ynode *n, const char *name)
+{
+
+	for (uint32_t i = 0; n->type != NULL && i < n->type->nitems; i++)
+		if (strcmp(n->type->items[i].name, name) == 0)
+			return (n->type->items[i].value);
+	return (-1);
+}
+
+/*
+ * The edits of diff tree n's children into arr, a YANG Patch's edit
+ * entries (RFC 8072): a node the diff made, merged or removed is one,
+ * with what is below it; one of a type excluded is left out.
+ */
+static int
+patch_edits(struct cbl_ysub *sub, const cbl_dnode *n, struct cbl_ybuf *arr,
+    size_t *count)
+{
+	const struct ynodes *y = &sub->y;
+	struct cbl_ybuf tgt = { 0 }, val = { 0 };
+	const cbl_dnode *c;
+	const char *type;
+	char eid[24];
+	int64_t opv;
+	int op, error = 0;
+	bool value;
+
+	for (c = cbl_dnode_first(n); error == 0 && c != NULL;
+	    c = cbl_dnode_next(c)) {
+		op = cbl_dnode_op(c);
+		if ((type = change_type(op)) == NULL) {
+			error = patch_edits(sub, c, arr, count);
+			continue;
+		}
+		if ((sub->excluded_ops & (1u << op)) != 0)
+			continue;
+		/* YANG Patch's operation: a change's type, a delete's. */
+		if ((opv = enum_value(y->ed_op, type)) < 0)
+			return (EINVAL);
+		value = strcmp(type, "delete") != 0;
+		if ((error = api_path(c, &tgt)) != 0 ||
+		    (error = buf_put(&tgt, "", 1)) != 0)
+			break;
+		(void)snprintf(eid, sizeof(eid), "%zu", *count + 1);
+		if ((error = buf_head(arr, 5, value ? 4 : 3)) == 0 &&
+		    (error = buf_int(arr, (int64_t)(y->ed_id->sid -
+		    y->ed->sid))) == 0 &&
+		    (error = buf_text(arr, eid)) == 0 &&
+		    (error = buf_int(arr, (int64_t)(y->ed_op->sid -
+		    y->ed->sid))) == 0 &&
+		    (error = buf_int(arr, opv)) == 0 &&
+		    (error = buf_int(arr, (int64_t)(y->ed_target->sid -
+		    y->ed->sid))) == 0 &&
+		    (error = buf_text(arr, (const char *)tgt.p)) == 0 && value &&
+		    (error = buf_int(arr, (int64_t)(y->ed_value->sid -
+		    y->ed->sid))) == 0 &&
+		    (error = buf_head(&val, 5, 1)) == 0 &&
+		    (error = put_member(&val, c, y->ed_value->sid)) == 0)
+			error = buf_put(arr, val.p, val.len);
+		cbl_ybuf_free(&tgt);
+		cbl_ybuf_free(&val);
+		memset(&tgt, 0, sizeof(tgt));
+		memset(&val, 0, sizeof(val));
+		(*count)++;
+	}
+	cbl_ybuf_free(&tgt);
+	return (error);
+}
+
+/*
+ * On-change (RFC 8641 section 3.3): what the filter selects, read now,
+ * compared with what was read last (cbl_dtree_diff()); its changes, a
+ * YANG Patch, pushed as a push-change-update.  The first read is a
+ * push-update with sync-on-start.  A read that failed is not compared:
+ * what it missed would read as gone.
+ */
+static int
+change_push(struct cbl_ysub *sub)
+{
+	const struct ynodes *y = &sub->y;
+	struct cbl_ybuf arr = { 0 }, c = { 0 };
+	cbl_dtree *t, *d;
+	bool incomplete;
+	size_t count = 0;
+	char pid[24];
+	int error = 0;
+
+	if ((t = read_filtered(sub, &incomplete)) == NULL && !incomplete &&
+	    (t = cbl_dtree_new(y->srv->schema)) == NULL)
+		return (ENOMEM);
+	if (incomplete) {
+		cbl_dtree_free(t);
+		return (0);
+	}
+	if (sub->last == NULL) {
+		if (sub->sync)
+			error = push_update(sub, cbl_dtree_root(t), false);
+		sub->last = t;
+		return (error);
+	}
+	if ((d = cbl_dtree_diff(sub->last, t)) == NULL) {
+		cbl_dtree_free(t);
+		return (errno == ENOMEM ? ENOMEM : 0);
+	}
+	error = patch_edits(sub, cbl_dtree_root(d), &arr, &count);
+	cbl_dtree_free(d);
+	cbl_dtree_free(sub->last);
+	sub->last = t;
+	if (error != 0 || count == 0) {
+		cbl_ybuf_free(&arr);
+		return (error);
+	}
+	/*
+	 * {id, datastore-changes: {yang-patch: {patch-id, edit: [...]}}}:
+	 * each map's keys deltas from its own node's SID.
+	 */
+	(void)snprintf(pid, sizeof(pid), "%ju", (uintmax_t)++sub->patches);
+	if ((error = buf_head(&c, 5, 2)) == 0 &&
+	    (error = buf_int(&c, (int64_t)(y->pcu_id->sid - y->pcu->sid))) ==
+	    0 && (error = buf_int(&c, (int64_t)sub->id)) == 0 &&
+	    (error = buf_int(&c, (int64_t)(y->pcu_dc->sid - y->pcu->sid))) ==
+	    0 && (error = buf_head(&c, 5, 1)) == 0 &&
+	    (error = buf_int(&c, (int64_t)(y->yp->sid - y->pcu_dc->sid))) ==
+	    0 && (error = buf_head(&c, 5, 2)) == 0 &&
+	    (error = buf_int(&c, (int64_t)(y->yp_pid->sid - y->yp->sid))) ==
+	    0 && (error = buf_text(&c, pid)) == 0 &&
+	    (error = buf_int(&c, (int64_t)(y->ed->sid - y->yp->sid))) == 0 &&
+	    (error = buf_head(&c, 4, count)) == 0 &&
+	    (error = buf_put(&c, arr.p, arr.len)) == 0)
+		error = send_record(sub, y->pcu->sid, c.p, c.len);
+	cbl_ybuf_free(&arr);
+	cbl_ybuf_free(&c);
 	return (error);
 }
 
@@ -513,7 +855,7 @@ sub_thread(void *p)
 		}
 		if (sub->period != 0 && !ts_before(&now, &due)) {
 			pthread_mutex_unlock(&sub->ctx->ysublock);
-			error = push(sub);
+			error = sub->onchange ? change_push(sub) : push(sub);
 			pthread_mutex_lock(&sub->ctx->ysublock);
 			if (error == EPIPE)
 				break;
@@ -609,6 +951,49 @@ sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
 						    "anchor-time is no time"));
 				}
 			}
+		} else if (strcmp(name, "on-change") == 0) {
+			sub->onchange = true;
+			sub->sync = true;
+			for (pc = cbl_dnode_first(c); pc != NULL;
+			    pc = cbl_dnode_next(pc)) {
+				sn = cbl_dnode_schema(pc);
+				v = cbl_dnode_value(pc);
+				if (strcmp(sn->name, "dampening-period") == 0)
+					sub->dampening = *(const uint32_t *)v;
+				else if (strcmp(sn->name, "sync-on-start") == 0)
+					sub->sync = *(const bool *)v;
+				else if (strcmp(sn->name, "excluded-change") ==
+				    0) {
+					int64_t e = *(const int32_t *)v;
+					const char *t = NULL;
+
+					for (uint32_t k = 0; k < sn->type->nitems;
+					    k++)
+						if (sn->type->items[k].value ==
+						    e)
+							t = sn->type->items[k].
+							    name;
+					if (t == NULL)
+						continue;
+					if (strcmp(t, "create") == 0)
+						sub->excluded_ops |=
+						    1u << CBL_DOP_CREATE;
+					else if (strcmp(t, "delete") == 0)
+						sub->excluded_ops |=
+						    1u << CBL_DOP_REMOVE |
+						    1u << CBL_DOP_DELETE;
+					else if (strcmp(t, "replace") == 0)
+						sub->excluded_ops |=
+						    1u << CBL_DOP_MERGE |
+						    1u << CBL_DOP_REPLACE;
+					else if (strcmp(t, "insert") == 0)
+						sub->excluded_ops |=
+						    1u << CBL_DOP_INSERT;
+					else if (strcmp(t, "move") == 0)
+						sub->excluded_ops |=
+						    1u << CBL_DOP_MOVE;
+				}
+			}
 		} else {
 			char text[128];
 
@@ -650,6 +1035,16 @@ sub_check(cbl_req *req, struct cbl_ysub *sub)
 			return (cbl_ysay(req, EOPNOTSUPP, y->rpc->sid,
 			    "operation-not-supported", "the operational "
 			    "datastore is the one subscribed to"));
+		if (sub->onchange) {
+			if (y->pcu == NULL)
+				return (cbl_ysay(req, EOPNOTSUPP, y->rpc->sid,
+				    "operation-not-supported", "no on-change: "
+				    "ietf-yang-push's on-change is not on"));
+			/* Changes are seen by reading: every dampening
+			 * period, a second at least. */
+			sub->period = sub->dampening > 100 ? sub->dampening :
+			    100;
+		}
 		if (sub->period == 0)
 			return (cbl_ysay(req, EINVAL, y->rpc->sid,
 			    "invalid-value", "a datastore's subscription is "
@@ -922,7 +1317,9 @@ cbl_ysub_each(cbl_ctx *ctx, int (*fn)(const struct cbl_ysub_info *, void *),
 		in.stream = sub->stream;
 		in.datastore = sub->datastore;
 		in.xpath = sub->xpath;
-		in.period = sub->period;
+		in.period = sub->onchange ? 0 : sub->period;
+		in.on_change = sub->onchange;
+		in.dampening = sub->dampening;
 		in.anchor_time = sub->anchor_s;
 		in.stop_time = sub->stop_s;
 		in.sent = atomic_load(&sub->sent);

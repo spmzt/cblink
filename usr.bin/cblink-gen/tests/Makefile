@@ -100,7 +100,7 @@ CLEANFILES+=	ysubh.h ysubh_schema.c
 ysubh.h: ${YSUBH_SRC} ${GEN}
 	${GEN} -m h,schema -b ysubh -o ${.OBJDIR} -p ${.CURDIR}/corpus \
 	    -F subdemo: -F ietf-subscribed-notifications:xpath \
-	    -F ietf-yang-push: -F ietf-datastores: ${YSUBH_SID} \
+	    -F ietf-yang-push:on-change -F ietf-datastores: ${YSUBH_SID} \
 	    ${YSUBH_SRC} > /dev/null
 ysubh_schema.c: ysubh.h
 # yvalid_test: the static validator on the module rules.

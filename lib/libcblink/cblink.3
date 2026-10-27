@@ -213,6 +213,27 @@ that
 makes of the keys of every list from the top down; its handler gets it
 as its target and reads its keys with
 .Fn cbl_yiid_read .
+Where a server's modules have ietf-subscribed-notifications (RFC 8639),
+SUBSCRIBE opens a push stream with establish-subscription's input, put
+as an rpc's: the NETCONF stream, every notification
+.Fn cbl_ynotify
+sends that its stream-xpath-filter selects; or, with ietf-yang-push and
+ietf-datastores (RFC 8641), the operational datastore, periodic, a
+push-update every period of what its datastore-xpath-filter selects,
+read by the get handlers on the stream's connection.
+The accept carries the output, the id; each data message is a
+notification as group notify has it
+.Pq Fn cbl_msg_ynotif .
+A stop-time closes the stream; a record the stream's credit has no room
+for is left out and counted.
+.Fn cbl_ysub_delete
+ends one of the requester's connection, from a delete-subscription
+handler,
+.Fn cbl_ysub_kill
+any, and
+.Fn cbl_ysub_each
+calls a function for each, under a lock, for a handler serving the
+subscriptions list.
 .Pp
 An operation's handler receives a
 .Vt cbl_req

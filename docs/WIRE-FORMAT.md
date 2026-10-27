@@ -463,6 +463,7 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
 | 3   | `RPC`  | do       | `{SID(rpc): input or null}`; an action's, `{SID(action): input or null, cblink:action: {target: instance-identifier}}` | `{SID(rpc): output}`, or `{SID(rpc): null}` when the rpc has no output; an action's likewise |
 | 4   | `NOTIFY` | notification, group `notify` | — | `{cblink:notification: {event-time, event: {delta: content}}}` |
 | 5   | `GET-SID` | dump | empty | one `MULTI` frame per module: `{1301: sid-file}` |
+| 6   | `SUBSCRIBE` | push stream | `{SID(establish-subscription): input}` | accept `{SID(establish-subscription): output}`; data, one `cblink:notification` each |
 
 - **GET** is CORECONF's FETCH. A node that is not instantiated is left
   out of the reply. A target is a top-level node's SID; a list entry's
@@ -499,6 +500,26 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   module), so a client that has the module but not its numbering can
   decode what the server speaks. `cblink-gen -m server` puts the `.sid`
   files given with `-s` in the server's table.
+- **SUBSCRIBE** is a dynamic subscription (RFC 8639) on a push stream
+  (section 8), where the server's modules have
+  `ietf-subscribed-notifications`. The open carries
+  `establish-subscription`'s input as an rpc's; the accept its output,
+  the subscription's `id`; each data frame one record in `NOTIFY`'s
+  envelope. Two targets are served: the `NETCONF` stream, every
+  notification the server sends to group `notify` that the
+  `stream-xpath-filter` selects; and, with `ietf-yang-push` and
+  `ietf-datastores`, the `operational` datastore with `periodic`
+  (RFC 8641): a `push-update` every `period` (10 centiseconds at least)
+  from `anchor-time` (without one, at once), its
+  `datastore-contents` what the `datastore-xpath-filter` selects of the
+  data the server's get handlers read on the stream's connection, and
+  `incomplete-update` where a read failed. A `stop-time` closes the
+  stream ("stop-time reached"); the subscription ends with its stream.
+  On-change, replay, subtree filters, filters by reference, modify,
+  and suspension are not served: a record that does not fit the
+  stream's credit is left out. An input member that is not served is
+  refused by name (`operation-not-supported`), and the open fails with
+  the error.
 - **Errors.** The `cblink:error` structure's `error-path` is the SID of
   the node at fault, alone; its `error-tag` says why, e.g.
   `unknown-element` for a SID no served module has,

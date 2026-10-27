@@ -1358,6 +1358,17 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
 	return (0);
 }
 
+/* The length of the CBOR item at p, 0 where it is none. */
+size_t
+cbl_ycbor_skip(const uint8_t *p, const uint8_t *end)
+{
+	struct yrd r = { p, end, p, NULL, 0, NULL, 0, NULL };
+
+	if (skip(&r, 0) != 0)
+		return (0);
+	return ((size_t)(r.p - p));
+}
+
 int
 cbl_ydecode_member(const struct cbl_ynode *n, const void *data, size_t len,
     void *parent, cbl_yarena *a, int flags, char *why, size_t whylen)

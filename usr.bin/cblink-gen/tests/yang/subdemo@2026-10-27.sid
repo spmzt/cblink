@@ -1,0 +1,71 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "subdemo",
+    "module-revision": "2026-10-27",
+    "sid-file-version": 0,
+    "description": "ysub_test's tables, numbered for the test alone.",
+    "assignment-range": [
+      {
+        "entry-point": "81000",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "subdemo",
+        "sid": "81000"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:alert",
+        "sid": "81001"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:alert/level",
+        "sid": "81002"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:alert/text",
+        "sid": "81003"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:counters",
+        "sid": "81004"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:counters/port",
+        "sid": "81005"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:counters/port/name",
+        "sid": "81006"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:counters/port/octets",
+        "sid": "81007"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:counters/ticks",
+        "sid": "81008"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:other",
+        "sid": "81009"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/subdemo:other/note",
+        "sid": "81010"
+      }
+    ]
+  }
+}

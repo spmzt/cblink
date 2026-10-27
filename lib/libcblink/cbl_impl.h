@@ -193,6 +193,10 @@ struct cbl_ctx {
 		void		*arg;
 	}			*ysrv;
 	size_t			 nysrv;
+	/* Its subscriptions (cbl_ysub.c), the next one's id. */
+	pthread_mutex_t		 ysublock;
+	TAILQ_HEAD(, cbl_ysub)	 ysubs;
+	uint32_t		 ysubid;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);

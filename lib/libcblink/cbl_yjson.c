@@ -19,8 +19,11 @@
  *   between (6.3, 6.5); binary is base64 (6.6); empty [null] (6.9);
  *   an identityref "module:identity" (6.8), the module always said.
  * - A union is its member's value, as that member's type says.
- * - An instance-identifier, and anydata and anyxml, which are CBOR here,
- *   are null: left out of this version.
+ * - Anydata is an object of its content's members, each "module:name"
+ *   (7.7): its YANG-CBOR's keys deltas from its own SID, top-level
+ *   nodes of the tables.  Where it holds one the tables do not have,
+ *   it is null, as anyxml and an instance-identifier are: left out of
+ *   this version.
  */
 
 #include <sys/types.h>
@@ -48,6 +51,10 @@ struct yarr {
 
 static int	json_map(struct cbl_ybuf *, const struct cbl_ynode *,
 		    const void *, int);
+static int	json_child(struct cbl_ybuf *, const struct cbl_ynode *,
+		    const void *, int);
+static int	json_name(struct cbl_ybuf *, const struct cbl_ynode *,
+		    const struct cbl_ynode *);
 
 static int
 jput(struct cbl_ybuf *b, const void *d, size_t len)
@@ -301,6 +308,94 @@ json_value(struct cbl_ybuf *b, const struct cbl_ynode *n,
 	return (EINVAL);
 }
 
+/* A CBOR head at *pp: its major type and value; false: none. */
+static bool
+cbor_head(const uint8_t **pp, const uint8_t *end, int *major, uint64_t *v)
+{
+	const uint8_t *p = *pp;
+	size_t k;
+
+	if (p >= end)
+		return (false);
+	*major = p[0] >> 5;
+	*v = p[0] & 0x1f;
+	p++;
+	if (*v >= 24) {
+		if (*v > 27)
+			return (false);
+		k = (size_t)1 << (*v - 24);
+		if ((size_t)(end - p) < k)
+			return (false);
+		for (*v = 0; k > 0; k--)
+			*v = *v << 8 | *p++;
+	}
+	*pp = p;
+	return (true);
+}
+
+/*
+ * Anydata's YANG-CBOR, {delta: value}, as an object of its members,
+ * each a top-level node of the tables, decoded and said as one; null
+ * where it is not so.
+ */
+static int
+json_anydata(struct cbl_ybuf *b, const struct cbl_ynode *n,
+    const struct cbl_bytes *v, int depth)
+{
+	const struct cbl_yschema *s = n->module != NULL ? n->module->schema :
+	    NULL;
+	const uint8_t *p, *end;
+	const struct cbl_ynode *c;
+	struct cbl_ybuf out = { 0 };
+	cbl_yarena *a;
+	uint64_t count, d;
+	int64_t delta;
+	void *data;
+	size_t len;
+	int major, error = 0;
+	bool ok;
+
+	if (v->p == NULL || s == NULL || depth > JDEPTH_MAX)
+		return (jputs(b, "null"));
+	p = v->p;
+	end = p + v->len;
+	if (!cbor_head(&p, end, &major, &count) || major != 5)
+		return (jputs(b, "null"));
+	if ((a = cbl_yarena_new()) == NULL)
+		return (ENOMEM);
+	ok = (error = jputs(&out, "{")) == 0;
+	for (uint64_t i = 0; ok && i < count; i++) {
+		if (!cbor_head(&p, end, &major, &d) || major > 1 ||
+		    d > INT64_MAX) {
+			ok = false;
+			break;
+		}
+		delta = major == 0 ? (int64_t)d : -1 - (int64_t)d;
+		c = cbl_yschema_node(s, (uint64_t)((int64_t)n->sid + delta));
+		if (c == NULL || c->module == NULL || c->module->size == 0 ||
+		    (len = cbl_ycbor_skip(p, end)) == 0 ||
+		    (data = cbl_yarena_alloc(a, c->module->size)) == NULL ||
+		    cbl_ydecode_member(c, p, len, data, a, 0, NULL, 0) != 0) {
+			ok = false;
+			break;
+		}
+		p += len;
+		if ((i > 0 && (error = jputs(&out, ",")) != 0) ||
+		    (error = json_name(&out, c, NULL)) != 0 ||
+		    (error = json_child(&out, c, data, depth + 1)) != 0)
+			ok = false;
+	}
+	if (ok)
+		error = jputs(&out, "}");
+	cbl_yarena_free(a);
+	if (ok && error == 0)
+		error = jput(b, out.p, out.len);
+	else if (error == 0 || error == EINVAL)
+		error = jputs(b, "null");
+	cbl_ybuf_free(&out);
+	return (error);
+}
+
 /* A member's name: "module:name" at the top or across modules. */
 static int
 json_name(struct cbl_ybuf *b, const struct cbl_ynode *c,
@@ -354,6 +449,8 @@ json_child(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 	case CBL_YN_LEAF:
 		return (json_value(b, n, n->type, AT(p, n->off)));
 	case CBL_YN_ANYDATA:
+		return (json_anydata(b, n, (const struct cbl_bytes *)AT(p,
+		    n->off), depth));
 	case CBL_YN_ANYXML:
 		return (jputs(b, "null"));
 	}

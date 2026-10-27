@@ -25,6 +25,8 @@
  *	GET-SID	a dump: {1301: the ietf-sid-file structure}, a frame for
  *		each module's .sid file, what a generic client decodes
  *		the others with.
+ *	SUBSCRIBE  a push stream: RFC 8639's subscriptions and RFC
+ *		8641's periodic YANG-Push (cbl_ysub.c).
  *
  * A request's targets are top-level nodes; a list entry's (a SID with
  * keys), actions and the .sid files (GET-SID) are for what comes next.
@@ -42,14 +44,6 @@
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
 #include "cbl_ymod.h"
-
-/* A node of a served module: its server, handlers and node. */
-struct yfound {
-	const struct cbl_yserver	*srv;
-	void				*arg;
-	const struct cbl_ynode		*n;
-	const struct cbl_yhandler	*h;	/* NULL: none */
-};
 
 static int
 hcmp(const void *key, const void *elem)
@@ -70,8 +64,8 @@ handler_of(const struct cbl_yserver *srv, uint64_t sid)
 	    sizeof(*srv->handler), hcmp));
 }
 
-static bool
-yfind(cbl_ctx *ctx, uint64_t sid, struct yfound *f)
+bool
+cbl_yfind(cbl_ctx *ctx, uint64_t sid, struct cbl_yfound *f)
 {
 	const struct cbl_ynode *n;
 	bool found = false;
@@ -111,8 +105,8 @@ is_top(const struct cbl_ynode *n)
 }
 
 /* A top-level data node: what GET reads and EDIT changes. */
-static bool
-is_top_data(const struct cbl_ynode *n)
+bool
+cbl_yis_top_data(const struct cbl_ynode *n)
 {
 
 	switch (n->kind) {
@@ -129,8 +123,8 @@ is_top_data(const struct cbl_ynode *n)
 }
 
 /* Why a request failed: its message, the node by SID, the tag. */
-static int
-ysay(cbl_req *req, int error, uint64_t sid, const char *tag,
+int
+cbl_ysay(cbl_req *req, int error, uint64_t sid, const char *tag,
     const char *text)
 {
 
@@ -146,7 +140,7 @@ static int
 yfailed(cbl_req *req, int error, uint64_t sid, const char *what)
 {
 
-	return (ysay(req, error, sid, NULL, req->err_msg == NULL ? what :
+	return (cbl_ysay(req, error, sid, NULL, req->err_msg == NULL ? what :
 	    NULL));
 }
 
@@ -195,23 +189,23 @@ iid_sid(cbl_req *req, const struct cbl_bytes *b, uint64_t *sidp)
 	size_t n;
 
 	if (b->len == 0)
-		return (ysay(req, EINVAL, 0, "bad-element", "empty target"));
+		return (cbl_ysay(req, EINVAL, 0, "bad-element", "empty target"));
 	if ((p[0] & 0xe0) == 0x80)
-		return (ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
 		    "a list entry as a target: not yet"));
 	if ((p[0] & 0xe0) != 0)
-		return (ysay(req, EINVAL, 0, "bad-element",
+		return (cbl_ysay(req, EINVAL, 0, "bad-element",
 		    "a target is a SID"));
 	v = p[0] & 0x1f;
 	if (v >= 24) {
 		if (v > 27 || b->len != 1 + ((size_t)1 << (v - 24)))
-			return (ysay(req, EINVAL, 0, "bad-element",
+			return (cbl_ysay(req, EINVAL, 0, "bad-element",
 			    "a target is a SID"));
 		n = b->len - 1;
 		for (v = 0; n > 0; n--)
 			v = v << 8 | *++p;
 	} else if (b->len != 1)
-		return (ysay(req, EINVAL, 0, "bad-element", "a target is a SID"));
+		return (cbl_ysay(req, EINVAL, 0, "bad-element", "a target is a SID"));
 	*sidp = v;
 	return (0);
 }
@@ -267,13 +261,13 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
 				    s->schema, s->handler[j].sid);
 
 				if (s->handler[j].get != NULL && nd != NULL &&
-				    is_top_data(nd))
+				    cbl_yis_top_data(nd))
 					v[n++] = s->handler[j].sid;
 			}
 		}
 		pthread_rwlock_unlock(&ctx->famlock);
 	} else
-		error = ysay(req, error, 0, "malformed-message", why);
+		error = cbl_ysay(req, error, 0, "malformed-message", why);
 	/* An xpath filter: copied, the arena goes. */
 	*xpathp = NULL;
 	if (error == 0 && g.xpath_filter != NULL &&
@@ -298,28 +292,32 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
 
 /*
  * The nodes v read through their get handlers, made one instance tree
- * (cbl_data.h) as their YANG-CBOR says, what xpath selects of it (with
- * the nodes above and a list entry's keys, RFC 6241 section 8.9) into
- * reply.  The nodes' servers are one, their schema the tree's.
+ * (cbl_data.h) as their YANG-CBOR says, *tp; NULL where none of them is
+ * read.  The nodes' servers are one, their schema the tree's.  With
+ * incomplete, a node whose read fails is left out and *incomplete set;
+ * without, the read fails with it.
  */
-static int
-get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
-    const char *xpath)
+int
+cbl_yread_tree(cbl_req *req, const uint64_t *v, size_t n, cbl_dtree **tp,
+    bool *incomplete)
 {
 	const struct cbl_yschema *schema = NULL;
 	struct cbl_ybuf b = { NULL, 0, 0 };
-	cbl_dtree *t = NULL, *ft;
-	struct yfound f;
+	cbl_dtree *t = NULL;
+	struct cbl_yfound f;
 	cbl_yarena *a;
-	cbl_dnode *c;
 	void *data;
 	char why[160];
 	int error = 0;
 
+	*tp = NULL;
 	for (size_t i = 0; error == 0 && i < n; i++) {
-		if (!yfind(req->conn->ctx, v[i], &f) || !is_top_data(f.n))
-			return (ysay(req, ENOENT, v[i], "unknown-element",
+		if (!cbl_yfind(req->conn->ctx, v[i], &f) ||
+		    !cbl_yis_top_data(f.n)) {
+			cbl_dtree_free(t);
+			return (cbl_ysay(req, ENOENT, v[i], "unknown-element",
 			    "no such node"));
+		}
 		if (f.h == NULL || f.h->get == NULL)
 			continue;
 		if (schema == NULL) {
@@ -328,7 +326,7 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 				return (ENOMEM);
 		} else if (f.srv->schema != schema) {
 			cbl_dtree_free(t);
-			return (ysay(req, EOPNOTSUPP, v[i],
+			return (cbl_ysay(req, EOPNOTSUPP, v[i],
 			    "operation-not-supported", "a filter's nodes are "
 			    "of one server's modules"));
 		}
@@ -349,18 +347,44 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 				    b.p, b.len, 0, why, sizeof(why), NULL);
 			cbl_ybuf_free(&b);
 			memset(&b, 0, sizeof(b));
+			if (error != 0 && error != ENOMEM &&
+			    incomplete != NULL) {
+				*incomplete = true;
+				error = 0;
+			}
 		}
 		cbl_yarena_free(a);
 	}
-	if (error != 0 || t == NULL) {
+	if (error != 0) {
 		cbl_dtree_free(t);
 		return (error);
 	}
+	*tp = t;
+	return (0);
+}
+
+/*
+ * The nodes v read (cbl_yread_tree()), what xpath selects of them (with
+ * the nodes above and a list entry's keys, RFC 6241 section 8.9) into
+ * reply.
+ */
+static int
+get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
+    const char *xpath)
+{
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	cbl_dtree *t, *ft;
+	cbl_dnode *c;
+	char why[160];
+	int error;
+
+	if ((error = cbl_yread_tree(req, v, n, &t, NULL)) != 0 || t == NULL)
+		return (error);
 	if ((ft = cbl_dtree_filter_xpath(t, xpath, why, sizeof(why))) ==
 	    NULL) {
 		error = errno;
 		cbl_dtree_free(t);
-		return (ysay(req, error == ENOMEM ? ENOMEM : EINVAL, 0,
+		return (cbl_ysay(req, error == ENOMEM ? ENOMEM : EINVAL, 0,
 		    "invalid-value", why));
 	}
 	for (c = cbl_dnode_first(cbl_dtree_root(ft)); error == 0 && c != NULL;
@@ -380,17 +404,17 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 static int
 get_one(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
 {
-	struct yfound f;
+	struct cbl_yfound f;
 	cbl_yarena *a;
 	void *data;
 	int error;
 
 	*put = false;
-	if (!yfind(req->conn->ctx, sid, &f) || !is_top_data(f.n))
-		return (ysay(req, ENOENT, sid, "unknown-element",
+	if (!cbl_yfind(req->conn->ctx, sid, &f) || !cbl_yis_top_data(f.n))
+		return (cbl_ysay(req, ENOENT, sid, "unknown-element",
 		    "no such node"));
 	if (f.h == NULL || f.h->get == NULL)
-		return (ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
+		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
 		    "the node is not read"));
 	if ((a = cbl_yarena_new()) == NULL)
 		return (ENOMEM);
@@ -477,7 +501,7 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 			free(xpath);
 			free(d->v);
 			free(d);
-			return (ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+			return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
 			    "an xpath filter is for a GET, not a dump"));
 		}
 		st->priv = d;
@@ -503,7 +527,7 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 }
 
 struct yedit {
-	struct yfound	 f;
+	struct cbl_yfound	 f;
 	void		*before;
 	void		*after;
 };
@@ -537,15 +561,15 @@ y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		if (at->key < 1 || cbl_fw_sid((uint64_t)at->key))
 			continue;
 		sid = (uint64_t)at->key;
-		if (!yfind(req->conn->ctx, sid, &e[n].f) ||
-		    !is_top_data(e[n].f.n)) {
-			error = ysay(req, ENOENT, sid, "unknown-element",
+		if (!cbl_yfind(req->conn->ctx, sid, &e[n].f) ||
+		    !cbl_yis_top_data(e[n].f.n)) {
+			error = cbl_ysay(req, ENOENT, sid, "unknown-element",
 			    "no such node");
 			break;
 		}
 		if ((e[n].f.n->flags & CBL_YNF_CONFIG) == 0 ||
 		    e[n].f.h == NULL || e[n].f.h->edit == NULL) {
-			error = ysay(req, EOPNOTSUPP, sid,
+			error = cbl_ysay(req, EOPNOTSUPP, sid,
 			    "operation-not-supported",
 			    "the node is not configuration that is edited");
 			break;
@@ -563,7 +587,7 @@ y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 			if ((error = cbl_ydecode_member(e[n].f.n, raw, at->len,
 			    e[n].after, a, CBL_YD_STRICT, why,
 			    sizeof(why))) != 0) {
-				error = ysay(req, error, sid, "bad-element",
+				error = cbl_ysay(req, error, sid, "bad-element",
 				    why);
 				break;
 			}
@@ -628,12 +652,12 @@ action_target(cbl_req *req, const cbl_msg *msg, const struct cbl_yserver *srv,
 	memset(ac, 0, sizeof(*ac));
 	if ((error = cbl_msg_ydecode(msg, cbl_fw_node("action"), ac, a,
 	    CBL_YD_STRICT, why, sizeof(why))) != 0)
-		return (ysay(req, error == ENOENT ? EINVAL : error, act->sid,
+		return (cbl_ysay(req, error == ENOENT ? EINVAL : error, act->sid,
 		    "missing-element", error == ENOENT ? "an action needs "
 		    "its target (cblink:action)" : why));
 	if (cbl_yiid_read(srv->schema, &ac->target, &n, &vals, &nvals,
 	    a) != 0 || n != act->parent)
-		return (ysay(req, EINVAL, act->sid, "bad-element",
+		return (cbl_ysay(req, EINVAL, act->sid, "bad-element",
 		    "the target is no instance of the action's node"));
 	return (0);
 }
@@ -643,7 +667,7 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 {
 	const cbl_attr *body = cbl_msg_body(msg), *at = NULL;
 	const struct cbl_ynode *in, *out;
-	struct yfound f;
+	struct cbl_yfound f;
 	cbl_msg *reply;
 	void *pin, *pout;
 	cbl_yarena *a;
@@ -656,25 +680,25 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		    cbl_fw_sid((uint64_t)body->child[i].key))
 			continue;
 		if (at != NULL)
-			return (ysay(req, EINVAL, 0, "bad-element",
+			return (cbl_ysay(req, EINVAL, 0, "bad-element",
 			    "one rpc a request"));
 		at = &body->child[i];
 	}
 	if (at == NULL)
-		return (ysay(req, EINVAL, 0, "missing-element", "no rpc"));
+		return (cbl_ysay(req, EINVAL, 0, "missing-element", "no rpc"));
 	sid = (uint64_t)at->key;
-	if (!yfind(req->conn->ctx, sid, &f) || (f.n->kind != CBL_YN_RPC &&
+	if (!cbl_yfind(req->conn->ctx, sid, &f) || (f.n->kind != CBL_YN_RPC &&
 	    f.n->kind != CBL_YN_ACTION))
-		return (ysay(req, ENOENT, sid, "unknown-element",
+		return (cbl_ysay(req, ENOENT, sid, "unknown-element",
 		    "no such rpc or action"));
 	if (f.h == NULL || (f.n->kind == CBL_YN_RPC ? f.h->rpc == NULL :
 	    f.h->action == NULL))
-		return (ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
+		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
 		    f.n->kind == CBL_YN_RPC ? "the rpc is not served" :
 		    "the action is not served"));
 	if ((in = io_of(f.n, CBL_YN_INPUT)) == NULL ||
 	    (out = io_of(f.n, CBL_YN_OUTPUT)) == NULL)
-		return (ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
+		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
 		    "the rpc's tables have no input or output"));
 	if ((a = cbl_yarena_new()) == NULL)
 		return (ENOMEM);
@@ -686,7 +710,7 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	if ((error = cbl_msg_ydecode(msg, in, pin, a, CBL_YD_STRICT, why,
 	    sizeof(why))) != 0) {
 		cbl_yarena_free(a);
-		return (ysay(req, error, sid, "bad-element", why));
+		return (cbl_ysay(req, error, sid, "bad-element", why));
 	}
 	/* An rpc's input, valid as RFC 7950 has it. */
 	if ((error = yvalid(req, in, pin, 0)) != 0) {
@@ -835,6 +859,8 @@ static const struct cbl_op yops[] = {
 	    .doit = y_rpc },
 	{ .cmd = CBL_YCMD_GET_SID, .flags = CBL_OPF_DUMP, .name = "get-sid",
 	    .dumpit = y_getsid_dump },
+	{ .cmd = CBL_YCMD_SUBSCRIBE, .flags = CBL_OPF_PUSH,
+	    .name = "subscribe", .stream_open = cbl_ysub_open },
 };
 
 static const struct cbl_mcgrp ygroups[] = {
@@ -852,8 +878,8 @@ static const struct cbl_family_def ydef = {
 };
 
 /* A CBOR integer's head into p, major type 0 or 1: its length. */
-static size_t
-put_int(uint8_t *p, int64_t v)
+size_t
+cbl_ycbor_int(uint8_t *p, int64_t v)
 {
 	uint64_t u = v < 0 ? (uint64_t)(-(v + 1)) : (uint64_t)v;
 	uint8_t major = v < 0 ? 0x20 : 0;
@@ -914,55 +940,74 @@ cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n, const void *p)
 	return (cbl_ynotify_fam(ctx->yfam, 0, CBL_YCMD_NOTIFY, n, p));
 }
 
-/* A YANG notification to a group of a family: family 1's, or ctrl's. */
+/*
+ * {cblink:notification: {event-time: now, event: {delta: content}}}
+ * into msg: notification sid's content, its YANG-CBOR, the delta from
+ * event's SID (RFC 9254: anydata's keys are as a container's).
+ */
 int
-cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
-    const struct cbl_ynode *n, const void *p)
+cbl_ynotif_put(cbl_msg *msg, uint64_t sid, const uint8_t *content,
+    size_t len)
 {
 	struct cblink_notification e = { 0 };
 	const struct cbl_ynode *ev = event_node();
-	struct cbl_ybuf c = { 0 };
-	uint8_t head[1 + 9], *b = NULL;
+	uint8_t head[1 + 9], *b;
 	char t[sizeof("YYYY-MM-DDThh:mm:ss.uuuuuuZ")];
 	struct timespec ts;
 	struct tm tm;
-	cbl_msg *msg;
 	size_t hl;
 	int error;
 
-	if (fam == NULL || n == NULL || p == NULL ||
-	    n->kind != CBL_YN_NOTIF || ev == NULL)
+	if (ev == NULL)
 		return (EINVAL);
-	if ((error = cbl_yencode(n, p, &c)) != 0)
-		return (error);
-	/* event: {delta: content}. */
 	head[0] = 0xa1;
-	hl = 1 + put_int(head + 1, (int64_t)(n->sid - ev->sid));
-	if ((b = malloc(hl + c.len)) == NULL) {
-		error = ENOMEM;
-		goto out;
-	}
+	hl = 1 + cbl_ycbor_int(head + 1, (int64_t)(sid - ev->sid));
+	if ((b = malloc(hl + len)) == NULL)
+		return (ENOMEM);
 	memcpy(b, head, hl);
-	memcpy(b + hl, c.p, c.len);
+	memcpy(b + hl, content, len);
 	e.event.p = b;
-	e.event.len = hl + c.len;
+	e.event.len = hl + len;
 	(void)clock_gettime(CLOCK_REALTIME, &ts);
 	(void)gmtime_r(&ts.tv_sec, &tm);
 	hl = strftime(t, sizeof(t), "%Y-%m-%dT%H:%M:%S", &tm);
 	(void)snprintf(t + hl, sizeof(t) - hl, ".%06ldZ",
 	    ts.tv_nsec / 1000);
 	e.event_time = t;
+	error = cbl_msg_put_ynode(msg, cbl_fw_node("notification"), &e);
+	free(b);
+	return (error);
+}
+
+/*
+ * A YANG notification to a group of a family: family 1's, or ctrl's;
+ * family 1's to its subscriptions to the NETCONF stream too
+ * (cbl_ysub.c).
+ */
+int
+cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
+    const struct cbl_ynode *n, const void *p)
+{
+	struct cbl_ybuf c = { 0 };
+	cbl_msg *msg;
+	int error;
+
+	if (fam == NULL || n == NULL || p == NULL ||
+	    n->kind != CBL_YN_NOTIF || event_node() == NULL)
+		return (EINVAL);
+	if ((error = cbl_yencode(n, p, &c)) != 0)
+		return (error);
+	if (fam == fam->ctx->yfam && group_idx == 0)
+		cbl_ysub_event(fam->ctx, n, c.p, c.len);
 	if ((error = cbl_notify_msg_new(fam, cmd, &msg)) != 0)
 		goto out;
-	if ((error = cbl_msg_put_ynode(msg, cbl_fw_node("notification"),
-	    &e)) != 0) {
+	if ((error = cbl_ynotif_put(msg, n->sid, c.p, c.len)) != 0) {
 		cbl_msg_free(msg);
 		goto out;
 	}
 	error = cbl_notify(fam, group_idx, msg);
 out:
 	cbl_ybuf_free(&c);
-	free(b);
 	return (error);
 }
 
@@ -1119,7 +1164,7 @@ cbl_req_set_yerr(cbl_req *req, const char *text, uint64_t sid)
 
 	if (req == NULL)
 		return (EINVAL);
-	(void)ysay(req, 0, sid, NULL, text);
+	(void)cbl_ysay(req, 0, sid, NULL, text);
 	return (0);
 }
 

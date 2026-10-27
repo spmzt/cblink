@@ -81,6 +81,28 @@ CFLAGS.yxpath_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yxpath_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread -lm
 CFLAGS.yedit_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 LDADD.yedit_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+# ysub_test: family 1's subscriptions, subdemo's tables with RFC 8639's
+# and RFC 8641's modules (the corpus's), numbered for the test alone.
+ATF_TESTS_C+=	ysub_test
+SRCS.ysub_test=	ysubh.h ysub_test.c ysubh_schema.c
+CFLAGS.ysub_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
+LDADD.ysub_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CFLAGS.ysubh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+YSUBH_SRC=	${.CURDIR}/yang/subdemo@2026-10-27.yang \
+		${.CURDIR}/corpus/ietf-subscribed-notifications@2019-09-09.yang \
+		${.CURDIR}/corpus/ietf-yang-push@2019-09-09.yang \
+		${.CURDIR}/corpus/ietf-datastores@2018-02-14.yang
+YSUBH_SID=	-s ${.CURDIR}/yang/subdemo@2026-10-27.sid \
+		-s ${.CURDIR}/yang/ietf-subscribed-notifications@2019-09-09.sid \
+		-s ${.CURDIR}/yang/ietf-yang-push@2019-09-09.sid \
+		-s ${.CURDIR}/yang/ietf-datastores@2018-02-14.sid
+CLEANFILES+=	ysubh.h ysubh_schema.c
+ysubh.h: ${YSUBH_SRC} ${GEN}
+	${GEN} -m h,schema -b ysubh -o ${.OBJDIR} -p ${.CURDIR}/corpus \
+	    -F subdemo: -F ietf-subscribed-notifications:xpath \
+	    -F ietf-yang-push: -F ietf-datastores: ${YSUBH_SID} \
+	    ${YSUBH_SRC} > /dev/null
+ysubh_schema.c: ysubh.h
 # yvalid_test: the static validator on the module rules.
 ATF_TESTS_C+=	yvalid_test
 SRCS.yvalid_test=	rules.h yvalid_test.c rules_schema.c
@@ -139,6 +161,10 @@ YANG=		yang/good@2026-10-13.yang yang/bad@2026-10-13.yang \
 		yang/foo@2026-10-14.yang yang/foo@2026-10-14.sid \
 		yang/bibliomod@2026-10-14.yang yang/bibliomod@2026-10-14.sid \
 		yang/shared@2026-10-22.yang yang/shared@2026-10-22.sid \
+		yang/subdemo@2026-10-27.yang yang/subdemo@2026-10-27.sid \
+		yang/ietf-subscribed-notifications@2019-09-09.sid \
+		yang/ietf-yang-push@2019-09-09.sid \
+		yang/ietf-datastores@2018-02-14.sid \
 		yang/shared-bad@2026-10-22.yang \
 		${.CURDIR}/../../../share/yang/cblink-gen@2026-10-22.yang \
 		${.CURDIR}/../../../share/yang/ietf-sid-file@2024-07-31.yang \

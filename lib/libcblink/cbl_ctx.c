@@ -82,6 +82,8 @@ cbl_ctx_new(cbl_ctx **ctxp)
 	}
 	pthread_cond_init(&ctx->famcv, NULL);
 	pthread_mutex_init(&ctx->submtx, NULL);
+	pthread_mutex_init(&ctx->ysublock, NULL);
+	TAILQ_INIT(&ctx->ysubs);
 	RB_INIT(&ctx->groups);
 	RB_INIT(&ctx->fams);
 	ctx->next_fam = 2;	/* 0 and 1 are built in: ctrl, cblink.yang */
@@ -111,6 +113,7 @@ cbl_ctx_free(cbl_ctx *ctx)
 	cbl_family_free_all(ctx);
 	cbl_yfamily_free(ctx);
 	cbl_tls_free(ctx->tls);
+	pthread_mutex_destroy(&ctx->ysublock);
 	pthread_mutex_destroy(&ctx->submtx);
 	pthread_cond_destroy(&ctx->famcv);
 	pthread_rwlock_destroy(&ctx->famlock);

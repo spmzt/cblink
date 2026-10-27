@@ -190,6 +190,9 @@ CBLINK_1.0 {
 	cbl_ydefaults;
 	cbl_req_yarg;
 	cbl_req_set_yerr;
+	cbl_ysub_delete;
+	cbl_ysub_kill;
+	cbl_ysub_each;
 	cbl_dtree_new;
 	cbl_dtree_free;
 	cbl_dtree_root;

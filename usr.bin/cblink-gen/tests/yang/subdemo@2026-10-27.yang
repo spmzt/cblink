@@ -1,0 +1,66 @@
+module subdemo {
+  yang-version 1.1;
+  namespace "urn:example:subdemo";
+  prefix sd;
+
+  description
+    "Data and a notification to subscribe to, for ysub_test: family
+     1's subscriptions (RFC 8639) and periodic YANG-Push (RFC 8641).";
+
+  revision 2026-10-27 {
+    description
+      "Initial revision.";
+  }
+
+  container counters {
+    config false;
+    description
+      "What a periodic subscription pushes.";
+    leaf ticks {
+      type uint32;
+      description
+        "How many times it was read.";
+    }
+    list port {
+      key "name";
+      description
+        "A port.";
+      leaf name {
+        type string;
+        description
+          "Its name.";
+      }
+      leaf octets {
+        type uint64;
+        description
+          "What it carried.";
+      }
+    }
+  }
+
+  container other {
+    config false;
+    description
+      "What a filter leaves out.";
+    leaf note {
+      type string;
+      description
+        "A note.";
+    }
+  }
+
+  notification alert {
+    description
+      "What the NETCONF stream carries.";
+    leaf level {
+      type string;
+      description
+        "low or high.";
+    }
+    leaf text {
+      type string;
+      description
+        "What happened.";
+    }
+  }
+}

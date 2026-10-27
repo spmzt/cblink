@@ -590,6 +590,7 @@ enum cbl_ycmd {
 	CBL_YCMD_RPC = 3,
 	CBL_YCMD_NOTIFY = 4,	/* NOTIFY frames, group "notify" */
 	CBL_YCMD_GET_SID = 5,	/* dump: {1301: sid-file}, a module each */
+	CBL_YCMD_SUBSCRIBE = 6,	/* a push stream: a subscription's records */
 };
 
 /*
@@ -630,5 +631,44 @@ void		*cbl_req_yarg(const cbl_req *req);
 int		 cbl_req_set_yerr(cbl_req *req, const char *text,
 		    uint64_t sid);
 uint64_t	 cbl_msg_err_sid(const cbl_msg *msg);
+
+/*
+ * Subscriptions (RFC 8639) and YANG-Push (RFC 8641), dynamic, where a
+ * server's modules have ietf-subscribed-notifications (and, for a
+ * datastore's, ietf-yang-push and ietf-datastores): SUBSCRIBE opens a
+ * push stream with establish-subscription's input, put as an rpc's
+ * (cbl_msg_put_ynode() of its input node); the stream is accepted with
+ * its output, the id, and carries the subscription's records, each a
+ * cblink:notification as group "notify" has them (cbl_msg_ynotif()).
+ * The NETCONF stream: every notification cbl_ynotify() sends, what
+ * stream-xpath-filter selects of it.  The operational datastore,
+ * periodic (period, anchor-time): a push-update every period of what
+ * datastore-xpath-filter selects, read by the get handlers on the
+ * stream's connection.  A stop-time ends it, the stream closed.  A
+ * record that does not fit in the stream's credit is left out, and
+ * counted.  The subscription ends with its stream (the subscriber's
+ * close), cbl_ysub_delete() (the subscriber's, from the request of a
+ * delete-subscription rpc on its connection) or cbl_ysub_kill() (any).
+ * cbl_ysub_each() calls fn for each subscription, under a lock: fn
+ * copies what it keeps and calls no cbl_ysub_* function; it stops at
+ * fn's first error, which it returns.
+ */
+struct cbl_ysub_info {
+	uint32_t	 id;
+	const char	*stream;	/* or NULL: a datastore's */
+	uint64_t	 datastore;	/* its identity's SID */
+	const char	*xpath;		/* the filter, or NULL */
+	uint32_t	 period;	/* centiseconds */
+	const char	*anchor_time;	/* or NULL */
+	const char	*stop_time;	/* or NULL */
+	uint64_t	 sent;		/* records */
+	uint64_t	 excluded;
+	const char	*receiver;	/* the peer's certificate subject */
+};
+
+int		 cbl_ysub_delete(cbl_req *req, uint32_t id);
+int		 cbl_ysub_kill(cbl_ctx *ctx, uint32_t id);
+int		 cbl_ysub_each(cbl_ctx *ctx,
+		    int (*fn)(const struct cbl_ysub_info *, void *), void *arg);
 
 #endif /* !_CBL_SCHEMA_H_ */

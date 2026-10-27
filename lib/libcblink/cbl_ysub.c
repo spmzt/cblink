@@ -121,8 +121,9 @@ struct cbl_ysub {
 	 * may be reading it still. */
 	void			**retired;
 	size_t			 nretired;
-	/* ysublock's: a thread runs it; push now (resync, modify). */
-	bool			 dead, listed, threaded, kick;
+	/* ysublock's: a thread runs it; push now (resync, modify); its
+	 * first read done; told of a change since its last read. */
+	bool			 dead, listed, threaded, kick, synced, dirty;
 	int			 refs;
 	pthread_cond_t		 cv;
 };
@@ -972,10 +973,31 @@ next_tick(const struct cbl_ysub *sub, const struct timespec *now,
 		ts_add_cs(next, sub->period);
 }
 
+/* With ysublock: an on-change subscription that reads only what the
+ * program tells the changes of. */
+static bool
+waits_told(const struct cbl_ysub *sub)
+{
+	size_t i, j;
+
+	if (!sub->onchange || sub->ntop == 0)
+		return (false);
+	for (i = 0; i < sub->ntop; i++) {
+		for (j = 0; j < sub->ctx->nytold; j++)
+			if (sub->ctx->ytold[j] == sub->top[i])
+				break;
+		if (j == sub->ctx->nytold)
+			return (false);
+	}
+	return (true);
+}
+
 /*
  * A periodic subscription's pushes, and its stop-time.  The first push
  * is at once without an anchor-time, else at the anchor's first period
  * from now; each next one a period on from the anchor, past the push.
+ * An on-change one that waits to be told reads at its tick only once
+ * told of a change, or asked to push the whole of it again.
  */
 static void *
 sub_thread(void *p)
@@ -995,18 +1017,31 @@ sub_thread(void *p)
 		(void)clock_gettime(CLOCK_REALTIME, &now);
 		if (sub->kick) {
 			sub->kick = false;
+			sub->dirty = true;
 			due = now;
 		}
 		if (sub->has_stop && !ts_before(&now, &sub->stop)) {
 			stop = true;
 			break;
 		}
+		if (sub->period != 0 && sub->synced && !sub->dirty &&
+		    !atomic_load(&sub->resync) && waits_told(sub)) {
+			if (sub->has_stop)
+				(void)pthread_cond_timedwait(&sub->cv,
+				    &sub->ctx->ysublock, &sub->stop);
+			else
+				(void)pthread_cond_wait(&sub->cv,
+				    &sub->ctx->ysublock);
+			continue;
+		}
 		if (sub->period != 0 && !ts_before(&now, &due)) {
+			sub->dirty = false;
 			pthread_mutex_unlock(&sub->ctx->ysublock);
 			error = sub->onchange ? change_push(sub) : push(sub);
 			pthread_mutex_lock(&sub->ctx->ysublock);
 			if (error == EPIPE)
 				break;
+			sub->synced = true;
 			(void)clock_gettime(CLOCK_REALTIME, &now);
 			now.tv_nsec++;
 			next_tick(sub, &now, &due);
@@ -1063,6 +1098,10 @@ sub_writable(cbl_stream *s __unused, size_t credit __unused, void *arg)
 		return;
 	atomic_store(&sub->resync, true);
 	atomic_store(&sub->suspended, false);
+	/* One waiting to be told reads at once. */
+	pthread_mutex_lock(&sub->ctx->ysublock);
+	pthread_cond_broadcast(&sub->cv);
+	pthread_mutex_unlock(&sub->ctx->ysublock);
 }
 
 static const struct cbl_stream_cbs sub_cbs = {
@@ -1864,6 +1903,52 @@ cbl_ysub_resync(cbl_req *req, uint32_t id)
 	pthread_cond_broadcast(&sub->cv);
 	pthread_mutex_unlock(&ctx->ysublock);
 	return (0);
+}
+
+int
+cbl_ysub_told(cbl_ctx *ctx, const struct cbl_ynode *const *tops, size_t n)
+{
+	uint64_t *v = NULL;
+
+	if (ctx == NULL || (n > 0 && tops == NULL))
+		return (EINVAL);
+	for (size_t i = 0; i < n; i++)
+		if (tops[i] == NULL || !cbl_yis_top_data(tops[i]))
+			return (EINVAL);
+	if (n > 0 && (v = calloc(n, sizeof(*v))) == NULL)
+		return (ENOMEM);
+	for (size_t i = 0; i < n; i++)
+		v[i] = tops[i]->sid;
+	pthread_mutex_lock(&ctx->ysublock);
+	free(ctx->ytold);
+	ctx->ytold = v;
+	ctx->nytold = n;
+	pthread_mutex_unlock(&ctx->ysublock);
+	return (0);
+}
+
+void
+cbl_ysub_changed(cbl_ctx *ctx, const struct cbl_ynode *top)
+{
+	struct cbl_ysub *sub;
+	size_t i;
+
+	if (ctx == NULL)
+		return;
+	pthread_mutex_lock(&ctx->ysublock);
+	TAILQ_FOREACH(sub, &ctx->ysubs, link) {
+		if (!sub->onchange || sub->dead || (top != NULL &&
+		    sub->y.srv->schema != top->module->schema))
+			continue;
+		for (i = 0; top != NULL && i < sub->ntop; i++)
+			if (sub->top[i] == top->sid)
+				break;
+		if (top != NULL && i == sub->ntop)
+			continue;
+		sub->dirty = true;
+		pthread_cond_broadcast(&sub->cv);
+	}
+	pthread_mutex_unlock(&ctx->ysublock);
 }
 
 int

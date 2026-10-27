@@ -204,6 +204,10 @@ struct cbl_ctx {
 	int			(*yreplay)(const struct timespec *,
 				    struct cbl_ysub_replay *, void *);
 	void			*yreplay_arg;
+	/* The top-level nodes whose changes the program tells (their
+	 * SIDs), ysublock's. */
+	uint64_t		*ytold;
+	size_t			 nytold;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);

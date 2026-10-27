@@ -546,6 +546,49 @@ ATF_TC_BODY(on_change, tc)
 	teardown(&f);
 }
 
+/* Told what changes: read when told, not every period. */
+ATF_TC_WITHOUT_HEAD(told);
+ATF_TC_BODY(told, tc)
+{
+	struct ietf_subscribed_notifications_establish_subscription_input_yp_on_change
+	    oc = { 0 };
+	const struct cbl_ynode *tops[1];
+	struct fixture f;
+	struct cli c;
+	est_per per;
+	est_in in;
+	unsigned t;
+
+	setup(&f);
+	tops[0] = n_counters;
+	ATF_REQUIRE_EQ(0, cbl_ysub_told(f.sctx, tops, 1));
+	cli_init(&c);
+	for_datastore(&in, "operational", "/subdemo:counters/port", &per, 0);
+	in.yp_update_trigger = SN(YP_UPDATE_TRIGGER_ON_CHANGE);
+	in.yp_on_change = &oc;
+	(void)subscribe(&f, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	wait_for(&c.records, 1, 3000);
+	ATF_REQUIRE_EQ(1, c.records);
+	/* Changed, not told: not read again. */
+	t = atomic_load(&ticks);
+	atomic_store(&em0_octets, 3000);
+	usleep(2300000);
+	ATF_REQUIRE_EQ(1, c.records);
+	ATF_REQUIRE_EQ(t, atomic_load(&ticks));
+	/* Another node's news: nothing still. */
+	cbl_ysub_changed(f.sctx, n_other);
+	usleep(1300000);
+	ATF_REQUIRE_EQ(1, c.records);
+	cbl_ysub_changed(f.sctx, n_counters);
+	wait_for(&c.records, 2, 3000);
+	ATF_REQUIRE_EQ(2, c.records);
+	ATF_REQUIRE_MATCH("\"target\":\"/subdemo:counters/port=em0/octets\"",
+	    c.json[1]);
+	cli_fini(&c);
+	teardown(&f);
+}
+
 /* What is refused at the open, and why. */
 static void
 refused_by(struct fixture *f, const est_in *in, const char *why)
@@ -899,6 +942,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, periodic);
 	ATF_TP_ADD_TC(tp, stream);
 	ATF_TP_ADD_TC(tp, on_change);
+	ATF_TP_ADD_TC(tp, told);
 	ATF_TP_ADD_TC(tp, suspend);
 	ATF_TP_ADD_TC(tp, replay);
 	ATF_TP_ADD_TC(tp, modify);

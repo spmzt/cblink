@@ -249,6 +249,11 @@ any, and
 .Fn cbl_ysub_each
 calls a function for each, under a lock, for a handler serving the
 subscriptions list.
+.Fn cbl_ysub_told
+names the top-level nodes whose changes the program tells by
+.Fn cbl_ysub_changed :
+an on-change subscription that reads only those is read when told, a
+dampening period after its last read at the soonest, not every period.
 .Pp
 An operation's handler receives a
 .Vt cbl_req

@@ -198,6 +198,8 @@ CBLINK_1.0 {
 	cbl_ysub_replay_oldest;
 	cbl_ysub_replay_live;
 	cbl_ysub_kill;
+	cbl_ysub_told;
+	cbl_ysub_changed;
 	cbl_ysub_each;
 	cbl_dtree_new;
 	cbl_dtree_free;

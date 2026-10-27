@@ -701,6 +701,17 @@ int		 cbl_ysub_modify(cbl_req *req, const void *in);
 int		 cbl_ysub_resync(cbl_req *req, uint32_t id);
 int		 cbl_ysub_delete(cbl_req *req, uint32_t id);
 int		 cbl_ysub_kill(cbl_ctx *ctx, uint32_t id);
+/*
+ * On-change from the program's own news: cbl_ysub_told() names the
+ * top-level data nodes each of whose changes the program tells by
+ * cbl_ysub_changed(top) (NULL: any of them).  An on-change
+ * subscription that reads only those is read again when told, a
+ * dampening period after its last read at the soonest, not every
+ * period.
+ */
+int		 cbl_ysub_told(cbl_ctx *ctx, const struct cbl_ynode *const *tops,
+		    size_t n);
+void		 cbl_ysub_changed(cbl_ctx *ctx, const struct cbl_ynode *top);
 int		 cbl_ysub_each(cbl_ctx *ctx,
 		    int (*fn)(const struct cbl_ysub_info *, void *), void *arg);
 

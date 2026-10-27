@@ -113,6 +113,7 @@ cbl_ctx_free(cbl_ctx *ctx)
 	cbl_family_free_all(ctx);
 	cbl_yfamily_free(ctx);
 	cbl_tls_free(ctx->tls);
+	free(ctx->ytold);
 	pthread_mutex_destroy(&ctx->ysublock);
 	pthread_mutex_destroy(&ctx->submtx);
 	pthread_cond_destroy(&ctx->famcv);

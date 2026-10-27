@@ -522,8 +522,20 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   (`replace`) or gone (`delete`), its `target` the node's RFC 8040
   api-path and its `value` the node; `excluded-change` leaves those types
   out. A `stop-time` closes the stream ("stop-time reached"); the
-  subscription ends with its stream. Replay, subtree filters, filters
-  by reference, modify, and suspension are not served: a record that does not fit the
+  subscription ends with its stream. A stream's `replay-start-time`
+  replays what the program keeps since then (its replay hook), each
+  record at its own time, then `replay-completed`, then the live ones;
+  `replay-start-time-revision` in the output says where it began when
+  the program keeps less. When a record does not fit in the stream's
+  credit the subscription is suspended, its records counted as
+  excluded; once the subscriber grants credit again it is told
+  `subscription-suspended` (`unsupportable-volume`) and
+  `subscription-resumed`, and an on-change subscription pushes the whole
+  of it again. `modify-subscription` and `resync-subscription` are the
+  program's rpcs, answered by `cbl_ysub_modify()` and
+  `cbl_ysub_resync()`; the first sends `subscription-modified`. Subtree
+  filters, filters by reference and configured subscriptions are not
+  served: a record that does not fit the
   stream's credit is left out. An input member that is not served is
   refused by name (`operation-not-supported`), and the open fails with
   the error.

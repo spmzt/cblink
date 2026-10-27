@@ -949,6 +949,15 @@ int
 cbl_ynotif_put(cbl_msg *msg, uint64_t sid, const uint8_t *content,
     size_t len)
 {
+
+	return (cbl_ynotif_put_at(msg, sid, content, len, NULL));
+}
+
+/* The same, its event-time when (NULL: now). */
+int
+cbl_ynotif_put_at(cbl_msg *msg, uint64_t sid, const uint8_t *content,
+    size_t len, const struct timespec *when)
+{
 	struct cblink_notification e = { 0 };
 	const struct cbl_ynode *ev = event_node();
 	uint8_t head[1 + 9], *b;
@@ -968,7 +977,10 @@ cbl_ynotif_put(cbl_msg *msg, uint64_t sid, const uint8_t *content,
 	memcpy(b + hl, content, len);
 	e.event.p = b;
 	e.event.len = hl + len;
-	(void)clock_gettime(CLOCK_REALTIME, &ts);
+	if (when != NULL)
+		ts = *when;
+	else
+		(void)clock_gettime(CLOCK_REALTIME, &ts);
 	(void)gmtime_r(&ts.tv_sec, &tm);
 	hl = strftime(t, sizeof(t), "%Y-%m-%dT%H:%M:%S", &tm);
 	(void)snprintf(t + hl, sizeof(t) - hl, ".%06ldZ",

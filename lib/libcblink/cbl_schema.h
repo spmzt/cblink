@@ -668,9 +668,37 @@ struct cbl_ysub_info {
 	const char	*stop_time;	/* or NULL */
 	uint64_t	 sent;		/* records */
 	uint64_t	 excluded;
+	bool		 suspended;
 	const char	*receiver;	/* the peer's certificate subject */
 };
 
+/*
+ * Replay (RFC 8639 section 2.4.2.1, the replay feature): fn, given to
+ * cbl_ysub_set_replay(), gives the notifications kept since from, the
+ * oldest first, to cbl_ysub_replay_emit() with the time each happened,
+ * and says the oldest it keeps (cbl_ysub_replay_oldest()).  So that none
+ * is lost or sent twice, it calls cbl_ysub_replay_live() while what
+ * orders its notifications still holds: from then on the subscription
+ * takes them live.  It runs on the loop.
+ */
+struct cbl_ysub_replay;
+typedef int	 cbl_ysub_replay_f(const struct timespec *from,
+		    struct cbl_ysub_replay *r, void *arg);
+int		 cbl_ysub_set_replay(cbl_ctx *ctx, cbl_ysub_replay_f *fn,
+		    void *arg);
+int		 cbl_ysub_replay_emit(struct cbl_ysub_replay *r,
+		    const struct cbl_ynode *n, const void *p,
+		    const struct timespec *when);
+void		 cbl_ysub_replay_oldest(struct cbl_ysub_replay *r,
+		    const struct timespec *oldest);
+void		 cbl_ysub_replay_live(struct cbl_ysub_replay *r);
+/*
+ * modify-subscription (in, the program's struct of its input) and
+ * resync-subscription, for the subscriber's own subscription, from the
+ * program's rpc handlers: 0, or an errno, said for the request.
+ */
+int		 cbl_ysub_modify(cbl_req *req, const void *in);
+int		 cbl_ysub_resync(cbl_req *req, uint32_t id);
 int		 cbl_ysub_delete(cbl_req *req, uint32_t id);
 int		 cbl_ysub_kill(cbl_ctx *ctx, uint32_t id);
 int		 cbl_ysub_each(cbl_ctx *ctx,

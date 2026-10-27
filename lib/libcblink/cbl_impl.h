@@ -161,6 +161,9 @@ void	cbl_notify_conn_closed(cbl_conn *conn);
 void	cbl_notify_family_gone(cbl_ctx *ctx, const cbl_family *fam);
 void	cbl_sub_free_all(cbl_conn *conn);
 
+struct cbl_ysub_replay;
+struct timespec;
+
 struct cbl_ctx {
 	pthread_mutex_t		 mtx;
 	struct cbl_limits	 lim;
@@ -193,10 +196,14 @@ struct cbl_ctx {
 		void		*arg;
 	}			*ysrv;
 	size_t			 nysrv;
-	/* Its subscriptions (cbl_ysub.c), the next one's id. */
+	/* Its subscriptions (cbl_ysub.c), the next one's id; the
+	 * program's replay of its notifications. */
 	pthread_mutex_t		 ysublock;
 	TAILQ_HEAD(, cbl_ysub)	 ysubs;
 	uint32_t		 ysubid;
+	int			(*yreplay)(const struct timespec *,
+				    struct cbl_ysub_replay *, void *);
+	void			*yreplay_arg;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);

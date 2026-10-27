@@ -99,7 +99,7 @@ YSUBH_SID=	-s ${.CURDIR}/yang/subdemo@2026-10-27.sid \
 CLEANFILES+=	ysubh.h ysubh_schema.c
 ysubh.h: ${YSUBH_SRC} ${GEN}
 	${GEN} -m h,schema -b ysubh -o ${.OBJDIR} -p ${.CURDIR}/corpus \
-	    -F subdemo: -F ietf-subscribed-notifications:xpath \
+	    -F subdemo: -F ietf-subscribed-notifications:xpath,replay \
 	    -F ietf-yang-push:on-change -F ietf-datastores: ${YSUBH_SID} \
 	    ${YSUBH_SRC} > /dev/null
 ysubh_schema.c: ysubh.h

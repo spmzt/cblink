@@ -67,6 +67,20 @@ struct ynodes {
 	const struct cbl_ynode	*pcu, *pcu_id, *pcu_dc, *yp, *yp_pid, *ed,
 				*ed_id, *ed_op, *ed_target, *ed_value;
 	uint64_t		 operational;
+	/* The state notifications; modify-subscription's input; the
+	 * output's replay-start-time-revision (NULL: none of them). */
+	const struct cbl_ynode	*n_susp, *n_resumed, *n_modified, *n_replayed,
+				*mod_in, *out_rev;
+	uint64_t		 unsupportable;	/* a suspension's reason */
+};
+
+/* A record held while a replay is sent, in the order it came. */
+struct yrec {
+	uint64_t		 sid;
+	uint8_t			*p;
+	size_t			 len;
+	struct timespec		 when;
+	bool			 has_when;
 };
 
 struct cbl_ysub {
@@ -94,11 +108,28 @@ struct cbl_ysub {
 	uint64_t		 patches;
 	char			*receiver;
 	_Atomic uint64_t	 sent, excluded;
-	/* ysublock's. */
-	bool			 dead, listed;
+	/* Out of credit: records left out until the subscriber reads
+	 * again; on-change pushes everything again then (resync). */
+	_Atomic bool		 suspended, resync;
+	/* Replay (replay-start-time): live records held meanwhile. */
+	bool			 has_replay;
+	struct timespec		 replay_from;
+	bool			 replaying;	/* ysublock's */
+	struct yrec		*held;
+	size_t			 nheld, capheld;
+	/* What a modify replaced, freed with the subscription: a thread
+	 * may be reading it still. */
+	void			**retired;
+	size_t			 nretired;
+	/* ysublock's: a thread runs it; push now (resync, modify). */
+	bool			 dead, listed, threaded, kick;
 	int			 refs;
 	pthread_cond_t		 cv;
 };
+
+static bool	selects(const struct cbl_ysub *, const struct cbl_ynode *,
+		    const uint8_t *, size_t);
+static bool	ts_before(const struct timespec *, const struct timespec *);
 
 static const struct cbl_ymodule *
 mod_named(const struct cbl_yschema *s, const char *name)
@@ -145,6 +176,7 @@ static bool
 nodes(cbl_ctx *ctx, struct ynodes *y)
 {
 	const struct cbl_yschema *s;
+	const struct cbl_ymodule *m;
 	const struct cbl_yident *id;
 
 	memset(y, 0, sizeof(*y));
@@ -194,7 +226,19 @@ nodes(cbl_ctx *ctx, struct ynodes *y)
 		if (strcmp(id->name, "operational") == 0 &&
 		    strcmp(id->module->name, "ietf-datastores") == 0)
 			y->operational = id->sid;
+		else if (strcmp(id->name, "unsupportable-volume") == 0 &&
+		    strcmp(id->module->name,
+		    "ietf-subscribed-notifications") == 0)
+			y->unsupportable = id->sid;
 	}
+	m = mod_named(s, "ietf-subscribed-notifications");
+	y->n_susp = top_named(m, "subscription-suspended");
+	y->n_resumed = top_named(m, "subscription-resumed");
+	y->n_modified = top_named(m, "subscription-modified");
+	y->n_replayed = top_named(m, "replay-completed");
+	y->mod_in = child_kind(top_named(m, "modify-subscription"),
+	    CBL_YN_INPUT);
+	y->out_rev = child_named(y->out, "replay-start-time-revision");
 	return (true);
 }
 
@@ -340,6 +384,12 @@ sub_rele(struct cbl_ysub *sub)
 	pthread_mutex_unlock(&sub->ctx->ysublock);
 	cbl_stream_rele(sub->s);
 	cbl_dtree_free(sub->last);
+	for (size_t i = 0; i < sub->nheld; i++)
+		free(sub->held[i].p);
+	free(sub->held);
+	for (size_t i = 0; i < sub->nretired; i++)
+		free(sub->retired[i]);
+	free(sub->retired);
 	pthread_cond_destroy(&sub->cv);
 	free(sub->stream);
 	free(sub->xpath);
@@ -363,27 +413,113 @@ sub_end(struct cbl_ysub *sub)
 	pthread_cond_broadcast(&sub->cv);
 }
 
-/* One record on the stream; one that does not fit is left out. */
+/*
+ * One record on the stream, its event-time when (NULL: now).  One that
+ * does not fit in the credit is left out and the subscription
+ * suspended; while it is, records are left out too.  A state
+ * notification (state) goes whether it is or not; EAGAIN when it does
+ * not fit.
+ */
 static int
-send_record(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
-    size_t len)
+send_at(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
+    size_t len, const struct timespec *when, bool state)
 {
 	cbl_msg *m;
 	int error;
 
+	if (!state && atomic_load(&sub->suspended)) {
+		atomic_fetch_add(&sub->excluded, 1);
+		return (0);
+	}
 	if ((error = cbl_stream_msg_new(sub->s, &m)) != 0)
 		return (error);
-	if ((error = cbl_ynotif_put(m, sid, content, len)) != 0) {
+	if ((error = cbl_ynotif_put_at(m, sid, content, len, when)) != 0) {
 		cbl_msg_free(m);
 		return (error);
 	}
 	if ((error = cbl_stream_send(sub->s, m)) == EAGAIN) {
 		cbl_msg_free(m);
+		if (state)
+			return (EAGAIN);
 		atomic_fetch_add(&sub->excluded, 1);
+		atomic_store(&sub->suspended, true);
 		return (0);
 	}
 	if (error == 0)
 		atomic_fetch_add(&sub->sent, 1);
+	return (error);
+}
+
+static int
+send_record(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
+    size_t len)
+{
+
+	return (send_at(sub, sid, content, len, NULL, false));
+}
+
+/*
+ * A state notification n of the subscription (RFC 8639 section 2.7):
+ * its id, a reason (an identity's SID, 0: none) and, for
+ * subscription-modified, what the subscription is now.
+ */
+static int
+send_state(struct cbl_ysub *sub, const struct cbl_ynode *n, uint64_t reason)
+{
+	const struct cbl_ynode *c, *g;
+	struct cbl_ybuf b = { 0 };
+	cbl_dtree *t;
+	cbl_dnode *dn, *dc;
+	const char *s;
+	uint32_t u;
+	int error;
+
+	if (n == NULL)
+		return (0);
+	if ((t = cbl_dtree_new(sub->y.srv->schema)) == NULL)
+		return (ENOMEM);
+	if ((error = cbl_dnode_add(cbl_dtree_root(t), n, NULL, &dn)) == 0 &&
+	    (c = child_named(n, "id")) != NULL)
+		error = cbl_dnode_add(dn, c, &sub->id, NULL);
+	if (error == 0 && reason != 0 && (c = child_named(n, "reason")) !=
+	    NULL)
+		error = cbl_dnode_add(dn, c, &reason, NULL);
+	if (error == 0 && n == sub->y.n_modified) {
+		if (sub->stream != NULL &&
+		    (c = child_named(n, "stream")) != NULL &&
+		    (error = cbl_dnode_add(dn, c, &sub->stream, NULL)) == 0 &&
+		    (s = sub->xpath) != NULL &&
+		    (c = child_named(n, "stream-xpath-filter")) != NULL)
+			error = cbl_dnode_add(dn, c, &s, NULL);
+		if (error == 0 && sub->stream == NULL &&
+		    (c = child_named(n, "datastore")) != NULL &&
+		    (error = cbl_dnode_add(dn, c, &sub->datastore, NULL)) ==
+		    0 && (s = sub->xpath) != NULL &&
+		    (c = child_named(n, "datastore-xpath-filter")) != NULL)
+			error = cbl_dnode_add(dn, c, &s, NULL);
+		if (error == 0 && (s = sub->stop_s) != NULL &&
+		    (c = child_named(n, "stop-time")) != NULL)
+			error = cbl_dnode_add(dn, c, &s, NULL);
+		if (error == 0 && sub->stream == NULL && sub->onchange &&
+		    (g = child_named(n, "on-change")) != NULL &&
+		    (error = cbl_dnode_add(dn, g, NULL, &dc)) == 0 &&
+		    (c = child_named(g, "dampening-period")) != NULL)
+			error = cbl_dnode_add(dc, c, &sub->dampening, NULL);
+		else if (error == 0 && sub->stream == NULL &&
+		    (g = child_named(n, "periodic")) != NULL &&
+		    (error = cbl_dnode_add(dn, g, NULL, &dc)) == 0 &&
+		    (c = child_named(g, "period")) != NULL) {
+			u = sub->period;
+			error = cbl_dnode_add(dc, c, &u, NULL);
+			if (error == 0 && (s = sub->anchor_s) != NULL &&
+			    (c = child_named(g, "anchor-time")) != NULL)
+				error = cbl_dnode_add(dc, c, &s, NULL);
+		}
+	}
+	if (error == 0 && (error = cbl_dnode_encode(dn, &b)) == 0)
+		error = send_at(sub, n->sid, b.p, b.len, NULL, true);
+	cbl_ybuf_free(&b);
+	cbl_dtree_free(t);
 	return (error);
 }
 
@@ -446,7 +582,7 @@ static cbl_dtree *
 read_filtered(struct cbl_ysub *sub, bool *incomplete)
 {
 	struct cbl_req r;
-	cbl_dtree *t = NULL, *ft;
+	cbl_dtree *t = NULL, *ft = NULL;
 	char why[160];
 
 	*incomplete = false;
@@ -749,6 +885,14 @@ change_push(struct cbl_ysub *sub)
 		cbl_dtree_free(t);
 		return (0);
 	}
+	/* A resync (asked, or after a suspension): the whole of it. */
+	if (atomic_exchange(&sub->resync, false) && sub->last != NULL) {
+		cbl_dtree_free(sub->last);
+		sub->last = NULL;
+		error = push_update(sub, cbl_dtree_root(t), false);
+		sub->last = t;
+		return (error);
+	}
 	if (sub->last == NULL) {
 		if (sub->sync)
 			error = push_update(sub, cbl_dtree_root(t), false);
@@ -849,6 +993,10 @@ sub_thread(void *p)
 		next_tick(sub, &now, &due);
 	while (!sub->dead) {
 		(void)clock_gettime(CLOCK_REALTIME, &now);
+		if (sub->kick) {
+			sub->kick = false;
+			due = now;
+		}
 		if (sub->has_stop && !ts_before(&now, &sub->stop)) {
 			stop = true;
 			break;
@@ -897,8 +1045,29 @@ sub_closed(cbl_stream *s __unused, int code __unused,
 	sub_rele(sub);
 }
 
+/*
+ * Credit again after a suspension: the subscriber told it was suspended
+ * and is resumed (RFC 8639 sections 2.7.6, 2.7.7), what was left out
+ * meanwhile counted as excluded; an on-change subscription pushes the
+ * whole of it next, as a resync.
+ */
+static void
+sub_writable(cbl_stream *s __unused, size_t credit __unused, void *arg)
+{
+	struct cbl_ysub *sub = arg;
+
+	if (!atomic_load(&sub->suspended))
+		return;
+	if (send_state(sub, sub->y.n_susp, sub->y.unsupportable) != 0 ||
+	    send_state(sub, sub->y.n_resumed, 0) != 0)
+		return;
+	atomic_store(&sub->resync, true);
+	atomic_store(&sub->suspended, false);
+}
+
 static const struct cbl_stream_cbs sub_cbs = {
 	.on_close = sub_closed,
+	.on_writable = sub_writable,
 };
 
 /* The input read into sub, by its leaves' names; 0, or said. */
@@ -933,6 +1102,13 @@ sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
 				return (cbl_ysay(req, EINVAL, sn->sid,
 				    "invalid-value", "stop-time is no time"));
 			sub->has_stop = true;
+		} else if (strcmp(name, "replay-start-time") == 0) {
+			if (!datetime(*(const char *const *)v,
+			    &sub->replay_from))
+				return (cbl_ysay(req, EINVAL, sn->sid,
+				    "invalid-value",
+				    "replay-start-time is no time"));
+			sub->has_replay = true;
 		} else if (strcmp(name, "periodic") == 0) {
 			for (pc = cbl_dnode_first(c); pc != NULL;
 			    pc = cbl_dnode_next(pc)) {
@@ -1057,7 +1233,14 @@ sub_check(cbl_req *req, struct cbl_ysub *sub)
 		if (sub->anchor_s == NULL)
 			sub->anchor = now;
 	}
-	if (sub->has_stop && !ts_before(&now, &sub->stop))
+	if (sub->has_replay && (sub->stream == NULL ||
+	    sub->ctx->yreplay == NULL))
+		return (cbl_ysay(req, EOPNOTSUPP, y->rpc->sid,
+		    "operation-not-supported", sub->stream == NULL ?
+		    "replay is a stream's" : "nothing is kept to replay"));
+	/* A stop-time gone by ends a replay, after it; else nothing. */
+	if (sub->has_stop && !ts_before(&now, &sub->stop) &&
+	    (!sub->has_replay || !ts_before(&sub->replay_from, &sub->stop)))
 		return (cbl_ysay(req, EINVAL, y->rpc->sid, "invalid-value",
 		    "stop-time has passed"));
 	if (sub->xpath != NULL) {
@@ -1077,9 +1260,161 @@ sub_check(cbl_req *req, struct cbl_ysub *sub)
 	return (sub->stream == NULL ? targets(sub) : 0);
 }
 
+struct cbl_ysub_replay {
+	struct cbl_ysub		*sub;
+	struct yrec		*v;
+	size_t			 n, cap;
+	struct timespec		 oldest;
+	bool			 has_oldest, live;
+	int			 error;
+};
+
+static int
+rec_add(struct yrec **vp, size_t *np, size_t *capp, uint64_t sid,
+    const void *p, size_t len, const struct timespec *when)
+{
+	struct yrec *v;
+
+	if (*np == *capp) {
+		if ((v = reallocarray(*vp, *capp + 32, sizeof(*v))) == NULL)
+			return (ENOMEM);
+		*vp = v;
+		*capp += 32;
+	}
+	v = &(*vp)[*np];
+	if ((v->p = malloc(len > 0 ? len : 1)) == NULL)
+		return (ENOMEM);
+	memcpy(v->p, p, len);
+	v->sid = sid;
+	v->len = len;
+	v->has_when = when != NULL;
+	if (when != NULL)
+		v->when = *when;
+	(*np)++;
+	return (0);
+}
+
+int
+cbl_ysub_set_replay(cbl_ctx *ctx, cbl_ysub_replay_f *fn, void *arg)
+{
+
+	if (ctx == NULL)
+		return (EINVAL);
+	pthread_mutex_lock(&ctx->ysublock);
+	ctx->yreplay = fn;
+	ctx->yreplay_arg = arg;
+	pthread_mutex_unlock(&ctx->ysublock);
+	return (0);
+}
+
+int
+cbl_ysub_replay_emit(struct cbl_ysub_replay *r, const struct cbl_ynode *n,
+    const void *p, const struct timespec *when)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (r == NULL || n == NULL || p == NULL || n->kind != CBL_YN_NOTIF)
+		return (EINVAL);
+	if (r->live || (when != NULL && ts_before(when,
+	    &r->sub->replay_from)))
+		return (0);
+	/* What the filter leaves out is not replayed either. */
+	if ((error = cbl_yencode(n, p, &b)) == 0 && (r->sub->xpath == NULL ||
+	    selects(r->sub, n, b.p, b.len)))
+		error = rec_add(&r->v, &r->n, &r->cap, n->sid, b.p, b.len,
+		    when);
+	cbl_ybuf_free(&b);
+	if (error != 0)
+		r->error = error;
+	return (error);
+}
+
+void
+cbl_ysub_replay_oldest(struct cbl_ysub_replay *r,
+    const struct timespec *oldest)
+{
+
+	if (r == NULL || oldest == NULL)
+		return;
+	r->oldest = *oldest;
+	r->has_oldest = true;
+}
+
+/* From now on the subscription is told live, held until the replay is
+ * sent. */
+void
+cbl_ysub_replay_live(struct cbl_ysub_replay *r)
+{
+	struct cbl_ysub *sub;
+
+	if (r == NULL || r->live)
+		return;
+	sub = r->sub;
+	pthread_mutex_lock(&sub->ctx->ysublock);
+	sub->replaying = true;
+	TAILQ_INSERT_TAIL(&sub->ctx->ysubs, sub, link);
+	sub->listed = true;
+	pthread_mutex_unlock(&sub->ctx->ysublock);
+	r->live = true;
+}
+
+/*
+ * After the accept: the replayed records with their times, then
+ * replay-completed, then what came live meanwhile, in order.
+ */
+static void
+replay_send(struct cbl_ysub *sub, struct cbl_ysub_replay *r)
+{
+	struct yrec rec;
+
+	for (size_t i = 0; i < r->n; i++) {
+		(void)send_at(sub, r->v[i].sid, r->v[i].p, r->v[i].len,
+		    r->v[i].has_when ? &r->v[i].when : NULL, false);
+		free(r->v[i].p);
+	}
+	free(r->v);
+	r->v = NULL;
+	r->n = r->cap = 0;
+	(void)send_state(sub, sub->y.n_replayed, 0);
+	pthread_mutex_lock(&sub->ctx->ysublock);
+	for (size_t i = 0;; i++) {
+		if (i == sub->nheld) {
+			sub->nheld = 0;
+			sub->replaying = false;
+			break;
+		}
+		rec = sub->held[i];
+		pthread_mutex_unlock(&sub->ctx->ysublock);
+		(void)send_at(sub, rec.sid, rec.p, rec.len, NULL, false);
+		free(rec.p);
+		pthread_mutex_lock(&sub->ctx->ysublock);
+	}
+	pthread_mutex_unlock(&sub->ctx->ysublock);
+}
+
+/* With ysublock held: a thread for the periods and the stop-time. */
+static int
+sub_start(struct cbl_ysub *sub)
+{
+	pthread_t tid;
+
+	if (sub->threaded)
+		return (0);
+	sub->refs++;
+	if (pthread_create(&tid, NULL, sub_thread, sub) != 0) {
+		sub->refs--;
+		return (ENOMEM);
+	}
+	(void)pthread_detach(tid);
+	sub->threaded = true;
+	return (0);
+}
+
 /* The accept: the output, the id. */
 static int
-sub_accept_msg(cbl_req *req, const struct cbl_ysub *sub, cbl_msg **accp)
+sub_accept_msg(cbl_req *req, const struct cbl_ysub *sub, const char *rev,
+    cbl_msg **accp)
 {
 	const struct ynodes *y = &sub->y;
 	cbl_dtree *t;
@@ -1100,6 +1435,8 @@ sub_accept_msg(cbl_req *req, const struct cbl_ysub *sub, cbl_msg **accp)
 	    &dr)) == 0 &&
 	    (error = cbl_dnode_add(dr, y->out, NULL, &dout)) == 0 &&
 	    (error = cbl_dnode_add(dout, y->out_id, &sub->id, NULL)) == 0 &&
+	    (rev == NULL || y->out_rev == NULL ||
+	    (error = cbl_dnode_add(dout, y->out_rev, &rev, NULL)) == 0) &&
 	    (error = cbl_dnode_to_struct(dout, pout, a)) == 0 &&
 	    (error = cbl_msg_new(req->conn->ctx, CBL_YANG_FAMILY,
 	    CBL_YCMD_SUBSCRIBE, 0, accp)) == 0 &&
@@ -1118,14 +1455,15 @@ cbl_ysub_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s,
 {
 	cbl_ctx *ctx = req->conn->ctx;
 	const char *subj;
+	struct cbl_ysub_replay r;
 	struct cbl_ysub *sub;
 	cbl_dtree *t = NULL;
 	cbl_dnode *dr, *din;
 	cbl_msg *acc = NULL;
 	cbl_yarena *a;
-	pthread_t tid;
+	const char *rev;
 	void *pin;
-	char why[160];
+	char why[160], revbuf[32];
 	int error;
 
 	if ((sub = calloc(1, sizeof(*sub))) == NULL)
@@ -1173,31 +1511,52 @@ cbl_ysub_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s,
 		ctx->ysubid = 1;
 	sub->id = ctx->ysubid;
 	pthread_mutex_unlock(&ctx->ysublock);
-	if ((error = sub_accept_msg(req, sub, &acc)) != 0) {
-		sub_rele(sub);
-		return (error);
-	}
 	cbl_stream_ref(s);
 	sub->s = s;
-	/* Not accepted: no callback will run, sub still ours. */
-	if ((error = cbl_stream_accept(s, acc, 0, &sub_cbs, sub)) != 0) {
+	/* A replay: what is kept since its start, live after it. */
+	memset(&r, 0, sizeof(r));
+	r.sub = sub;
+	rev = NULL;
+	if (sub->has_replay) {
+		error = ctx->yreplay(&sub->replay_from, &r, ctx->yreplay_arg);
+		cbl_ysub_replay_live(&r);
+		if (error == 0)
+			error = r.error;
+		if (error == 0 && r.has_oldest && ts_before(&sub->replay_from,
+		    &r.oldest)) {
+			struct tm tm;
+
+			(void)gmtime_r(&r.oldest.tv_sec, &tm);
+			(void)strftime(revbuf, sizeof(revbuf),
+			    "%Y-%m-%dT%H:%M:%SZ", &tm);
+			rev = revbuf;
+		}
+	}
+	if (error != 0 ||
+	    (error = sub_accept_msg(req, sub, rev, &acc)) != 0 ||
+	    (error = cbl_stream_accept(s, acc, 0, &sub_cbs, sub)) != 0) {
+		/* Not accepted: no callback will run, sub still ours. */
+		for (size_t i = 0; i < r.n; i++)
+			free(r.v[i].p);
+		free(r.v);
+		pthread_mutex_lock(&ctx->ysublock);
+		sub_end(sub);
+		pthread_mutex_unlock(&ctx->ysublock);
 		sub_rele(sub);
 		return (error);
 	}
+	if (sub->has_replay)
+		replay_send(sub, &r);
 	pthread_mutex_lock(&ctx->ysublock);
-	TAILQ_INSERT_TAIL(&ctx->ysubs, sub, link);
-	sub->listed = true;
-	/* A thread for the periods and the stop-time. */
-	if (sub->period != 0 || sub->has_stop) {
-		sub->refs++;
-		if (pthread_create(&tid, NULL, sub_thread, sub) != 0) {
-			sub->refs--;
-			sub_end(sub);
-			pthread_mutex_unlock(&ctx->ysublock);
-			(void)cbl_stream_close(s, ENOMEM, "no thread for it");
-			return (0);
-		}
-		(void)pthread_detach(tid);
+	if (!sub->listed && !sub->dead) {
+		TAILQ_INSERT_TAIL(&ctx->ysubs, sub, link);
+		sub->listed = true;
+	}
+	if ((sub->period != 0 || sub->has_stop) && sub_start(sub) != 0) {
+		sub_end(sub);
+		pthread_mutex_unlock(&ctx->ysublock);
+		(void)cbl_stream_close(s, ENOMEM, "no thread for it");
+		return (0);
 	}
 	pthread_mutex_unlock(&ctx->ysublock);
 	return (0);
@@ -1236,6 +1595,13 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
 		if (sub->stream == NULL || sub->dead ||
 		    sub->y.srv->schema != n->module->schema)
 			continue;
+		/* Its replay is being sent: held, sent after it. */
+		if (sub->replaying) {
+			if (sub->xpath == NULL || selects(sub, n, content, len))
+				(void)rec_add(&sub->held, &sub->nheld,
+				    &sub->capheld, n->sid, content, len, NULL);
+			continue;
+		}
 		if (nv == cap) {
 			struct cbl_ysub **w = reallocarray(v, cap + 8,
 			    sizeof(*w));
@@ -1291,6 +1657,215 @@ cbl_ysub_delete(cbl_req *req, uint32_t id)
 	return (sub_stop(req->conn->ctx, req->conn, id, "deleted"));
 }
 
+/* With ysublock held: the subscription of id on conn (NULL: any). */
+static struct cbl_ysub *
+sub_find(cbl_ctx *ctx, const cbl_conn *conn, uint32_t id)
+{
+	struct cbl_ysub *sub;
+
+	TAILQ_FOREACH(sub, &ctx->ysubs, link)
+		if (sub->id == id && !sub->dead && (conn == NULL ||
+		    cbl_stream_conn(sub->s) == conn))
+			return (sub);
+	return (NULL);
+}
+
+static int
+retire(struct cbl_ysub *sub, void *p)
+{
+	void **v;
+
+	if (p == NULL)
+		return (0);
+	if ((v = reallocarray(sub->retired, sub->nretired + 1,
+	    sizeof(*v))) == NULL)
+		return (ENOMEM);
+	sub->retired = v;
+	v[sub->nretired++] = p;
+	return (0);
+}
+
+/*
+ * modify-subscription (RFC 8639 section 2.4.3, RFC 8641 section
+ * 4.4.2): the filter, the stop-time, the period or the dampening period
+ * of the requester's own subscription changed; the target stays.  The
+ * subscriber is told subscription-modified.
+ */
+int
+cbl_ysub_modify(cbl_req *req, const void *in)
+{
+	cbl_ctx *ctx;
+	struct ynodes y;
+	struct cbl_ysub *sub, want;
+	const struct cbl_ynode *sn;
+	const cbl_dnode *c, *pc;
+	cbl_dtree *t = NULL, *ft = NULL;
+	cbl_dnode *dr, *din;
+	const void *v;
+	uint32_t id = 0;
+	char why[160];
+	int error = 0;
+
+	if (req == NULL || in == NULL)
+		return (EINVAL);
+	ctx = req->conn->ctx;
+	if (!nodes(ctx, &y) || y.mod_in == NULL)
+		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+		    "no modify-subscription in the tables"));
+	memset(&want, 0, sizeof(want));
+	want.y = y;
+	want.ctx = ctx;
+	if ((t = cbl_dtree_new(y.srv->schema)) == NULL)
+		return (ENOMEM);
+	if ((error = cbl_dnode_add(cbl_dtree_root(t), y.mod_in->parent !=
+	    NULL ? y.mod_in->parent : y.rpc, NULL, &dr)) != 0 ||
+	    (error = cbl_dnode_from_struct(dr, y.mod_in, in, &din)) != 0) {
+		cbl_dtree_free(t);
+		return (error);
+	}
+	for (c = cbl_dnode_first(din); error == 0 && c != NULL;
+	    c = cbl_dnode_next(c)) {
+		sn = cbl_dnode_schema(c);
+		v = cbl_dnode_value(c);
+		if (strcmp(sn->name, "id") == 0)
+			id = *(const uint32_t *)v;
+		else if (strcmp(sn->name, "stream-xpath-filter") == 0 ||
+		    strcmp(sn->name, "datastore-xpath-filter") == 0)
+			want.xpath = (char *)(uintptr_t)
+			    *(const char *const *)v;
+		else if (strcmp(sn->name, "stop-time") == 0) {
+			want.stop_s = (char *)(uintptr_t)
+			    *(const char *const *)v;
+			if (!datetime(want.stop_s, &want.stop))
+				error = cbl_ysay(req, EINVAL, sn->sid,
+				    "invalid-value", "stop-time is no time");
+			want.has_stop = true;
+		} else if (strcmp(sn->name, "periodic") == 0 ||
+		    strcmp(sn->name, "on-change") == 0) {
+			for (pc = cbl_dnode_first(c); pc != NULL;
+			    pc = cbl_dnode_next(pc)) {
+				if (strcmp(cbl_dnode_schema(pc)->name,
+				    "period") == 0)
+					want.period = *(const uint32_t *)
+					    cbl_dnode_value(pc);
+				else if (strcmp(cbl_dnode_schema(pc)->name,
+				    "dampening-period") == 0) {
+					want.dampening = *(const uint32_t *)
+					    cbl_dnode_value(pc);
+					want.onchange = true;
+				}
+			}
+			if (strcmp(sn->name, "on-change") == 0)
+				want.onchange = true;
+		} else if (strcmp(sn->name, "datastore") != 0) {
+			char text[128];
+
+			(void)snprintf(text, sizeof(text), "%s: not supported",
+			    sn->name);
+			error = cbl_ysay(req, EOPNOTSUPP, sn->sid,
+			    "operation-not-supported", text);
+		}
+	}
+	/* A new filter, tried on nothing first. */
+	if (error == 0 && want.xpath != NULL) {
+		cbl_dtree *e = cbl_dtree_new(y.srv->schema);
+
+		if (e == NULL)
+			error = ENOMEM;
+		else if ((ft = cbl_dtree_filter_xpath(e, want.xpath, why,
+		    sizeof(why))) == NULL)
+			error = cbl_ysay(req, EINVAL, 0, "invalid-value", why);
+		cbl_dtree_free(ft);
+		cbl_dtree_free(e);
+	}
+	if (error == 0 && want.period != 0 && want.period < 10)
+		error = cbl_ysay(req, EINVAL, 0, "invalid-value",
+		    "the period is 10 centiseconds at least");
+	if (error != 0) {
+		cbl_dtree_free(t);
+		return (error);
+	}
+	pthread_mutex_lock(&ctx->ysublock);
+	if ((sub = sub_find(ctx, req->conn, id)) == NULL) {
+		pthread_mutex_unlock(&ctx->ysublock);
+		cbl_dtree_free(t);
+		return (cbl_ysay(req, ENOENT, 0, "invalid-value",
+		    "no such subscription of this connection"));
+	}
+	if (want.onchange != sub->onchange || (want.period != 0 &&
+	    sub->stream != NULL)) {
+		pthread_mutex_unlock(&ctx->ysublock);
+		cbl_dtree_free(t);
+		return (cbl_ysay(req, EINVAL, 0, "invalid-value",
+		    "the kind of trigger is not changed"));
+	}
+	if (want.xpath != NULL) {
+		char *x = strdup(want.xpath);
+
+		if (x == NULL || retire(sub, sub->xpath) != 0)
+			error = ENOMEM;
+		else {
+			sub->xpath = x;
+			if (sub->stream == NULL) {
+				(void)retire(sub, sub->top);
+				sub->top = NULL;
+				error = targets(sub);
+			}
+		}
+	}
+	if (error == 0 && want.has_stop) {
+		char *x = strdup(want.stop_s);
+
+		if (x == NULL || retire(sub, sub->stop_s) != 0)
+			error = ENOMEM;
+		else {
+			sub->stop_s = x;
+			sub->stop = want.stop;
+			sub->has_stop = true;
+		}
+	}
+	if (error == 0 && want.period != 0)
+		sub->period = want.period;
+	if (error == 0 && want.onchange && want.dampening != 0) {
+		sub->dampening = want.dampening;
+		sub->period = want.dampening > 100 ? want.dampening : 100;
+	}
+	if (error == 0 && (sub->period != 0 || sub->has_stop))
+		error = sub_start(sub);
+	sub->kick = true;
+	pthread_cond_broadcast(&sub->cv);
+	sub->refs++;
+	pthread_mutex_unlock(&ctx->ysublock);
+	cbl_dtree_free(t);
+	if (error == 0)
+		(void)send_state(sub, y.n_modified, 0);
+	sub_rele(sub);
+	return (error);
+}
+
+/* resync-subscription (RFC 8641 section 4.4.1): the whole of it again. */
+int
+cbl_ysub_resync(cbl_req *req, uint32_t id)
+{
+	cbl_ctx *ctx;
+	struct cbl_ysub *sub;
+
+	if (req == NULL)
+		return (EINVAL);
+	ctx = req->conn->ctx;
+	pthread_mutex_lock(&ctx->ysublock);
+	if ((sub = sub_find(ctx, req->conn, id)) == NULL || !sub->onchange) {
+		pthread_mutex_unlock(&ctx->ysublock);
+		return (cbl_ysay(req, ENOENT, 0, "invalid-value",
+		    "no on-change subscription of that id on this connection"));
+	}
+	atomic_store(&sub->resync, true);
+	sub->kick = true;
+	pthread_cond_broadcast(&sub->cv);
+	pthread_mutex_unlock(&ctx->ysublock);
+	return (0);
+}
+
 int
 cbl_ysub_kill(cbl_ctx *ctx, uint32_t id)
 {
@@ -1324,6 +1899,7 @@ cbl_ysub_each(cbl_ctx *ctx, int (*fn)(const struct cbl_ysub_info *, void *),
 		in.stop_time = sub->stop_s;
 		in.sent = atomic_load(&sub->sent);
 		in.excluded = atomic_load(&sub->excluded);
+		in.suspended = atomic_load(&sub->suspended);
 		in.receiver = sub->receiver;
 		if ((error = fn(&in, arg)) != 0)
 			break;

@@ -14,6 +14,7 @@
 
 #include <atf-c.h>
 #include <errno.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -107,7 +108,49 @@ other_get(cbl_req *req, void *data, cbl_yarena *a)
 	return (0);
 }
 
-static struct cbl_yhandler handlers[2];
+/* modify-subscription and resync-subscription, as a program serves
+ * them: cblink's. */
+static int
+modify_rpc(cbl_req *req, const void *in, void *out, cbl_yarena *a)
+{
+
+	(void)out;
+	(void)a;
+	return (cbl_ysub_modify(req, in));
+}
+
+static int
+resync_rpc(cbl_req *req, const void *in, void *out, cbl_yarena *a)
+{
+
+	(void)out;
+	(void)a;
+	return (cbl_ysub_resync(req,
+	    ((const struct ietf_yang_push_resync_subscription_input *)in)->id));
+}
+
+/* The alerts kept, two, a minute and a half and a minute old. */
+static struct timespec kept_at[2];
+
+static int
+replay(const struct timespec *from, struct cbl_ysub_replay *r, void *arg)
+{
+	static const struct subdemo_alert kept[2] = {
+		{ .level = "high", .text = "old 1" },
+		{ .level = "low", .text = "old 2" },
+	};
+
+	(void)from;
+	(void)arg;
+	cbl_ysub_replay_oldest(r, &kept_at[0]);
+	for (int i = 0; i < 2; i++)
+		ATF_REQUIRE_EQ(0, cbl_ysub_replay_emit(r, n_alert, &kept[i],
+		    &kept_at[i]));
+	cbl_ysub_replay_live(r);
+	return (0);
+}
+
+static struct cbl_yhandler handlers[4];
 static struct cbl_yserver server = { .schema = &ysubh_schema };
 
 static int
@@ -128,6 +171,8 @@ struct cli {
 	atomic_int	 arrived;	/* data frames, decoded or not */
 	atomic_int	 records;
 	char		*json[16];	/* the records, as RFC 7951 JSON */
+	const char	*kind[16];	/* each one's notification */
+	char		*when[16];	/* and event-time */
 	atomic_int	 closed;
 	char		 close_text[64];
 };
@@ -175,9 +220,12 @@ cli_data(cbl_stream *s, cbl_msg *data, void *arg)
 	    cbl_ydecode(n, nt.content, nt.len, p, a, CBL_YD_STRICT, NULL,
 	    0) == 0 && cbl_yjson(n, p, &b) == 0) {
 		pthread_mutex_lock(&c->mtx);
-		if (c->records < (int)nitems(c->json))
+		if (c->records < (int)nitems(c->json)) {
 			c->json[c->records] = strndup((const char *)b.p,
 			    b.len);
+			c->kind[c->records] = n->name;
+			c->when[c->records] = strdup(nt.event_time);
+		}
 		c->records++;
 		pthread_mutex_unlock(&c->mtx);
 	}
@@ -235,6 +283,10 @@ setup(struct fixture *f)
 	    NULL, NULL, NULL };
 	handlers[1] = (struct cbl_yhandler){ n_other->sid, other_get, NULL,
 	    NULL, NULL };
+	handlers[2] = (struct cbl_yhandler){ top("ietf-subscribed-notifications",
+	    "modify-subscription")->sid, NULL, NULL, modify_rpc, NULL };
+	handlers[3] = (struct cbl_yhandler){ top("ietf-yang-push",
+	    "resync-subscription")->sid, NULL, NULL, resync_rpc, NULL };
 	qsort(handlers, nitems(handlers), sizeof(handlers[0]), hcmp);
 	server.nhandler = nitems(handlers);
 	server.handler = handlers;
@@ -245,6 +297,11 @@ setup(struct fixture *f)
 	f->sctx = test_ctx();
 	f->cctx = test_ctx();
 	ATF_REQUIRE_EQ(0, cbl_yserver_add(f->sctx, &server, NULL));
+	clock_gettime(CLOCK_REALTIME, &kept_at[0]);
+	kept_at[0].tv_sec -= 90;
+	kept_at[1] = kept_at[0];
+	kept_at[1].tv_sec += 30;
+	ATF_REQUIRE_EQ(0, cbl_ysub_set_replay(f->sctx, replay, NULL));
 	test_server_start(&f->ts, f->sctx, "tcp://127.0.0.1:0",
 	    CBL_PLAINTEXT);
 	ATF_REQUIRE_EQ(0, cbl_conn_new(f->cctx, f->ts.uri, CBL_PLAINTEXT,
@@ -290,8 +347,10 @@ static void
 cli_fini(struct cli *c)
 {
 
-	for (size_t i = 0; i < nitems(c->json); i++)
+	for (size_t i = 0; i < nitems(c->json); i++) {
 		free(c->json[i]);
+		free(c->when[i]);
+	}
 	pthread_mutex_destroy(&c->mtx);
 }
 
@@ -558,6 +617,238 @@ ATF_TC_BODY(stop_time, tc)
 	teardown(&f);
 }
 
+/* An rpc of the modules, its input in, over the client's connection. */
+static int
+call_rpc(struct fixture *f, const char *mod, const char *name, const void *in)
+{
+	cbl_msg *m, *r = NULL;
+	int error;
+
+	ATF_REQUIRE_EQ(0, cbl_msg_new(f->cctx, CBL_YANG_FAMILY, CBL_YCMD_RPC,
+	    0, &m));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, io(top(mod, name),
+	    CBL_YN_INPUT), in));
+	error = cbl_request(f->c, m, &r, 5000);
+	if (error != 0 && r != NULL && cbl_msg_err_str(r) != NULL)
+		fprintf(stderr, "%s: %s\n", name, cbl_msg_err_str(r));
+	cbl_msg_free(r);
+	return (error);
+}
+
+/* Whether record i is notification name; how many records name is. */
+static int
+kinds(struct cli *c, const char *name)
+{
+	int n = 0;
+
+	pthread_mutex_lock(&c->mtx);
+	for (int i = 0; i < c->records && i < 16; i++)
+		n += c->kind[i] != NULL && strcmp(c->kind[i], name) == 0;
+	pthread_mutex_unlock(&c->mtx);
+	return (n);
+}
+
+/*
+ * A subscriber that does not read: records left out, the subscription
+ * suspended; once it reads, told subscription-suspended and -resumed,
+ * and the pushes go on.
+ */
+static int
+info_of(const struct cbl_ysub_info *in, void *arg)
+{
+
+	*(struct cbl_ysub_info *)arg = *in;
+	((struct cbl_ysub_info *)arg)->stream = NULL;
+	((struct cbl_ysub_info *)arg)->xpath = NULL;
+	((struct cbl_ysub_info *)arg)->receiver = NULL;
+	((struct cbl_ysub_info *)arg)->anchor_time = NULL;
+	((struct cbl_ysub_info *)arg)->stop_time = NULL;
+	return (0);
+}
+
+ATF_TC_WITHOUT_HEAD(suspend);
+ATF_TC_BODY(suspend, tc)
+{
+	static const struct cbl_stream_cbs mcbs = {
+		.on_open = cli_open,
+		.on_data = cli_data,
+		.on_close = cli_close,
+	};
+	struct cbl_ysub_info inf;
+	struct fixture f;
+	struct cli c;
+	est_per per;
+	est_in in;
+	cbl_stream *s;
+	cbl_msg *m;
+
+	setup(&f);
+	cli_init(&c);
+	for_datastore(&in, "operational", "/subdemo:counters", &per, 10);
+	ATF_REQUIRE_EQ(0, cbl_msg_new(f.cctx, CBL_YANG_FAMILY,
+	    CBL_YCMD_SUBSCRIBE, 0, &m));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_est_in, &in));
+	/* Room for two records, given back by hand alone. */
+	ATF_REQUIRE_EQ(0, cbl_msg_set_window(m, 512));
+	ATF_REQUIRE_EQ(0, cbl_stream_open(f.c, m, CBL_SF_PUSH |
+	    CBL_SF_MANUAL_CREDIT, &mcbs, &c, &s));
+	wait_for(&c.opened, 1, 3000);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	usleep(800000);
+	memset(&inf, 0, sizeof(inf));
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, info_of, &inf));
+	ATF_REQUIRE(inf.suspended);
+	ATF_REQUIRE(inf.excluded > 0);
+	ATF_REQUIRE(c.records < 8);
+	/* Read now: the state notifications, then pushes again. */
+	ATF_REQUIRE_EQ(0, cbl_stream_consumed(s, 64 * 1024));
+	for (int i = 0; i < 300 && kinds(&c, "subscription-resumed") == 0; i++)
+		usleep(10000);
+	ATF_REQUIRE_EQ(0, cbl_stream_consumed(s, 64 * 1024));
+	usleep(300000);
+	ATF_REQUIRE_EQ(1, kinds(&c, "subscription-suspended"));
+	ATF_REQUIRE_EQ(1, kinds(&c, "subscription-resumed"));
+	pthread_mutex_lock(&c.mtx);
+	for (int i = 0; i < c.records && i < 16; i++)
+		if (strcmp(c.kind[i], "subscription-suspended") == 0) {
+			ATF_REQUIRE_MATCH("\"reason\":"
+			    "\"ietf-subscribed-notifications:unsupportable-volume\"",
+			    c.json[i]);
+			ATF_REQUIRE(i + 1 < c.records && strcmp(c.kind[i + 1],
+			    "subscription-resumed") == 0);
+		}
+	pthread_mutex_unlock(&c.mtx);
+	memset(&inf, 0, sizeof(inf));
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, info_of, &inf));
+	ATF_REQUIRE(!inf.suspended);
+	ATF_REQUIRE_EQ(0, cbl_stream_close(s, 0, NULL));
+	wait_for(&c.closed, 1, 3000);
+	cli_fini(&c);
+	teardown(&f);
+}
+
+/*
+ * Replay: the alerts kept since replay-start-time, each at its own
+ * time, then replay-completed, then what comes live; the output says
+ * where the replay began when the log begins later than asked.
+ */
+ATF_TC_WITHOUT_HEAD(replay);
+ATF_TC_BODY(replay, tc)
+{
+	struct subdemo_alert live = { .level = "high", .text = "now" };
+	struct fixture f;
+	struct cli c;
+	char from[32], want[32];
+	struct tm tm;
+	time_t t;
+	est_in in;
+
+	setup(&f);
+	cli_init(&c);
+	t = time(NULL) - 3600;
+	gmtime_r(&t, &tm);
+	strftime(from, sizeof(from), "%Y-%m-%dT%H:%M:%SZ", &tm);
+	for_stream(&in, "NETCONF", NULL);
+	in.replay_start_time = from;
+	(void)subscribe(&f, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &live));
+	wait_for(&c.records, 4, 3000);
+	ATF_REQUIRE_EQ(4, c.records);
+	pthread_mutex_lock(&c.mtx);
+	ATF_REQUIRE_STREQ("alert", c.kind[0]);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"old 1\"}", c.json[0]);
+	gmtime_r(&kept_at[0].tv_sec, &tm);
+	strftime(want, sizeof(want), "%Y-%m-%dT%H:%M:%S", &tm);
+	ATF_REQUIRE(strncmp(c.when[0], want, strlen(want)) == 0);
+	ATF_REQUIRE_STREQ("{\"level\":\"low\",\"text\":\"old 2\"}", c.json[1]);
+	ATF_REQUIRE_STREQ("replay-completed", c.kind[2]);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"now\"}", c.json[3]);
+	pthread_mutex_unlock(&c.mtx);
+	cli_fini(&c);
+	teardown(&f);
+}
+
+/* modify-subscription: the filter changed, told subscription-modified. */
+ATF_TC_WITHOUT_HEAD(modify);
+ATF_TC_BODY(modify, tc)
+{
+	struct ietf_subscribed_notifications_modify_subscription_input mi;
+	struct subdemo_alert low = { .level = "low", .text = "a" };
+	struct subdemo_alert high = { .level = "high", .text = "b" };
+	struct fixture f;
+	struct cli c;
+	est_in in;
+
+	setup(&f);
+	cli_init(&c);
+	for_stream(&in, "NETCONF", "/subdemo:alert[level='high']");
+	(void)subscribe(&f, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	memset(&mi, 0, sizeof(mi));
+	mi.has_id = true;
+	mi.id = c.id;
+	mi.target = IETF_SUBSCRIBED_NOTIFICATIONS_MODIFY_SUBSCRIPTION_INPUT_TARGET_STREAM;
+	mi.stream_filter =
+	    IETF_SUBSCRIBED_NOTIFICATIONS_MODIFY_SUBSCRIPTION_INPUT_STREAM_FILTER_WITHIN_SUBSCRIPTION;
+	mi.filter_spec =
+	    IETF_SUBSCRIBED_NOTIFICATIONS_MODIFY_SUBSCRIPTION_INPUT_FILTER_SPEC_STREAM_XPATH_FILTER;
+	mi.stream_xpath_filter = "/subdemo:alert[level='low']";
+	ATF_REQUIRE_EQ(0, call_rpc(&f, "ietf-subscribed-notifications",
+	    "modify-subscription", &mi));
+	wait_for(&c.records, 1, 3000);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &high));
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &low));
+	wait_for(&c.records, 2, 3000);
+	usleep(100000);
+	ATF_REQUIRE_EQ(2, c.records);
+	pthread_mutex_lock(&c.mtx);
+	ATF_REQUIRE_STREQ("subscription-modified", c.kind[0]);
+	ATF_REQUIRE_MATCH("\"stream-xpath-filter\":\"/subdemo:alert\\[level='low'\\]\"",
+	    c.json[0]);
+	ATF_REQUIRE_STREQ("{\"level\":\"low\",\"text\":\"a\"}", c.json[1]);
+	pthread_mutex_unlock(&c.mtx);
+	/* Another connection's, or none: refused. */
+	mi.id = c.id + 100;
+	ATF_REQUIRE(call_rpc(&f, "ietf-subscribed-notifications",
+	    "modify-subscription", &mi) != 0);
+	cli_fini(&c);
+	teardown(&f);
+}
+
+/* resync-subscription: an on-change subscription pushes it whole again. */
+ATF_TC_WITHOUT_HEAD(resync);
+ATF_TC_BODY(resync, tc)
+{
+	struct ietf_yang_push_resync_subscription_input ri;
+	struct ietf_subscribed_notifications_establish_subscription_input_yp_on_change
+	    oc = { 0 };
+	struct fixture f;
+	struct cli c;
+	est_per per;
+	est_in in;
+
+	setup(&f);
+	cli_init(&c);
+	for_datastore(&in, "operational", "/subdemo:counters/port", &per, 0);
+	in.yp_update_trigger = SN(YP_UPDATE_TRIGGER_ON_CHANGE);
+	in.yp_on_change = &oc;
+	(void)subscribe(&f, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	wait_for(&c.records, 1, 3000);
+	ATF_REQUIRE_EQ(1, c.records);
+	memset(&ri, 0, sizeof(ri));
+	ri.has_id = true;
+	ri.id = c.id;
+	ATF_REQUIRE_EQ(0, call_rpc(&f, "ietf-yang-push", "resync-subscription",
+	    &ri));
+	wait_for(&c.records, 2, 3000);
+	ATF_REQUIRE_EQ(2, c.records);
+	ATF_REQUIRE_EQ(2, kinds(&c, "push-update"));
+	cli_fini(&c);
+	teardown(&f);
+}
+
 static int
 collect(const struct cbl_ysub_info *in, void *arg)
 {
@@ -608,6 +899,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, periodic);
 	ATF_TP_ADD_TC(tp, stream);
 	ATF_TP_ADD_TC(tp, on_change);
+	ATF_TP_ADD_TC(tp, suspend);
+	ATF_TP_ADD_TC(tp, replay);
+	ATF_TP_ADD_TC(tp, modify);
+	ATF_TP_ADD_TC(tp, resync);
 	ATF_TP_ADD_TC(tp, refused);
 	ATF_TP_ADD_TC(tp, stop_time);
 	ATF_TP_ADD_TC(tp, each_kill);

@@ -49,6 +49,9 @@ int	cbl_yread_tree(cbl_req *req, const uint64_t *v, size_t n,
 	    struct cbl_dtree **tp, bool *incomplete);
 int	cbl_ynotif_put(cbl_msg *msg, uint64_t sid, const uint8_t *content,
 	    size_t len);
+struct timespec;
+int	cbl_ynotif_put_at(cbl_msg *msg, uint64_t sid, const uint8_t *content,
+	    size_t len, const struct timespec *when);
 size_t	cbl_ycbor_int(uint8_t *p, int64_t v);
 /* The codec's: the length of the CBOR item at p, 0 where it is none. */
 size_t	cbl_ycbor_skip(const uint8_t *p, const uint8_t *end);

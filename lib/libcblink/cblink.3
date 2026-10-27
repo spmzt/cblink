@@ -226,8 +226,21 @@ push-change-update's YANG Patch.
 The accept carries the output, the id; each data message is a
 notification as group notify has it
 .Pq Fn cbl_msg_ynotif .
-A stop-time closes the stream; a record the stream's credit has no room
-for is left out and counted.
+A stop-time closes the stream.
+A record the stream's credit has no room for is left out and counted,
+the subscription suspended until the subscriber grants credit again,
+then told it was suspended and is resumed.
+.Fn cbl_ysub_set_replay
+gives a stream subscription's replay: the program's function hands the
+notifications it keeps to
+.Fn cbl_ysub_replay_emit
+and marks, with
+.Fn cbl_ysub_replay_live ,
+where the live ones begin.
+.Fn cbl_ysub_modify
+and
+.Fn cbl_ysub_resync
+answer the modify-subscription and resync-subscription rpcs.
 .Fn cbl_ysub_delete
 ends one of the requester's connection, from a delete-subscription
 handler,

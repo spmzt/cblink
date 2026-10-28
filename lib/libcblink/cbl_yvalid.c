@@ -423,6 +423,8 @@ unique_leaf(const struct cbl_ynode *const *path, const void *entry)
 	return (AT(p, (*path)->off));
 }
 
+static int	v_mounted(struct yv *, const struct cbl_ynode *, const void *,
+		    int);
 static int	v_struct(struct yv *, const struct cbl_ynode *, const void *,
 		    int);
 
@@ -676,7 +678,42 @@ v_struct(struct yv *v, const struct cbl_ynode *n, const void *p, int depth)
 			break;
 		}
 	}
-	return (0);
+	return (n->flags & CBL_YNF_MOUNT ? v_mounted(v, n, p, depth) : 0);
+}
+
+/* What mount point n has mounted (RFC 8528): each module's top-level
+ * nodes there, as a module's data is validated. */
+static int
+v_mounted(struct yv *v, const struct cbl_ynode *n, const void *p,
+    int depth)
+{
+	const struct cbl_ymounts *m;
+	const struct cbl_ynode **kid;
+	struct cbl_ynode top;
+	int error = 0;
+
+	m = (const struct cbl_ymounts *)AT(p, n->moff);
+	for (size_t i = 0; error == 0 && i < m->n; i++) {
+		const struct cbl_ymodule *mod = m->v[i].module;
+		uint32_t k = 0;
+
+		if (m->v[i].data == NULL)
+			continue;
+		if ((kid = calloc(mod->ntop + 1, sizeof(*kid))) == NULL)
+			return (ENOMEM);
+		for (uint32_t j = 0; j < mod->ntop; j++)
+			if (has(mod->top[j], m->v[i].data))
+				kid[k++] = mod->top[j];
+		memset(&top, 0, sizeof(top));
+		top.name = mod->name;
+		top.module = mod;
+		top.nchild = k;
+		top.child = kid;
+		top.size = mod->size;
+		error = v_struct(v, &top, m->v[i].data, depth + 1);
+		free(kid);
+	}
+	return (error);
 }
 
 int

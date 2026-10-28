@@ -396,12 +396,26 @@ static const struct cbl_ynode *const *
 kids(const cbl_dnode *n, uint32_t *nk)
 {
 
-	if (n->sn == NULL) {
+	/* A mount point's children are the top's (RFC 8528, the schema
+	 * shared). */
+	if (n->sn == NULL || (n->sn->flags & CBL_YNF_MOUNT) != 0) {
 		*nk = n->tree->ntops;
 		return (n->tree->tops);
 	}
 	*nk = n->sn->nchild;
 	return (n->sn->child);
+}
+
+const struct cbl_ynode *const *
+cbl_d_kids(const cbl_dtree *t, const struct cbl_ynode *sn, uint32_t *nk)
+{
+
+	if (sn == NULL || (sn->flags & CBL_YNF_MOUNT) != 0) {
+		*nk = t->ntops;
+		return (t->tops);
+	}
+	*nk = sn->nchild;
+	return (sn->child);
 }
 
 /* sn's place among n's possible children, or -1: not one. */

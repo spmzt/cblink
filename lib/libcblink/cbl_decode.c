@@ -15,8 +15,9 @@
  * Strings are not copied: nodes point into the frame buffer.
  *
  * Tags are refused but YANG-CBOR's (RFC 9254), which version 2 takes
- * always: one tag on a value, never on a key or the body, and the value
- * of the kind its tag says.
+ * always: one tag on a value, never on the body, and the value of the
+ * kind its tag says; on a key, tag 47 alone, an absolute SID (RFC 9254
+ * section 4.2.1).
  */
 
 #include <errno.h>
@@ -45,6 +46,7 @@ struct dec {
 	int			 depth;
 	bool			 root_done;
 	bool			 yang_tags;
+	bool			 keytag;	/* tag 47 on the next key */
 	uint8_t			 tag;		/* on the next value */
 	uint32_t		 nvalues;
 	int			 error;
@@ -223,10 +225,12 @@ dec_item(struct dec *d, const cbl_attr *t, uint64_t n)
 	}
 	top = &d->st[d->depth - 1];
 	if (top->is_map && top->want_key) {
-		if (t->kind != CBL_K_UINT && t->kind != CBL_K_INT) {
+		if ((t->kind != CBL_K_UINT && t->kind != CBL_K_INT) ||
+		    (d->keytag && t->kind != CBL_K_UINT)) {
 			dec_fail(d, EPROTO, "map keys must be integers");
 			return;
 		}
+		d->keytag = false;
 		top->key = dec_keyval(t);
 		top->want_key = false;
 		return;
@@ -390,8 +394,13 @@ cb_tag(void *ctx, uint64_t v)
 		return;
 	}
 	top = &d->st[d->depth - 1];
+	/* An absolute SID as a key, RFC 9254 section 4.2.1: tag 47. */
 	if (top->is_map && top->want_key) {
-		dec_fail(d, EPROTO, "map keys must be integers");
+		if (v != 47 || d->keytag) {
+			dec_fail(d, EPROTO, "map keys must be integers");
+			return;
+		}
+		d->keytag = true;
 		return;
 	}
 	if (d->tag != 0) {

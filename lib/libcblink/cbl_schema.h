@@ -141,6 +141,10 @@ enum cbl_ynode_kind {
  * read, written and run only so. */
 #define	CBL_YNF_DENY_WRITE	0x0080	/* nacm:default-deny-write */
 #define	CBL_YNF_DENY_ALL	0x0100	/* nacm:default-deny-all */
+/* A schema mount point (RFC 8528, yangmnt:mount-point): below it, the
+ * schema's own top-level nodes (a shared schema), in YANG-CBOR keyed by
+ * their absolute SIDs (tag 47), in its struct as struct cbl_ymounts. */
+#define	CBL_YNF_MOUNT		0x0200
 
 /*
  * A when statement, and its context node (RFC 7950 section 7.21.5): the
@@ -197,6 +201,20 @@ struct cbl_yunique {
 
 struct cbl_ymodule;
 
+/*
+ * What a mount point has mounted (CBL_YNF_MOUNT): a module's data struct
+ * each, as a module's top-level nodes are filled; NULL data, none.
+ */
+struct cbl_ymounted {
+	const struct cbl_ymodule	*module;
+	void				*data;
+};
+
+struct cbl_ymounts {
+	size_t				 n;
+	const struct cbl_ymounted	*v;
+};
+
 struct cbl_ynode {
 	uint64_t		 sid;
 	/*
@@ -225,6 +243,7 @@ struct cbl_ynode {
 	uint32_t		 max;		/* and max-elements; 0: none */
 	uint32_t		 off;		/* its member in its parent's struct */
 	uint32_t		 hoff;		/* its has_ flag's, or NONE */
+	uint32_t		 moff;		/* a mount point's mounted */
 	uint32_t		 size;		/* its own struct's: container, ... */
 	const struct cbl_ytype	*type;		/* leaf, leaf-list */
 	const struct cbl_ynode	*const *child;	/* by SID */
@@ -435,6 +454,15 @@ int		 cbl_yencode_member(const struct cbl_ynode *n,
 		    const void *parent, struct cbl_ybuf *b);
 bool		 cbl_ymember_present(const struct cbl_ynode *n,
 		    const void *parent);
+/*
+ * A mount point's mounted (CBL_YNF_MOUNT): cbl_ymount_data(), mod's data
+ * struct in mount point n's struct p, made zeroed in a when there is none
+ * (NULL, out of memory); cbl_ymount_find(), it, NULL if none.
+ */
+void		*cbl_ymount_data(const struct cbl_ynode *n, void *p,
+		    const struct cbl_ymodule *mod, cbl_yarena *a);
+const void	*cbl_ymount_find(const struct cbl_ynode *n, const void *p,
+		    const struct cbl_ymodule *mod);
 
 /*
  * A value as RFC 7951's JSON (cbl_yjson.c says how), appended to b:

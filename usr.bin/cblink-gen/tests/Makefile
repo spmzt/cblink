@@ -139,6 +139,22 @@ ydsh.h: ${YDSH_SRC} ${GEN}
 	    -F ietf-netconf:candidate,confirmed-commit -F dsdemo: \
 	    ${YDSH_SID} ${YDSH_SRC} > /dev/null
 ydsh_schema.c: ydsh.h
+# ymount_test: schema mount (RFC 8528): mntdemo's hosts, dsdemo mounted
+# in each, through the codec, JSON, the instance tree and the validator.
+ATF_TESTS_C+=	ymount_test
+SRCS.ymount_test=	ymnth.h ymount_test.c ymnth_schema.c
+CFLAGS.ymount_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+LDADD.ymount_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CFLAGS.ymnth_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+YMNTH_SRC=	${.CURDIR}/yang/mntdemo@2026-10-28.yang \
+		${.CURDIR}/yang/dsdemo@2026-10-28.yang
+YMNTH_SID=	-s ${.CURDIR}/yang/mntdemo@2026-10-28.sid \
+		-s ${.CURDIR}/yang/dsdemo@2026-10-28.sid
+CLEANFILES+=	ymnth.h ymnth_schema.c
+ymnth.h: ${YMNTH_SRC} ${GEN}
+	${GEN} -m h,schema -b ymnth -o ${.OBJDIR} -p ${.CURDIR}/corpus \
+	    -F mntdemo: -F dsdemo: ${YMNTH_SID} ${YMNTH_SRC} > /dev/null
+ymnth_schema.c: ymnth.h
 # yvalid_test: the static validator on the module rules.
 ATF_TESTS_C+=	yvalid_test
 SRCS.yvalid_test=	rules.h yvalid_test.c rules_schema.c

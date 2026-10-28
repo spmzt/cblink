@@ -1,0 +1,47 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "mntdemo",
+    "module-revision": "2026-10-28",
+    "sid-file-version": 0,
+    "description": "ymount_test's tables, numbered for the test alone.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-schema-mount",
+        "module-revision": "2019-01-14"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "83000",
+        "size": "20"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "mntdemo",
+        "sid": "83000"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/mntdemo:hosts",
+        "sid": "83001"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/mntdemo:hosts/host",
+        "sid": "83002"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/mntdemo:hosts/host/data",
+        "sid": "83003"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/mntdemo:hosts/host/name",
+        "sid": "83004"
+      }
+    ]
+  }
+}

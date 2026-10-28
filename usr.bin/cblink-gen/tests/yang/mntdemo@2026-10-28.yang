@@ -1,0 +1,38 @@
+module mntdemo {
+  yang-version 1.1;
+  namespace "urn:example:mntdemo";
+  prefix mn;
+
+  import ietf-yang-schema-mount {
+    prefix yangmnt;
+  }
+
+  description
+    "Schema mount (RFC 8528) for ymount_test: each host's data a mount
+     point, the schema's own modules below it.";
+
+  revision 2026-10-28 {
+    description
+      "Initial revision.";
+  }
+
+  container hosts {
+    description
+      "The hosts.";
+    list host {
+      key "name";
+      description
+        "A host.";
+      leaf name {
+        type string;
+        description
+          "Its name.";
+      }
+      container data {
+        yangmnt:mount-point "data";
+        description
+          "What it has: the schema's modules, mounted.";
+      }
+    }
+  }
+}

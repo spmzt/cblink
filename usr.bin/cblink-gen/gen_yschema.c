@@ -967,9 +967,9 @@ node_ref(struct ys *y, const struct snode *n)
 	if ((n->kind == SN_INPUT || n->kind == SN_OUTPUT) && n->parent != NULL)
 		buf_printf(&init, "\t.base = UINT64_C(%" PRIu64 "),\n",
 		    n->parent->sid);
-	if ((n->flags & 0x7f) != 0 || nacm_flags(n) != 0)
+	if ((n->flags & 0x7f) != 0 || nacm_flags(n) != 0 || snode_mount(n))
 		buf_printf(&init, "\t.flags = 0x%x,\n", (n->flags & 0x7f) |
-		    nacm_flags(n));
+		    nacm_flags(n) | (snode_mount(n) ? 0x0200 : 0));
 	/* Where it is in the structs. */
 	buf_init(&list);
 	if (member_of(&list, n)) {
@@ -990,6 +990,9 @@ node_ref(struct ys *y, const struct snode *n)
 		buf_init(&list);
 		yc_struct(&list, n);
 		buf_printf(&init, "\t.size = sizeof(struct %s),\n", list.p);
+		if (snode_mount(n))
+			buf_printf(&init, "\t.moff = offsetof(struct %s, "
+			    "mounted),\n", list.p);
 		/* A struct several nodes share (cg:struct) has the codec of
 		 * the first of them. */
 		{

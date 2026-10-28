@@ -512,6 +512,16 @@ emit_struct(struct yg *g, const struct snode *n, const struct snode *first,
 	}
 	buf_init(&b);
 	members(g, &b, &ms, sname, first);
+	/* A schema mount point: what is mounted below it (RFC 8528);
+	 * nodes of its own beside are not taken. */
+	if (n != NULL && snode_mount(n) && first != NULL)
+		diag_add(g->d, 0, 0, "%s: a mount point with nodes of its own "
+		    "is not supported", sname);
+	if (n != NULL && snode_mount(n)) {
+		buf_puts(&b, "\tstruct cbl_ymounts\t mounted;\t/* schema mount: "
+		    "the modules' data */\n");
+		mset_add(g, &ms, sname, "mounted");
+	}
 	if (n != NULL)
 		what = snode_kind_name(n->kind);
 	buf_printf(&g->fwd, "struct %s;\n", sname);

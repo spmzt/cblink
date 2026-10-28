@@ -168,6 +168,8 @@ CBLINK_1.0 {
 	cbl_msg_ydecode;
 	cbl_yencode_member;
 	cbl_ymember_present;
+	cbl_ymount_data;
+	cbl_ymount_find;
 	cbl_yjson;
 	cbl_yjson_module;
 	cbl_yjson_members;

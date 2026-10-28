@@ -483,6 +483,27 @@ json_map(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 			return (error);
 		first = false;
 	}
+	/* What is mounted (RFC 8528): as at the top, "module:name". */
+	if ((n->flags & CBL_YNF_MOUNT) != 0) {
+		const struct cbl_ymounts *m =
+		    (const struct cbl_ymounts *)AT(p, n->moff);
+
+		for (size_t i = 0; i < m->n; i++)
+			for (uint32_t j = 0; m->v[i].data != NULL &&
+			    j < m->v[i].module->ntop; j++) {
+				const struct cbl_ynode *c =
+				    m->v[i].module->top[j];
+
+				if (!cbl_ypresent(c, m->v[i].data))
+					continue;
+				if ((!first && (error = jputs(b, ",")) != 0) ||
+				    (error = json_name(b, c, NULL)) != 0 ||
+				    (error = json_child(b, c, m->v[i].data,
+				    depth)) != 0)
+					return (error);
+				first = false;
+			}
+	}
 	return (jputs(b, "}"));
 }
 

@@ -260,8 +260,7 @@ diff_children(cbl_dnode *x, const cbl_dnode *a, const cbl_dnode *b,
 	uint32_t nk;
 	int error;
 
-	k = b->sn != NULL ? b->sn->child : b->tree->tops;
-	nk = b->sn != NULL ? b->sn->nchild : b->tree->ntops;
+	k = cbl_d_kids(b->tree, b->sn, &nk);
 	for (uint32_t i = 0; i < nk; i++) {
 		const struct cbl_ynode *sn = k[i];
 

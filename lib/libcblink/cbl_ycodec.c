@@ -529,6 +529,110 @@ enc_child(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 	return (EINVAL);
 }
 
+/*
+ * A mount point's mounted (CBL_YNF_MOUNT, RFC 8528): how many of the
+ * mounted modules' top-level nodes are there; and those, each keyed by
+ * its absolute SID, tag 47 (RFC 9254 section 4.2.1).
+ */
+static uint32_t
+mounted_count(const struct cbl_ynode *n, const void *p)
+{
+	const struct cbl_ymounts *m;
+	uint32_t k = 0;
+
+	if ((n->flags & CBL_YNF_MOUNT) == 0 || p == NULL)
+		return (0);
+	m = (const struct cbl_ymounts *)AT(p, n->moff);
+	for (size_t i = 0; i < m->n; i++)
+		for (uint32_t j = 0; m->v[i].data != NULL &&
+		    j < m->v[i].module->ntop; j++)
+			k += present(m->v[i].module->top[j], m->v[i].data);
+	return (k);
+}
+
+static int
+enc_mounted(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
+    int depth)
+{
+	const struct cbl_ymounts *m;
+	int error;
+
+	if ((n->flags & CBL_YNF_MOUNT) == 0)
+		return (0);
+	m = (const struct cbl_ymounts *)AT(p, n->moff);
+	for (size_t i = 0; i < m->n; i++)
+		for (uint32_t j = 0; m->v[i].data != NULL &&
+		    j < m->v[i].module->ntop; j++) {
+			const struct cbl_ynode *c = m->v[i].module->top[j];
+
+			if (!present(c, m->v[i].data))
+				continue;
+			if ((error = put_head(b, 6, 47)) != 0 ||
+			    (error = put_head(b, 0, c->sid)) != 0 ||
+			    (error = enc_child(b, c, m->v[i].data, depth)) != 0)
+				return (error);
+		}
+	return (0);
+}
+
+/* What may be mounted at mount point n: its schema's top-level data
+ * node of SID sid; NULL, none. */
+static const struct cbl_ynode *
+mounted_node(const struct cbl_ynode *n, uint64_t sid)
+{
+	const struct cbl_ynode *c;
+
+	c = cbl_yschema_node(n->module->schema, sid);
+	if (c == NULL || c->parent != NULL || c->kind == CBL_YN_RPC ||
+	    c->kind == CBL_YN_NOTIF || c->kind == CBL_YN_ACTION ||
+	    c->off == CBL_YOFF_NONE)
+		return (NULL);
+	return (c);
+}
+
+void *
+cbl_ymount_data(const struct cbl_ynode *n, void *p,
+    const struct cbl_ymodule *mod, cbl_yarena *a)
+{
+	struct cbl_ymounts *m;
+	struct cbl_ymounted *v;
+	void *data;
+
+	if (n == NULL || p == NULL || mod == NULL || a == NULL ||
+	    (n->flags & CBL_YNF_MOUNT) == 0)
+		return (NULL);
+	m = (struct cbl_ymounts *)WAT(p, n->moff);
+	for (size_t i = 0; i < m->n; i++)
+		if (m->v[i].module == mod)
+			return (m->v[i].data);
+	if ((data = cbl_yarena_alloc(a, mod->size > 0 ? mod->size : 1)) ==
+	    NULL || (v = cbl_yarena_alloc(a, (m->n + 1) * sizeof(*v))) == NULL)
+		return (NULL);
+	memset(data, 0, mod->size > 0 ? mod->size : 1);
+	if (m->n > 0)
+		memcpy(v, m->v, m->n * sizeof(*v));
+	v[m->n].module = mod;
+	v[m->n].data = data;
+	m->v = v;
+	m->n++;
+	return (data);
+}
+
+const void *
+cbl_ymount_find(const struct cbl_ynode *n, const void *p,
+    const struct cbl_ymodule *mod)
+{
+	const struct cbl_ymounts *m;
+
+	if (n == NULL || p == NULL || (n->flags & CBL_YNF_MOUNT) == 0)
+		return (NULL);
+	m = (const struct cbl_ymounts *)AT(p, n->moff);
+	for (size_t i = 0; i < m->n; i++)
+		if (m->v[i].module == mod)
+			return (m->v[i].data);
+	return (NULL);
+}
+
 /* n's children in struct p, a map keyed by their deltas from n. */
 static int
 enc_map(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
@@ -541,6 +645,7 @@ enc_map(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 		return (ELOOP);
 	for (uint32_t i = 0; i < n->nchild; i++)
 		k += present(n->child[i], p);
+	k += mounted_count(n, p);
 	if ((error = put_head(b, 5, k)) != 0)
 		return (error);
 	for (uint32_t i = 0; i < n->nchild; i++) {
@@ -553,7 +658,7 @@ enc_map(struct cbl_ybuf *b, const struct cbl_ynode *n, const void *p,
 		    (error = enc_child(b, c, p, depth)) != 0)
 			return (error);
 	}
-	return (0);
+	return (enc_mounted(b, n, p, depth));
 }
 
 int
@@ -773,6 +878,24 @@ dec_int(struct yrd *r, int64_t min, uint64_t max, bool sgn, uint64_t *u,
 		return (fail(r, EINVAL, "an integer expected"));
 	r->p += hlen;
 	return (0);
+}
+
+static bool	tag(struct yrd *, uint64_t);
+
+/*
+ * A map's key: a SID's delta, a bare integer; or an absolute SID in tag
+ * 47 (RFC 9254 section 4.2.1), *abs and the SID in *u.
+ */
+static int
+dec_key(struct yrd *r, bool *abs, uint64_t *u, int64_t *delta)
+{
+
+	*abs = tag(r, 47);
+	if (*abs) {
+		*delta = 0;
+		return (dec_int(r, 0, UINT64_MAX, false, u, delta));
+	}
+	return (dec_int(r, INT64_MIN, INT64_MAX, true, u, delta));
 }
 
 static int
@@ -1334,10 +1457,32 @@ dec_map(struct yrd *r, const struct cbl_ynode *n, void *p, int depth)
 	if ((seen = calloc(n->nchild + 1, 1)) == NULL)
 		return (fail(r, ENOMEM, NOMEM));
 	for (uint64_t i = 0; i < k && error == 0; i++) {
-		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
-		    &delta)) != 0)
+		bool abs;
+
+		if ((error = dec_key(r, &abs, &u, &delta)) != 0)
 			break;
-		c = cbl_ynode_child(n, delta);
+		/* Mounted (RFC 8528): a module's top-level node, by SID. */
+		if (abs && (n->flags & CBL_YNF_MOUNT) != 0) {
+			void *data;
+
+			if ((c = mounted_node(n, u)) == NULL) {
+				if (r->flags & CBL_YD_STRICT)
+					error = fail(r, ENOENT, "%s: nothing "
+					    "mounted is SID %ju", n->name,
+					    (uintmax_t)u);
+				else
+					error = skip(r, depth);
+				continue;
+			}
+			if ((data = cbl_ymount_data(n, p, c->module,
+			    r->a)) == NULL)
+				error = fail(r, ENOMEM, NOMEM);
+			else
+				error = dec_child(r, c, data, depth);
+			continue;
+		}
+		c = abs ? cbl_ynode_child(n, (int64_t)(u -
+		    cbl_ynode_base(n))) : cbl_ynode_child(n, delta);
 		if (c == NULL || c->off == CBL_YOFF_NONE) {
 			if (r->flags & CBL_YD_STRICT)
 				error = fail(r, ENOENT, "%s: no child at delta "
@@ -1598,7 +1743,8 @@ enc_tmap(struct cbl_ybuf *b, const cbl_dnode *x, int depth)
 
 	if (depth > YDEPTH_MAX)
 		return (ELOOP);
-	if (x->sn == NULL) {
+	if (x->sn == NULL || (x->sn->flags & CBL_YNF_MOUNT) != 0) {
+		/* A mount point's: by absolute SID, tag 47. */
 		k = x->tree->tops;
 		nk = x->tree->ntops;
 		base = 0;
@@ -1617,6 +1763,9 @@ enc_tmap(struct cbl_ybuf *b, const cbl_dnode *x, int depth)
 
 		if (c == NULL)
 			continue;
+		if (x->sn != NULL && (x->sn->flags & CBL_YNF_MOUNT) != 0 &&
+		    (error = put_head(b, 6, 47)) != 0)
+			return (error);
 		if ((error = put_int(b, (int64_t)(k[i]->sid - base))) != 0)
 			return (error);
 		if (k[i]->kind != CBL_YN_LIST && k[i]->kind != CBL_YN_LEAFLIST) {
@@ -1852,20 +2001,30 @@ dec_tmap(struct yrd *r, cbl_dnode *x, int depth)
 	    (error = count(r, k, 2)) != 0)
 		return (error);
 	for (uint64_t i = 0; i < k; i++) {
-		if ((error = dec_int(r, INT64_MIN, INT64_MAX, true, &u,
-		    &delta)) != 0)
+		bool abs;
+
+		if ((error = dec_key(r, &abs, &u, &delta)) != 0)
 			return (error);
-		if (x->sn != NULL)
-			c = cbl_ynode_child(x->sn, delta);
-		else {
-			c = delta >= 0 ? cbl_yschema_node(x->tree->schema,
-			    (uint64_t)delta) : NULL;
+		/* The root's keys are SIDs; a mount point's, absolute ones
+		 * (RFC 8528): a top-level node either way. */
+		if (x->sn == NULL || (abs && (x->sn->flags &
+		    CBL_YNF_MOUNT) != 0)) {
+			uint64_t sid = abs ? u : (uint64_t)delta;
+
+			c = abs || delta >= 0 ? cbl_yschema_node(x->tree->schema,
+			    sid) : NULL;
 			for (u = 0; c != NULL && u < x->tree->ntops &&
 			    x->tree->tops[u] != c; u++)
 				;
 			if (c != NULL && u == x->tree->ntops)
 				c = NULL;
-		}
+			delta = (int64_t)sid;
+		} else if (abs) {
+			c = cbl_ynode_child(x->sn, (int64_t)(u -
+			    cbl_ynode_base(x->sn)));
+			delta = (int64_t)u;
+		} else
+			c = cbl_ynode_child(x->sn, delta);
 		if (c == NULL) {
 			if (r->flags & CBL_YD_STRICT)
 				return (fail(r, ENOENT, "%s: no child at %s "

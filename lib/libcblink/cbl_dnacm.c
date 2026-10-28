@@ -200,7 +200,10 @@ cbl_dnacm_path_new(const struct cbl_yschema *s, const char *path, char *why,
 			error = fail(why, whylen, "%s: no module", st->s);
 			break;
 		}
-		if (i == 0) {
+		/* The top, or below a mount point (RFC 8528): the step's
+		 * module's top-level nodes. */
+		if (i == 0 || (p->steps[i - 1].sn->flags & CBL_YNF_MOUNT) !=
+		    0) {
 			for (uint32_t j = 0; j < s->nmod; j++)
 				if (strcmp(s->mod[j]->name, mod) == 0) {
 					m = s->mod[j];

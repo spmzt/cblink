@@ -229,6 +229,19 @@ snode_ext(const struct snode *n, const char *ext)
 	return (NULL);
 }
 
+bool
+snode_mount(const struct snode *n)
+{
+
+	if (n->kind != SN_CONTAINER && n->kind != SN_LIST)
+		return (false);
+	for (size_t i = 0; i < n->nexts; i++)
+		if (!n->exts[i].inherited && strcmp(n->exts[i].ext,
+		    "ietf-yang-schema-mount:mount-point") == 0)
+			return (true);
+	return (false);
+}
+
 const char *
 snode_kind_name(enum snode_kind kind)
 {

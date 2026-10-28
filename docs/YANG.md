@@ -60,7 +60,8 @@ are from that SID, not the `input` or `output` node's.
 | `union` | as the member that matches, with the tags above where members could be told apart no other way |
 | anydata, anyxml | as a container, its keys deltas from its own SID |
 
-Tag 47, an absolute SID as a value, is taken too, never on a key. Tag
+Tag 47, an absolute SID, is taken as a value and as a key in any map
+(RFC 9254 section 4.2.1), the key then the child of that SID. Tag
 109 is draft-ietf-core-yang-metadata's: a node's annotations (RFC
 7952), `[metadata, value]` in place of its value, the metadata a map
 keyed by each annotation's delta from the node's own SID (an entry's:
@@ -72,6 +73,16 @@ in their shortest form. The decoder checks the CBOR (its shape, kinds, tags, UTF
 the limits) before a program sees it; the codec decodes a value into its
 struct and, with `CBL_YD_STRICT`, refuses a key the node has no child
 for. What a decode may allocate is bounded (64 MiB unless set).
+
+A schema mount point (RFC 8528, a node with `yangmnt:mount-point`) has
+below it the schema's own top-level nodes, a shared schema: in
+YANG-CBOR keyed by their absolute SIDs (tag 47), in RFC 7951's JSON
+named with their modules as at the top, in the instance tree as the
+mount point's children. Its struct has `mounted` (`struct
+cbl_ymounts`), a module's data struct each, made and found by
+`cbl_ymount_data()` and `cbl_ymount_find()`; the validator, NACM's
+paths and the difference of two trees go inside. A mount point with
+nodes of its own beside is not generated.
 
 ## 4. Validation
 

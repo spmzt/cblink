@@ -122,6 +122,10 @@ const cbl_dnode *cbl_d_iid_node(const cbl_dtree *t,
 	    const struct cbl_bytes *v, cbl_yarena *a);
 /* n's value set to a copy of value, the one it had freed; and freed. */
 int	cbl_d_set_value(cbl_dnode *n, const void *value);
+/* The nodes a node of sn may have as children in tree t: sn's, or the
+ * top-level ones at the root or a mount point (RFC 8528). */
+const struct cbl_ynode *const *cbl_d_kids(const cbl_dtree *t,
+	    const struct cbl_ynode *sn, uint32_t *nk);
 /* Value p of type t within t's restrictions (cbl_yvalid.c): the
  * decoder's choice of a union's member, RFC 7950 9.12. */
 bool	cbl_ytype_admits(const struct cbl_yschema *s,

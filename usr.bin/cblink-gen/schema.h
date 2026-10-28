@@ -302,6 +302,8 @@ struct sident	*schema_ident(struct schema *s, const char *module,
 		    const char *name);
 struct sident	*schema_ident_in(struct smodule *m, const char *name);
 const char	*snode_kind_name(enum snode_kind kind);
+/* Whether n is a schema mount point (RFC 8528's mount-point). */
+bool		 snode_mount(const struct snode *n);
 /* The node's instance of the extension "module:name", or NULL. */
 const struct sext *snode_ext(const struct snode *n, const char *ext);
 const char	*sntype_base_name(enum sntype_base base);

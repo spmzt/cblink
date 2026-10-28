@@ -130,9 +130,13 @@ CFLAGS.yds_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
 LDADD.yds_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
 CFLAGS.ydsh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
 YDSH_SRC=	${.CURDIR}/yang/dsdemo@2026-10-28.yang \
-		${.CURDIR}/corpus/ietf-netconf@2011-06-01.yang
+		${.CURDIR}/corpus/ietf-netconf@2011-06-01.yang \
+		${.CURDIR}/corpus/ietf-origin@2018-02-14.yang \
+		${.CURDIR}/corpus/ietf-defaults@2024-04-03.yang
 YDSH_SID=	-s ${.CURDIR}/yang/dsdemo@2026-10-28.sid \
-		-s ${.CURDIR}/yang/ietf-netconf@2011-06-01.sid
+		-s ${.CURDIR}/yang/ietf-netconf@2011-06-01.sid \
+		-s ${.CURDIR}/yang/ietf-origin@2018-02-14.sid \
+		-s ${.CURDIR}/yang/ietf-defaults@2024-04-03.sid
 CLEANFILES+=	ydsh.h ydsh_schema.c
 ydsh.h: ${YDSH_SRC} ${GEN}
 	${GEN} -m h,schema -b ydsh -o ${.OBJDIR} -p ${.CURDIR}/corpus \

@@ -219,8 +219,19 @@ when its session goes without `persist`, unless a commit confirms it
 (its session's, or any with its `persist-id`). A GET's `with-defaults`
 (RFC 6243) reads `explicit` (what the server has, the basic mode),
 `report-all` (the defaults in use too) or `trim` (a leaf at its default
-left out), of any datastore (`cbl_msg_put_yget_wd()`); `report-all-tagged`
-waits on an annotation of the default in YANG-CBOR. An undo a handler fails
+left out) or `report-all-tagged` (report-all, a leaf whose value is its
+default annotated `ietf-defaults:default`, draft-ietf-netconf-default-attribute),
+of any datastore (`cbl_msg_put_yget_wd()`). Its `with-origin` (RFC 8342
+section 5.3.4, RFC 8527 section 3.2.2), of the operational datastore
+alone, annotates each configuration node with `ietf-origin:origin` where
+it is not its parent's: `intended` where running has it (a leaf with the
+same value), `default` where it is a default in use, and where running
+has it not what the server says (`cbl_yorigin_set()`: `system`,
+`learned`, ...), `unknown` where it says nothing; what is below such a
+node has its origin (`cbl_msg_put_yget_opts()`). Both need their module among the server's.
+A client reads such a reply into an instance tree (`cbl_msg_ydtree()`)
+and writes it as JSON with its annotations (`cbl_dtree_json()`, RFC 7952
+section 5.2). An undo a handler fails
 is the program's to hear of, and the undo stops there; an undo needs
 no consent its commit had (`cbl_req_yundo()`). A get handler
 reading for running (`cbl_req_ydatastore()`) leaves out what is no

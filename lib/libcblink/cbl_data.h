@@ -126,8 +126,8 @@ ssize_t		 cbl_dtree_defaults(cbl_dnode *n);
  * default or not; the defaults made taken out.  trim: those, and every
  * leaf whose value is its default, a leaf-list whose values are its
  * defaults, taken out (never a list's key).  In both, a non-presence
- * container left with nothing in it goes too.  report-all-tagged needs
- * the codec's metadata and is not here.  0, or -1 and errno: EINVAL, a
+ * container left with nothing in it goes too.  report-all-tagged is
+ * report-all and the annotation a GET adds (cbl_yfamily.c).  0, or -1 and errno: EINVAL, a
  * mode there is not; ELOOP, too deep; ENOMEM.
  */
 #define	CBL_WD_REPORT_ALL	1
@@ -374,5 +374,31 @@ int		 cbl_dnode_encode(const cbl_dnode *n, struct cbl_ybuf *b);
 int		 cbl_dtree_decode(cbl_dtree *t, const void *data, size_t len,
 		    int flags, char *why, size_t whylen);
 int		 cbl_dtree_encode(const cbl_dtree *t, struct cbl_ybuf *b);
+
+/*
+ * The tree as RFC 7951's JSON, an object of its top-level nodes, with
+ * its annotations as RFC 7952 section 5.2 has them, appended to b.
+ * cbl_msg_ydtree(): the top-level nodes of t's schema a received body
+ * has, read into t as cbl_dnode_decode() reads them (with their
+ * annotations); the others passed over.
+ */
+int		 cbl_dtree_json(const cbl_dtree *t, struct cbl_ybuf *b);
+/* RFC 8040's api-path of n (section 3.5.3), each list entry with its
+ * keys and a leaf-list entry its value, percent-encoded; appended to b
+ * without a NUL. */
+int		 cbl_dnode_apipath(const cbl_dnode *n, struct cbl_ybuf *b);
+
+/*
+ * A GET's with-origin (RFC 8342 section 5.3.4): where the operational
+ * state has a configuration node running has not (or a leaf of another
+ * value), what f says it came from, an ietf-origin identity's name
+ * ("system", "learned", "dynamic"), or NULL, unknown; what is below it
+ * has the same.  f runs on a request's thread, the tree read-only.
+ * EINVAL: no ctx.
+ */
+typedef const char *cbl_yorigin_f(const cbl_dnode *n, void *arg);
+int		 cbl_yorigin_set(cbl_ctx *ctx, cbl_yorigin_f *f, void *arg);
+int		 cbl_msg_ydtree(const cbl_msg *msg, cbl_dtree *t, int flags,
+		    char *why, size_t whylen);
 
 #endif /* !_CBL_DATA_H_ */

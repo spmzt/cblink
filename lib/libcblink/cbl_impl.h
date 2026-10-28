@@ -185,6 +185,8 @@ struct cbl_ysub_replay;
 struct cbl_ynacm;
 struct timespec;
 
+struct cbl_dnode;
+
 struct cbl_ctx {
 	pthread_mutex_t		 mtx;
 	struct cbl_limits	 lim;
@@ -240,6 +242,10 @@ struct cbl_ctx {
 				 nacm_denied_notifs;
 	/* Family 1's datastores (cbl_yds.c), NULL: none. */
 	struct cbl_yds		*yds;
+	/* What a configuration node running has not came from (a GET's
+	 * with-origin), NULL: unknown. */
+	const char		*(*yorigin)(const struct cbl_dnode *, void *);
+	void			*yorigin_arg;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);

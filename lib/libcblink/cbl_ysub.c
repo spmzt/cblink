@@ -723,9 +723,8 @@ push(struct cbl_ysub *sub)
 	return (error);
 }
 
-/* RFC 8040's api-path of n, keys percent-encoded (section 3.5.3). */
-static int
-api_path(const cbl_dnode *n, struct cbl_ybuf *b)
+int
+cbl_dnode_apipath(const cbl_dnode *n, struct cbl_ybuf *b)
 {
 	const cbl_dnode *v[64], *p;
 	const struct cbl_ynode *sn, *psn, *kn;
@@ -857,7 +856,7 @@ patch_edits(struct cbl_ysub *sub, const cbl_dnode *n, struct cbl_ybuf *arr,
 		if ((opv = enum_value(y->ed_op, type)) < 0)
 			return (EINVAL);
 		value = strcmp(type, "delete") != 0;
-		if ((error = api_path(c, &tgt)) != 0 ||
+		if ((error = cbl_dnode_apipath(c, &tgt)) != 0 ||
 		    (error = buf_put(&tgt, "", 1)) != 0)
 			break;
 		(void)snprintf(eid, sizeof(eid), "%zu", *count + 1);

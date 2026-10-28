@@ -745,14 +745,20 @@ int		 cbl_msg_put_yget_xpath(cbl_msg *msg, const uint64_t *sids,
 		    size_t n, const char *xpath);
 /* The same with RFC 6243's retrieval mode: explicit (what the server
  * has), report-all (the defaults in use too), trim (leaves at their
- * default left out). */
+ * default left out), report-all-tagged (report-all, a leaf at its
+ * default annotated so).  _opts: with origin, each configuration node
+ * of the operational datastore annotated with its origin (RFC 8342
+ * section 5.3.4) where it is not its parent's. */
 enum cbl_ywd {
 	CBL_YWD_EXPLICIT,
 	CBL_YWD_REPORT_ALL,
 	CBL_YWD_TRIM,
+	CBL_YWD_REPORT_ALL_TAGGED,
 };
 int		 cbl_msg_put_yget_wd(cbl_msg *msg, const uint64_t *sids,
 		    size_t n, const char *xpath, enum cbl_ywd wd);
+int		 cbl_msg_put_yget_opts(cbl_msg *msg, const uint64_t *sids,
+		    size_t n, const char *xpath, enum cbl_ywd wd, bool origin);
 void		*cbl_req_yarg(const cbl_req *req);
 int		 cbl_req_set_yerr(cbl_req *req, const char *text,
 		    uint64_t sid);
@@ -833,7 +839,8 @@ int		 cbl_ysub_kill(cbl_ctx *ctx, uint32_t id);
  * cbl_ysub_changed(top) (NULL: any of them).  An on-change
  * subscription that reads only those is read again when told, a
  * dampening period after its last read at the soonest, not every
- * period.
+ * period.  An EDIT, a commit and a commit's undo tell of the nodes
+ * they change themselves.
  */
 int		 cbl_ysub_told(cbl_ctx *ctx, const struct cbl_ynode *const *tops,
 		    size_t n);

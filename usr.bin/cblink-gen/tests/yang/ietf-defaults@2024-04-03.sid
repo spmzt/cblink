@@ -1,0 +1,32 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-defaults",
+    "module-revision": "2024-04-03",
+    "sid-file-version": 0,
+    "description": "yds_test's tables, numbered for the test alone.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-metadata",
+        "module-revision": "2016-08-05"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "83150",
+        "size": "50"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "ietf-defaults",
+        "sid": "83150"
+      },
+      {
+        "namespace": "annotation",
+        "identifier": "default",
+        "sid": "83151"
+      }
+    ]
+  }
+}

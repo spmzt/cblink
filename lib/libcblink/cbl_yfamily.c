@@ -226,7 +226,7 @@ sid_cmp(const void *a, const void *b)
  */
 static int
 get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
-    char **xpathp, int *wdp)
+    char **xpathp, int *wdp, bool *originp)
 {
 	cbl_ctx *ctx = req->conn->ctx;
 	struct cblink_get g;
@@ -274,6 +274,7 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
 	*xpathp = NULL;
 	*wdp = g.has_with_defaults ? (int)g.with_defaults :
 	    CBLINK_GET_WITH_DEFAULTS_EXPLICIT;
+	*originp = g.with_origin;
 	if (error == 0 && g.xpath_filter != NULL &&
 	    (*xpathp = strdup(g.xpath_filter)) == NULL)
 		error = ENOMEM;
@@ -412,6 +413,7 @@ cbl_ywd_apply(cbl_dtree *t, int wd)
 
 	switch (wd) {
 	case CBLINK_GET_WITH_DEFAULTS_REPORT_ALL:
+	case CBLINK_GET_WITH_DEFAULTS_REPORT_ALL_TAGGED:
 		return (cbl_dtree_defaults(cbl_dtree_root(t)) < 0 ? (errno !=
 		    0 ? errno : ENOMEM) : 0);
 	case CBLINK_GET_WITH_DEFAULTS_TRIM:
@@ -421,9 +423,192 @@ cbl_ywd_apply(cbl_dtree *t, int wd)
 	}
 }
 
+/* Annotation name of module, in schema s; NULL where it has none. */
+static const struct cbl_yannot *
+annot_named(const struct cbl_yschema *s, const char *module, const char *name)
+{
+
+	for (uint32_t i = 0; i < s->nmod; i++)
+		if (strcmp(s->mod[i]->name, module) == 0)
+			return (cbl_ymodule_annot(s->mod[i], name));
+	return (NULL);
+}
+
+/* The SID of identity name of module, in schema s; 0 where none. */
+static uint64_t
+ident_named(const struct cbl_yschema *s, const char *module, const char *name)
+{
+
+	for (uint32_t i = 0; i < s->nident; i++)
+		if (strcmp(s->ident[i].name, name) == 0 &&
+		    strcmp(s->ident[i].module->name, module) == 0)
+			return (s->ident[i].sid);
+	return (0);
+}
+
+/* Leaves whose value is their default tagged so, below n. */
+static int
+tag_defaults(const cbl_dtree *t, const struct cbl_yannot *an, cbl_dnode *n,
+    int depth)
+{
+	static const bool yes = true;
+	cbl_dnode *c;
+	int error;
+
+	if (depth > 64)
+		return (ELOOP);
+	for (c = cbl_dnode_first(n); c != NULL; c = cbl_dnode_next(c)) {
+		const struct cbl_ynode *sn = cbl_dnode_schema(c);
+		char *s = NULL;
+
+		if (sn->kind == CBL_YN_LEAF) {
+			error = 0;
+			if (sn->ndflt > 0 && cbl_d_vstring(cbl_dtree_schema(t),
+			    sn->type, cbl_dnode_value(c), &s) == 0 &&
+			    s != NULL && strcmp(s, sn->dflt[0]) == 0)
+				error = cbl_dnode_meta_set(c, an, &yes);
+			free(s);
+		} else
+			error = tag_defaults(t, an, c, depth + 1);
+		if (error != 0)
+			return (error);
+	}
+	return (0);
+}
+
+struct origins {
+	const struct cbl_yannot	*an;
+	const struct cbl_yschema *s;
+	uint64_t		 intended, dflt, unknown;
+	cbl_yorigin_f		*f;
+	void			*arg;
+};
+
+int
+cbl_yorigin_set(cbl_ctx *ctx, cbl_yorigin_f *f, void *arg)
+{
+
+	if (ctx == NULL)
+		return (EINVAL);
+	ctx->yorigin = f;
+	ctx->yorigin_arg = arg;
+	return (0);
+}
+
+/* What c, which running has not, came from: the server's word. */
+static uint64_t
+origin_of(const struct origins *o, const cbl_dnode *c)
+{
+	const char *name;
+	uint64_t sid;
+
+	if (o->f == NULL || (name = o->f(c, o->arg)) == NULL ||
+	    (sid = ident_named(o->s, "ietf-origin", name)) == 0)
+		return (o->unknown);
+	return (sid);
+}
+
+/* What of r (running) is c, of the same schema node; NULL: none. */
+static const cbl_dnode *
+running_of(const cbl_dnode *r, const cbl_dnode *c)
+{
+	const struct cbl_ynode *sn = cbl_dnode_schema(c);
+	const void *keys[16];
+	const cbl_dnode *k;
+
+	if (r == NULL)
+		return (NULL);
+	switch (sn->kind) {
+	case CBL_YN_LIST:
+		if (sn->nkeys == 0 ||
+		    sn->nkeys > sizeof(keys) / sizeof(keys[0]))
+			return (NULL);
+		for (uint16_t i = 0; i < sn->nkeys; i++) {
+			if ((k = cbl_dnode_child(c, sn->child[sn->keys[i]])) ==
+			    NULL)
+				return (NULL);
+			keys[i] = cbl_dnode_value(k);
+		}
+		return (cbl_dnode_entry(r, sn, keys));
+	case CBL_YN_LEAFLIST:
+		return (cbl_dnode_llentry(r, sn, cbl_dnode_value(c)));
+	case CBL_YN_LEAF:
+		k = cbl_dnode_child(r, sn);
+		return (k != NULL && cbl_dvalue_equal(sn->type,
+		    cbl_dnode_value(k), cbl_dnode_value(c)) ? k : NULL);
+	default:
+		return (cbl_dnode_child(r, sn));
+	}
+}
+
+/*
+ * The configuration below n annotated with its origin where it is not
+ * its parent's, inherited: intended where running (r) has it, default
+ * where it is a default in use, else the server's word (origin_of())
+ * where running has n, n's otherwise.  State has none.
+ */
+static int
+annotate_origins(const struct origins *o, cbl_dnode *n, const cbl_dnode *r,
+    uint64_t inherited, int depth)
+{
+	const cbl_dnode *rc;
+	cbl_dnode *c;
+	uint64_t is;
+	int error;
+
+	if (depth > 64)
+		return (ELOOP);
+	for (c = cbl_dnode_first(n); c != NULL; c = cbl_dnode_next(c)) {
+		if ((cbl_dnode_schema(c)->flags & CBL_YNF_CONFIG) == 0)
+			continue;
+		rc = running_of(r, c);
+		is = (cbl_dnode_flags(c) & CBL_DN_DEFAULT) != 0 ? o->dflt :
+		    rc != NULL ? o->intended : r == NULL &&
+		    inherited != o->intended ? inherited : origin_of(o, c);
+		if ((is != inherited &&
+		    (error = cbl_dnode_meta_set(c, o->an, &is)) != 0) ||
+		    (error = annotate_origins(o, c, rc, is, depth + 1)) != 0)
+			return (error);
+	}
+	return (0);
+}
+
+int
+cbl_yget_annotate(cbl_req *req, cbl_dtree *t, bool origin, bool tagged)
+{
+	const struct cbl_yschema *s = cbl_dtree_schema(t);
+	const struct cbl_yannot *dan = NULL;
+	struct origins o = { NULL, s, 0, 0, 0, req->conn->ctx->yorigin,
+	    req->conn->ctx->yorigin_arg };
+	cbl_dtree *run;
+	int error;
+
+	if (tagged && (dan = annot_named(s, "ietf-defaults", "default")) ==
+	    NULL)
+		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+		    "report-all-tagged needs ietf-defaults in the server's "
+		    "modules"));
+	if (origin && ((o.an = annot_named(s, "ietf-origin", "origin")) ==
+	    NULL || (o.intended = ident_named(s, "ietf-origin", "intended")) ==
+	    0 || (o.dflt = ident_named(s, "ietf-origin", "default")) == 0 ||
+	    (o.unknown = ident_named(s, "ietf-origin", "unknown")) == 0))
+		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+		    "with-origin needs ietf-origin in the server's modules"));
+	if (tagged && (error = tag_defaults(t, dan, cbl_dtree_root(t), 0)) != 0)
+		return (error);
+	if (!origin)
+		return (0);
+	if ((error = cbl_yds_running(req, &run)) != 0)
+		return (error);
+	error = annotate_origins(&o, cbl_dtree_root(t), cbl_dtree_root(run),
+	    0, 0);
+	cbl_dtree_free(run);
+	return (error);
+}
+
 static int
 get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
-    const char *xpath, int wd)
+    const char *xpath, int wd, bool origin)
 {
 	struct cbl_ybuf b = { NULL, 0, 0 };
 	cbl_dtree *t, *ft;
@@ -454,6 +639,10 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 		return (cbl_ysay(req, error == ENOMEM ? ENOMEM : EINVAL, 0,
 		    "invalid-value", why));
 	}
+	/* A filter's copy has no annotations: made on what goes. */
+	if (origin || wd == CBLINK_GET_WITH_DEFAULTS_REPORT_ALL_TAGGED)
+		error = cbl_yget_annotate(req, ft, origin,
+		    wd == CBLINK_GET_WITH_DEFAULTS_REPORT_ALL_TAGGED);
 	for (c = cbl_dnode_first(cbl_dtree_root(ft)); error == 0 && c != NULL;
 	    c = cbl_dnode_next(c)) {
 		if ((error = cbl_dnode_encode(c, &b)) == 0)
@@ -541,7 +730,7 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	uint64_t *v;
 	char *xpath;
 	size_t n;
-	bool put;
+	bool origin, put;
 	int error, wd;
 
 	enum cbl_yds_name ds;
@@ -549,8 +738,17 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 
 	if ((error = cbl_yds_of(req, &ds, &said)) != 0)
 		return (error);
-	if ((error = get_targets(req, msg, &v, &n, &xpath, &wd)) != 0)
+	if ((error = get_targets(req, msg, &v, &n, &xpath, &wd,
+	    &origin)) != 0)
 		return (error);
+	/* The origins are the operational datastore's (RFC 8527 section
+	 * 3.2.2). */
+	if (origin && ds != CBL_YDS_OPERATIONAL) {
+		free(v);
+		free(xpath);
+		return (cbl_ysay(req, EINVAL, 0, "invalid-value",
+		    "with-origin is for the operational datastore"));
+	}
 	if ((error = cbl_req_reply_new(req, 0, &reply)) != 0) {
 		free(v);
 		free(xpath);
@@ -559,11 +757,12 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	/* A datastore's: running or the candidate, configuration alone. */
 	if (ds != CBL_YDS_OPERATIONAL)
 		error = cbl_yds_get(req, reply, v, n, xpath, ds, wd);
-	else if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT)
-		error = get_filtered(req, reply, v, n, xpath, wd);
+	else if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT ||
+	    origin)
+		error = get_filtered(req, reply, v, n, xpath, wd, origin);
 	for (size_t i = 0; ds == CBL_YDS_OPERATIONAL && xpath == NULL &&
-	    wd == CBLINK_GET_WITH_DEFAULTS_EXPLICIT && error == 0 && i < n;
-	    i++)
+	    wd == CBLINK_GET_WITH_DEFAULTS_EXPLICIT && !origin && error == 0 &&
+	    i < n; i++)
 		error = get_one(req, reply, v[i], &put);
 	free(v);
 	free(xpath);
@@ -596,7 +795,7 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 	struct ydump *d = st->priv;
 	cbl_msg *item;
 	char *xpath;
-	bool put;
+	bool origin, put;
 	int error, wd;
 
 	if (d == NULL) {
@@ -612,13 +811,14 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 		if ((d = calloc(1, sizeof(*d))) == NULL)
 			return (ENOMEM);
 		if ((error = get_targets(req, msg, &d->v, &d->n, &xpath,
-		    &wd)) != 0) {
+		    &wd, &origin)) != 0) {
 			free(d);
 			return (error);
 		}
 		/* A dump is a node a frame: a filter is a GET's, and the
-		 * defaults' modes. */
-		if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT) {
+		 * defaults' modes and the origins. */
+		if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT ||
+		    origin) {
 			free(xpath);
 			free(d->v);
 			free(d);
@@ -769,6 +969,9 @@ y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 			(void)e[done].f.h->edit(req, e[done].after,
 			    e[done].before);
 		}
+	/* The on-change subscriptions told. */
+	for (size_t i = 0; i < n; i++)
+		cbl_ysub_changed(req->conn->ctx, e[i].f.n);
 	free(e);
 	cbl_yarena_free(a);
 	return (error);
@@ -1301,17 +1504,26 @@ int
 cbl_msg_put_yget_wd(cbl_msg *msg, const uint64_t *sids, size_t n,
     const char *xpath, enum cbl_ywd wd)
 {
+
+	return (cbl_msg_put_yget_opts(msg, sids, n, xpath, wd, false));
+}
+
+int
+cbl_msg_put_yget_opts(cbl_msg *msg, const uint64_t *sids, size_t n,
+    const char *xpath, enum cbl_ywd wd, bool origin)
+{
 	struct cblink_get g = { 0 };
 	struct cbl_bytes *t;
 	uint8_t *b;
 	int error;
 
 	if (msg == NULL || (sids == NULL && n > 0) || wd < CBL_YWD_EXPLICIT ||
-	    wd > CBL_YWD_TRIM)
+	    wd > CBL_YWD_REPORT_ALL_TAGGED)
 		return (EINVAL);
-	if (n == 0 && xpath == NULL && wd == CBL_YWD_EXPLICIT)
+	if (n == 0 && xpath == NULL && wd == CBL_YWD_EXPLICIT && !origin)
 		return (0);
 	g.xpath_filter = xpath;
+	g.with_origin = origin;
 	g.has_with_defaults = wd != CBL_YWD_EXPLICIT;
 	g.with_defaults = (enum cblink_get_with_defaults)wd;
 	if ((t = calloc(n > 0 ? n : 1, sizeof(*t))) == NULL ||

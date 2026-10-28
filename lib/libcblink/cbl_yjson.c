@@ -24,6 +24,11 @@
  *   tables.  Where it holds one the tables do not have,
  *   it is null, as anyxml and an instance-identifier are: left out of
  *   this version.
+ *
+ * An instance tree (cbl_data.h) is written so too, with its annotations
+ * as RFC 7952 section 5.2 has them: a container's or an entry's as its
+ * member "@", a leaf's as its sibling "@name", a leaf-list's as
+ * "@name", an array of its entries' (null where one has none).
  */
 
 #include <sys/types.h>
@@ -38,6 +43,7 @@
 #include <string.h>
 
 #include "cblink.h"
+#include "cbl_data.h"
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
 
@@ -553,4 +559,161 @@ cbl_yjson_module(const struct cbl_ymodule *m, const void *data,
 	    (error = cbl_yjson_members(m, data, b, &first)) != 0)
 		return (error);
 	return (jputs(b, "}"));
+}
+
+/* n's annotations, an object of "module:name" members. */
+static int
+json_meta(struct cbl_ybuf *b, const cbl_dnode *n)
+{
+	const struct cbl_yannot	*an = NULL;
+	const void		*v;
+	bool			 first = true;
+	int			 error;
+
+	if ((error = jputs(b, "{")) != 0)
+		return (error);
+	while ((an = cbl_dnode_meta_next(n, an, &v)) != NULL) {
+		if ((!first && (error = jputs(b, ",")) != 0) ||
+		    (error = jputs(b, "\"")) != 0 || (error = jputs(b,
+		    an->module != NULL ? an->module->name : "")) != 0 ||
+		    (error = jputs(b, ":")) != 0 ||
+		    (error = jputs(b, an->name)) != 0 ||
+		    (error = jputs(b, "\":")) != 0 ||
+		    (error = json_value(b, cbl_dnode_schema(n), an->type,
+		    v)) != 0)
+			return (error);
+		first = false;
+	}
+	return (jputs(b, "}"));
+}
+
+/* A member's name in a tree: as json_name(), and "module:name" for what
+ * is mounted (RFC 8528); with at, the name of its annotations. */
+static int
+json_dname(struct cbl_ybuf *b, const struct cbl_ynode *c,
+    const struct cbl_ynode *parent, bool at)
+{
+	int	error;
+
+	if ((error = jputs(b, at ? "\"@" : "\"")) != 0)
+		return (error);
+	if (parent == NULL || parent->module != c->module ||
+	    (parent->flags & CBL_YNF_MOUNT) != 0) {
+		if ((error = jputs(b, c->module != NULL ? c->module->name :
+		    "")) != 0 || (error = jputs(b, ":")) != 0)
+			return (error);
+	}
+	if ((error = jputs(b, c->name)) != 0)
+		return (error);
+	return (jputs(b, "\":"));
+}
+
+static int	json_dobject(struct cbl_ybuf *, const cbl_dnode *, int);
+
+/*
+ * The member of the instances of c's schema node from c, its siblings
+ * of it; *nextp the first sibling after them.
+ */
+static int
+json_dmember(struct cbl_ybuf *b, const cbl_dnode *c, const cbl_dnode **nextp,
+    int depth)
+{
+	const struct cbl_ynode	*sn = cbl_dnode_schema(c);
+	const struct cbl_ynode	*psn = cbl_dnode_schema(cbl_dnode_parent(c));
+	const cbl_dnode		*x;
+	bool			 meta = false;
+	int			 error;
+
+	if ((error = json_dname(b, sn, psn, false)) != 0)
+		return (error);
+	switch (sn->kind) {
+	case CBL_YN_LIST:
+	case CBL_YN_LEAFLIST:
+		if ((error = jputs(b, "[")) != 0)
+			return (error);
+		for (x = c; x != NULL && cbl_dnode_schema(x) == sn;
+		    x = cbl_dnode_next(x)) {
+			if (x != c && (error = jputs(b, ",")) != 0)
+				return (error);
+			if (sn->kind == CBL_YN_LIST)
+				error = json_dobject(b, x, depth + 1);
+			else {
+				error = json_value(b, sn, sn->type,
+				    cbl_dnode_value(x));
+				meta |= cbl_dnode_meta_next(x, NULL, NULL) !=
+				    NULL;
+			}
+			if (error != 0)
+				return (error);
+		}
+		*nextp = x;
+		if ((error = jputs(b, "]")) != 0 || !meta)
+			return (error);
+		/* A leaf-list's annotations, an entry's each. */
+		if ((error = jputs(b, ",")) != 0 ||
+		    (error = json_dname(b, sn, psn, true)) != 0 ||
+		    (error = jputs(b, "[")) != 0)
+			return (error);
+		for (x = c; x != *nextp; x = cbl_dnode_next(x))
+			if ((x != c && (error = jputs(b, ",")) != 0) ||
+			    (error = cbl_dnode_meta_next(x, NULL, NULL) !=
+			    NULL ? json_meta(b, x) : jputs(b, "null")) != 0)
+				return (error);
+		return (jputs(b, "]"));
+	case CBL_YN_CONTAINER:
+		*nextp = cbl_dnode_next(c);
+		return (json_dobject(b, c, depth + 1));
+	case CBL_YN_LEAF:
+		*nextp = cbl_dnode_next(c);
+		if ((error = json_value(b, sn, sn->type,
+		    cbl_dnode_value(c))) != 0 ||
+		    cbl_dnode_meta_next(c, NULL, NULL) == NULL)
+			return (error);
+		if ((error = jputs(b, ",")) != 0 ||
+		    (error = json_dname(b, sn, psn, true)) != 0)
+			return (error);
+		return (json_meta(b, c));
+	case CBL_YN_ANYDATA:
+		*nextp = cbl_dnode_next(c);
+		return (json_anydata(b, sn, cbl_dnode_value(c), depth));
+	default:
+		*nextp = cbl_dnode_next(c);
+		return (jputs(b, "null"));
+	}
+}
+
+/* n's children, an object, its own annotations first. */
+static int
+json_dobject(struct cbl_ybuf *b, const cbl_dnode *n, int depth)
+{
+	const cbl_dnode	*c, *next;
+	bool		 first = true;
+	int		 error;
+
+	if (depth > JDEPTH_MAX)
+		return (ELOOP);
+	if ((error = jputs(b, "{")) != 0)
+		return (error);
+	if (cbl_dnode_meta_next(n, NULL, NULL) != NULL) {
+		if ((error = jputs(b, "\"@\":")) != 0 ||
+		    (error = json_meta(b, n)) != 0)
+			return (error);
+		first = false;
+	}
+	for (c = cbl_dnode_first(n); c != NULL; c = next) {
+		if ((!first && (error = jputs(b, ",")) != 0) ||
+		    (error = json_dmember(b, c, &next, depth)) != 0)
+			return (error);
+		first = false;
+	}
+	return (jputs(b, "}"));
+}
+
+int
+cbl_dtree_json(const cbl_dtree *t, struct cbl_ybuf *b)
+{
+
+	if (t == NULL || b == NULL)
+		return (EINVAL);
+	return (json_dobject(b, cbl_dtree_root(t), 0));
 }

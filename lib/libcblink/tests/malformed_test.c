@@ -351,6 +351,12 @@ ATF_TC_BODY(yang_tags, tc)
 	ATF_CHECK(a != NULL);
 	cbl_msg_free(msg);
 	require_body_error(ctx, "A1 01 A1 D8 2E 01 01", EPROTO);
+	/* 109 on [metadata, value] alone. */
+	a = yang_value(ctx, "A1 01 D8 6D 82 A1 01 01 01", &msg);
+	ATF_CHECK(a != NULL);
+	cbl_msg_free(msg);
+	require_body_error(ctx, "A1 01 D8 6D 01", EPROTO);
+	require_body_error(ctx, "A1 01 D8 6E 82 A1 01 01 01", EPROTO);
 	require_body_error(ctx, "A1 01 D8 2F D8 2F 01", EPROTO);
 	require_body_error(ctx, "A1 01 C4 83 21 01 01", EPROTO);
 	require_body_error(ctx, "A1 01 C4 19 0C 5D", EPROTO);

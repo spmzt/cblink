@@ -20,8 +20,10 @@
 
 #include <cbor.h>
 
+#include "cbl_data.h"
 #include "cbl_impl.h"
 #include "cbl_schema.h"
+#include "cbl_yimpl.h"
 
 #define	CBL_HEAD_MAX	9	/* largest CBOR item head */
 
@@ -447,6 +449,37 @@ cbl_msg_sid_raw(const cbl_msg *msg, uint64_t sid, const void **pp,
 	*pp = msg->buf + msg->hdr.hdrlen + a->off;
 	*lenp = a->len;
 	return (0);
+}
+
+int
+cbl_msg_ydtree(const cbl_msg *msg, cbl_dtree *t, int flags, char *why,
+    size_t whylen)
+{
+	const struct cbl_yschema *s;
+	const struct cbl_ynode *n;
+	const cbl_attr *body;
+	int error = 0;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (msg == NULL || t == NULL || !msg->decoded)
+		return (EINVAL);
+	if ((body = cbl_msg_body(msg)) == NULL)
+		return (0);
+	s = cbl_dtree_schema(t);
+	for (uint32_t i = 0; error == 0 && i < body->count; i++) {
+		const cbl_attr *at = &body->child[i];
+
+		/* The framework's keys and nodes of other modules. */
+		if (at->key < 1 || cbl_fw_sid((uint64_t)at->key) ||
+		    (n = cbl_yschema_node(s, (uint64_t)at->key)) == NULL ||
+		    !cbl_yis_top_data(n))
+			continue;
+		error = cbl_dnode_decode(cbl_dtree_root(t), n, msg->buf +
+		    msg->hdr.hdrlen + at->off, at->len, flags, why, whylen,
+		    NULL);
+	}
+	return (error);
 }
 
 int

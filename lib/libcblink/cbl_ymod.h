@@ -42,6 +42,7 @@ enum cblink_get_with_defaults {
 	CBLINK_GET_WITH_DEFAULTS_EXPLICIT = 0,
 	CBLINK_GET_WITH_DEFAULTS_REPORT_ALL = 1,
 	CBLINK_GET_WITH_DEFAULTS_TRIM = 2,
+	CBLINK_GET_WITH_DEFAULTS_REPORT_ALL_TAGGED = 3,
 };
 
 enum cblink_datastore_name {
@@ -104,6 +105,7 @@ struct cblink_get {
 	const char	*xpath_filter;
 	bool			 has_with_defaults;
 	enum cblink_get_with_defaults	 with_defaults;
+	bool		 with_origin;
 	struct {
 		size_t		 n;
 		const struct cbl_bytes	 *v;

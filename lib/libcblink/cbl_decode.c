@@ -17,7 +17,8 @@
  * Tags are refused but YANG-CBOR's (RFC 9254), which version 2 takes
  * always: one tag on a value, never on the body, and the value of the
  * kind its tag says; on a key, tag 47 alone, an absolute SID (RFC 9254
- * section 4.2.1).
+ * section 4.2.1).  Tag 109, draft-ietf-core-yang-metadata's annotated
+ * value ([metadata, value]), is taken as YANG-CBOR's.
  */
 
 #include <errno.h>
@@ -162,7 +163,8 @@ dec_keyval(const cbl_attr *t)
  * What each YANG-CBOR tag may stand on (RFC 9254 sections 6 and 9):
  * decimal64 is [exponent, mantissa]; bits a byte string, or an array
  * when sparse; an enumeration its name; an identityref a SID or a name;
- * an instance-identifier a SID, a SID with keys, or a name; tag 47 a SID.
+ * an instance-identifier a SID, a SID with keys, or a name; tag 47 a SID;
+ * tag 109 (provisional) [metadata, value].
  */
 static bool
 tag_fits(uint8_t tag, const cbl_attr *t, uint64_t n)
@@ -183,6 +185,8 @@ tag_fits(uint8_t tag, const cbl_attr *t, uint64_t n)
 		    t->kind == CBL_K_ARRAY);
 	case 47:
 		return (t->kind == CBL_K_UINT);
+	case 109:
+		return (t->kind == CBL_K_ARRAY && n == 2);
 	}
 	return (false);
 }
@@ -380,7 +384,7 @@ cb_tag(void *ctx, uint64_t v)
 		dec_fail(d, EPROTO, "CBOR tags are not allowed");
 		return;
 	}
-	if (v != 4 && (v < 43 || v > 47)) {
+	if (v != 4 && (v < 43 || v > 47) && v != 109) {
 		dec_fail(d, EPROTO, "CBOR tag not of YANG-CBOR");
 		return;
 	}

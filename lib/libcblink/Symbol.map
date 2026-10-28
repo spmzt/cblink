@@ -187,6 +187,7 @@ CBLINK_1.0 {
 	cbl_msg_put_yget;
 	cbl_msg_put_yget_xpath;
 	cbl_msg_put_yget_wd;
+	cbl_msg_put_yget_opts;
 	cbl_ynotify;
 	cbl_msg_ynotif;
 	cbl_yvalidate;
@@ -254,6 +255,10 @@ CBLINK_1.0 {
 	cbl_dnode_encode;
 	cbl_dtree_decode;
 	cbl_dtree_encode;
+	cbl_dtree_json;
+	cbl_dnode_apipath;
+	cbl_msg_ydtree;
+	cbl_yorigin_set;
 	cbl_dnode_meta_set;
 	cbl_dnode_meta;
 	cbl_dnode_meta_next;

@@ -54,6 +54,12 @@ int	cbl_yds_of(cbl_req *req, enum cbl_yds_name *ds, bool *said);
 /* A tree read as RFC 6243's mode wd says (CBLINK_GET_WITH_DEFAULTS_*). */
 struct cbl_dtree;
 int	cbl_ywd_apply(struct cbl_dtree *t, int wd);
+/* A GET's annotations on t, what goes into the reply: with origin,
+ * ietf-origin's (RFC 8342 section 5.3.4); with tagged, ietf-defaults'
+ * default (RFC 6243's report-all-tagged).  running as a tree. */
+int	cbl_yget_annotate(cbl_req *req, struct cbl_dtree *t, bool origin,
+	    bool tagged);
+int	cbl_yds_running(cbl_req *req, struct cbl_dtree **tp);
 int	cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 	    const char *xpath, enum cbl_yds_name ds, int wd);
 int	cbl_yds_edit(cbl_req *req, const cbl_msg *msg);

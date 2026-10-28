@@ -204,8 +204,8 @@ config_sids(cbl_ctx *ctx, bool edit, uint64_t **vp, size_t *np)
 
 /* running as a tree, *tp: the configuration nodes the handlers read,
  * read for running. */
-static int
-running_tree(cbl_req *req, cbl_dtree **tp)
+int
+cbl_yds_running(cbl_req *req, cbl_dtree **tp)
 {
 	cbl_ctx *ctx = req->conn != NULL ? req->conn->ctx : NULL;
 	uint64_t *v;
@@ -370,6 +370,8 @@ rollback(struct cbl_yds *d, cbl_conn *conn)
 			/* The access rules put back: read again. */
 			if (strcmp(f.n->module->name, "ietf-netconf-acm") == 0)
 				cbl_ynacm_changed(d->ctx);
+			/* On-change subscriptions told. */
+			cbl_ysub_changed(d->ctx, f.n);
 		}
 		if (error != 0 && d->undo_failed != NULL)
 			d->undo_failed(d->ctx, f.n, error, r.err_msg != NULL ?
@@ -526,7 +528,7 @@ cbl_yds_of(cbl_req *req, enum cbl_yds_name *ds, bool *said)
  * the user may not read and what xpath does not select left out. */
 static int
 put_tree(cbl_req *req, cbl_msg *reply, cbl_dtree *t, const uint64_t *v,
-    size_t n, const char *xpath)
+    size_t n, const char *xpath, int wd)
 {
 	struct cbl_ybuf b = { NULL, 0, 0 };
 	cbl_dtree *ft = NULL;
@@ -551,6 +553,13 @@ put_tree(cbl_req *req, cbl_msg *reply, cbl_dtree *t, const uint64_t *v,
 	if (xpath != NULL && (ft = cbl_dtree_filter_xpath(t, xpath, why,
 	    sizeof(why))) == NULL)
 		return (cbl_ysay(req, EINVAL, 0, "invalid-value", why));
+	/* A filter's copy has no annotations: made on what goes. */
+	if (wd == CBLINK_GET_WITH_DEFAULTS_REPORT_ALL_TAGGED &&
+	    (error = cbl_yget_annotate(req, ft != NULL ? ft : t, false,
+	    true)) != 0) {
+		cbl_dtree_free(ft);
+		return (error);
+	}
 	for (c = cbl_dnode_first(cbl_dtree_root(ft != NULL ? ft : t));
 	    error == 0 && c != NULL; c = cbl_dnode_next(c)) {
 		if ((error = cbl_dnode_encode(c, &b)) == 0)
@@ -579,10 +588,10 @@ cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 	pthread_mutex_unlock(&d->lock);
 	if (t == NULL && ds == CBL_YDS_CANDIDATE && d->cand != NULL)
 		return (ENOMEM);
-	if (t == NULL && (error = running_tree(req, &t)) != 0)
+	if (t == NULL && (error = cbl_yds_running(req, &t)) != 0)
 		return (error);
 	if ((error = cbl_ywd_apply(t, wd)) == 0)
-		error = put_tree(req, reply, t, v, n, xpath);
+		error = put_tree(req, reply, t, v, n, xpath, wd);
 	cbl_dtree_free(t);
 	return (error);
 }
@@ -657,7 +666,7 @@ cbl_yds_edit(cbl_req *req, const cbl_msg *msg)
 	if (body == NULL || body->count == 0)
 		return (0);
 	pthread_mutex_lock(&d->lock);
-	if (d->cand == NULL && (error = running_tree(req, &d->cand)) != 0) {
+	if (d->cand == NULL && (error = cbl_yds_running(req, &d->cand)) != 0) {
 		pthread_mutex_unlock(&d->lock);
 		return (error);
 	}
@@ -767,7 +776,7 @@ apply(cbl_req *req, struct cbl_yds *d, struct change **chp, size_t *nchp,
 	*nchp = 0;
 	if (d->cand == NULL)
 		return (0);
-	if ((error = running_tree(req, &run)) != 0 ||
+	if ((error = cbl_yds_running(req, &run)) != 0 ||
 	    (error = config_sids(req->conn->ctx, true, &v, &n)) != 0)
 		goto out;
 	if (n > 0 && (ch = calloc(n, sizeof(*ch))) == NULL) {
@@ -837,10 +846,13 @@ apply(cbl_req *req, struct cbl_yds *d, struct change **chp, size_t *nchp,
 		req->err_ytag = ytag;
 		req->err_ysid = ysid;
 	}
-	/* The access rules changed, or were put back: read again. */
-	for (size_t i = 0; i < nch; i++)
+	/* The access rules changed, or were put back: read again; the
+	 * on-change subscriptions told. */
+	for (size_t i = 0; i < nch; i++) {
 		if (strcmp(ch[i].f.n->module->name, "ietf-netconf-acm") == 0)
 			cbl_ynacm_changed(req->conn->ctx);
+		cbl_ysub_changed(req->conn->ctx, ch[i].f.n);
+	}
 out:
 	free(v);
 	cbl_dtree_free(run);

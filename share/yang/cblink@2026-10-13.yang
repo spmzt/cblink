@@ -458,13 +458,34 @@ module cblink {
           description
             "A leaf at its default left out.";
         }
+        enum report-all-tagged {
+          description
+            "As report-all, each leaf whose value is its default
+             annotated so, ietf-defaults' 'default' true (the
+             server's modules must have ietf-defaults).";
+        }
       }
       description
         "How defaults are read (RFC 6243 section 3); without it,
-         explicit.  report-all-tagged waits on an annotation of the
-         default in YANG-CBOR.";
+         explicit.";
       reference
-        "RFC 6243: With-defaults Capability for NETCONF, Section 3";
+        "RFC 6243: With-defaults Capability for NETCONF, Section 3;
+         draft-ietf-netconf-default-attribute: YANG Model for the
+         NETCONF default attribute";
+    }
+    leaf with-origin {
+      type empty;
+      description
+        "Of the operational datastore alone: each configuration node
+         annotated with ietf-origin's 'origin' where it differs from
+         its parent's (the server's modules must have ietf-origin):
+         'intended' where running has the node (a leaf, with the same
+         value), 'default' where it is a default in use, 'unknown'
+         otherwise, a server telling not where else it came from.";
+      reference
+        "RFC 8342: Network Management Datastore Architecture (NMDA),
+         Section 5.3.4; RFC 8527: RESTCONF Extensions to Support the
+         NMDA, Section 3.2.2";
     }
   }
 

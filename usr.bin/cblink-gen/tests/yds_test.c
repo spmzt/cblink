@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cbl_data.h"
 #include "cbl_net_test.h"
 #include "ydsh.h"
 
@@ -35,6 +36,7 @@ static struct {
 	int	 undo_fails;	/* how often an undo failed */
 	int	 edits;		/* how often the handler was asked */
 	int	 level;		/* reported as set; 0: not reported */
+	bool	 learned;	/* c in the operational state alone */
 } kept;
 
 static const struct cbl_ynode *
@@ -70,7 +72,6 @@ cfg_get(cbl_req *req, void *data, cbl_yarena *a)
 	struct dsdemo_cfg *c;
 	char *b;
 
-	(void)req;
 	kept.hits++;
 	if (!kept.have)
 		return (0);
@@ -87,6 +88,9 @@ cfg_get(cbl_req *req, void *data, cbl_yarena *a)
 		c->has_level = true;
 		c->level = (uint8_t)kept.level;
 	}
+	if (kept.learned &&
+	    cbl_req_ydatastore(req) == CBL_YDS_OPERATIONAL)
+		c->c = "learned";
 	d->cfg = c;
 	return (0);
 }
@@ -522,6 +526,110 @@ ATF_TC_BODY(with_defaults, tc)
 	teardown(&f);
 }
 
+/* A GET of ds (-1: none said) with origin and wd, its reply as RFC
+ * 7951's JSON with RFC 7952's annotations; NULL: refused, *errp. */
+static char *
+get_json(struct fixture *f, int ds, enum cbl_ywd wd, bool origin, int *errp)
+{
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	cbl_msg *m, *r = NULL;
+	cbl_dtree *t;
+	char why[128], *s;
+
+	ATF_REQUIRE_EQ(0, cbl_msg_new(f->cctx, CBL_YANG_FAMILY, CBL_YCMD_GET,
+	    0, &m));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yget_opts(m, &n_cfg->sid, 1, NULL, wd,
+	    origin));
+	if (ds >= 0)
+		ATF_REQUIRE_EQ(0, cbl_msg_set_datastore(m, ds));
+	if ((*errp = cbl_request(f->c, m, &r, 5000)) != 0) {
+		cbl_msg_free(r);
+		return (NULL);
+	}
+	ATF_REQUIRE((t = cbl_dtree_new(&ydsh_schema)) != NULL);
+	ATF_REQUIRE_EQ_MSG(0, cbl_msg_ydtree(r, t, CBL_YD_STRICT, why,
+	    sizeof(why)), "%s", why);
+	ATF_REQUIRE_EQ(0, cbl_dtree_json(t, &b));
+	ATF_REQUIRE((s = strndup((const char *)b.p, b.len)) != NULL);
+	cbl_ybuf_free(&b);
+	cbl_dtree_free(t);
+	cbl_msg_free(r);
+	return (s);
+}
+
+/* The server's word on where c came from. */
+static const char *
+learned_c(const cbl_dnode *n, void *arg)
+{
+
+	ATF_CHECK(arg == &kept);
+	return (strcmp(cbl_dnode_schema(n)->name, "c") == 0 ? "learned" :
+	    NULL);
+}
+
+/*
+ * RFC 8342's origins on the operational datastore: cfg is running's,
+ * intended, and its leaves with it unsaid; c the state alone has,
+ * unknown, or what the server says; level a default in use, default,
+ * and with report-all-tagged tagged so (RFC 6243); hits, state, none.  Running's has none, and
+ * with-origin is the operational datastore's alone (RFC 8527).
+ */
+ATF_TC_WITHOUT_HEAD(with_origin);
+ATF_TC_BODY(with_origin, tc)
+{
+	struct fixture f;
+	char *s;
+	int error;
+
+	setup(&f);
+	kept.learned = true;
+	s = get_json(&f, -1, CBL_YWD_REPORT_ALL_TAGGED, true, &error);
+	ATF_REQUIRE_MSG(s != NULL, "%s", strerror(error));
+	ATF_CHECK_MSG(strstr(s, "{\"dsdemo:cfg\":{\"@\":{\"ietf-origin:origin\":"
+	    "\"ietf-origin:intended\"},") == s, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "\"a\":1,") != NULL, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "\"@a\"") == NULL, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "\"c\":\"learned\",\"@c\":{"
+	    "\"ietf-origin:origin\":\"ietf-origin:unknown\"}") != NULL, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "\"level\":3,\"@level\":{"
+	    "\"ietf-origin:origin\":\"ietf-origin:default\","
+	    "\"ietf-defaults:default\":true}") != NULL, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "\"hits\":") != NULL &&
+	    strstr(s, "\"@hits\"") == NULL, "%s", s);
+	free(s);
+
+	/* The server says where c came from. */
+	ATF_REQUIRE_EQ(0, cbl_yorigin_set(f.sctx, learned_c, &kept));
+	s = get_json(&f, -1, CBL_YWD_EXPLICIT, true, &error);
+	ATF_REQUIRE(s != NULL);
+	ATF_CHECK_MSG(strstr(s, "\"c\":\"learned\",\"@c\":{"
+	    "\"ietf-origin:origin\":\"ietf-origin:learned\"}") != NULL, "%s",
+	    s);
+	free(s);
+
+	/* Without them, no annotation. */
+	s = get_json(&f, -1, CBL_YWD_REPORT_ALL, false, &error);
+	ATF_REQUIRE(s != NULL);
+	ATF_CHECK_MSG(strchr(s, '@') == NULL, "%s", s);
+	free(s);
+
+	/* report-all-tagged of running: a value set at its default
+	 * tagged too. */
+	kept.level = 3;
+	s = get_json(&f, CBL_YDS_RUNNING, CBL_YWD_REPORT_ALL_TAGGED, false,
+	    &error);
+	ATF_REQUIRE(s != NULL);
+	ATF_CHECK_MSG(strstr(s, "\"level\":3,\"@level\":{"
+	    "\"ietf-defaults:default\":true}") != NULL, "%s", s);
+	ATF_CHECK_MSG(strstr(s, "learned") == NULL, "%s", s);
+	free(s);
+
+	ATF_CHECK(get_json(&f, CBL_YDS_RUNNING, CBL_YWD_EXPLICIT, true,
+	    &error) == NULL);
+	ATF_CHECK_EQ(EINVAL, error);
+	teardown(&f);
+}
+
 /* A commit whose change fails: the handler asked once, the change
  * that failed not undone (RFC 6241 section 7.2 undoes the others). */
 ATF_TC_WITHOUT_HEAD(failed_alone);
@@ -570,5 +678,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, undo_accepts);
 	ATF_TP_ADD_TC(tp, failed_alone);
 	ATF_TP_ADD_TC(tp, with_defaults);
+	ATF_TP_ADD_TC(tp, with_origin);
 	return (atf_no_error());
 }

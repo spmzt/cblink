@@ -375,6 +375,13 @@ int	cbl_yserver_add(cbl_ctx *, const struct cbl_yserver *, void *arg);
 void	*cbl_req_yarg(const cbl_req *);
 int	cbl_req_set_yerr(cbl_req *, const char *text, uint64_t sid);
 int	cbl_msg_put_yget(cbl_msg *, const uint64_t *sids, size_t n);
+/* an XPath filter, RFC 6243's mode, RFC 8342's origins */
+enum cbl_ywd { CBL_YWD_EXPLICIT, CBL_YWD_REPORT_ALL, CBL_YWD_TRIM, CBL_YWD_REPORT_ALL_TAGGED };
+int	cbl_msg_put_yget_xpath(cbl_msg *, const uint64_t *sids, size_t n, const char *xpath);
+int	cbl_msg_put_yget_wd(cbl_msg *, const uint64_t *sids, size_t n, const char *xpath,
+	    enum cbl_ywd);
+int	cbl_msg_put_yget_opts(cbl_msg *, const uint64_t *sids, size_t n, const char *xpath,
+	    enum cbl_ywd, bool origin);
 
 /* the static validator; defaults */
 #define	CBL_YV_EDIT	0x0001	/* config false nodes refused */
@@ -437,6 +444,13 @@ int	cbl_dnode_encode(const cbl_dnode *, struct cbl_ybuf *);
 int	cbl_dtree_decode(cbl_dtree *, const void *, size_t, int flags, char *why,
 	    size_t whylen);
 int	cbl_dtree_encode(const cbl_dtree *, struct cbl_ybuf *);
+/* as RFC 7951's JSON with RFC 7952's annotations; a GET's reply into a tree */
+int	cbl_dtree_json(const cbl_dtree *, struct cbl_ybuf *);
+int	cbl_dnode_apipath(const cbl_dnode *, struct cbl_ybuf *);	/* RFC 8040's api-path */
+int	cbl_msg_ydtree(const cbl_msg *, cbl_dtree *, int flags, char *why, size_t whylen);
+/* a GET's with-origin: what a node running has not came from */
+typedef const char *cbl_yorigin_f(const cbl_dnode *, void *arg);
+int	cbl_yorigin_set(cbl_ctx *, cbl_yorigin_f *, void *arg);
 /* annotations (RFC 7952), in YANG-CBOR as draft-ietf-core-yang-metadata */
 int	cbl_dnode_meta_set(cbl_dnode *, const struct cbl_yannot *, const void *value);
 const void *cbl_dnode_meta(const cbl_dnode *, const struct cbl_yannot *);
@@ -503,8 +517,8 @@ void	cbl_xval_free(struct cbl_xval *);
   server, whatever its value, and takes the defaults made out; trim
   takes out too every leaf whose value is its default and a leaf-list
   whose values are its defaults (never a key). Both take out a
-  non-presence container left empty. report-all-tagged waits for the
-  codec's metadata.
+  non-presence container left empty. report-all-tagged is report-all
+  and the annotations a GET adds (YANG.md).
 - **Edits** are another tree of the schema, each node with an
   operation or its parent's: merge, replace, create (data-exists where
   the node is), delete (data-missing where it is not), remove; the

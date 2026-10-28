@@ -220,7 +220,7 @@ Restrictions (a strict profile of RFC 8949):
 | Item                             | Rule |
 |----------------------------------|------|
 | Indefinite-length items (any)    | MUST NOT be sent; receivers MUST reject. Every collection's size is then known before its contents are read, so limits can be checked before allocation. |
-| Tags (major type 6)              | Only the tags of YANG-CBOR (RFC 9254): 4 on a two-element array, 43 on a text string (bits in a union, by name), 44 on a text string, 45 on an unsigned integer or text string, 46 on an unsigned integer, text string or array, 47 on an unsigned integer; one tag per value, never on the body; on an inner map's key, 47 alone, an absolute SID (RFC 9254 section 4.2.1). Every other tag is rejected. |
+| Tags (major type 6)              | Only the tags of YANG-CBOR (RFC 9254): 4 on a two-element array, 43 on a text string (bits in a union, by name), 44 on a text string, 45 on an unsigned integer or text string, 46 on an unsigned integer, text string or array, 47 on an unsigned integer; 109 (draft-ietf-core-yang-metadata, provisional) on a two-element array, `[metadata, value]`; one tag per value, never on the body; on an inner map's key, 47 alone, an absolute SID (RFC 9254 section 4.2.1). Every other tag is rejected. |
 | Simple values                    | Only `false` (`0xF4`), `true` (`0xF5`) and `null` (`0xF6`). `undefined` and other simple values are rejected. |
 | Floats                           | Half, single and double precision are accepted by the decoder; YANG has none to send. |
 | Map keys                         | MUST be integers (major type 0 or 1). Any other key type is rejected. |

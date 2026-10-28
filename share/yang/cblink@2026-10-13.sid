@@ -2,7 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "cblink",
     "module-revision": "2026-10-13",
-    "sid-file-version": 6,
+    "sid-file-version": 7,
     "sid-file-status": "unpublished",
     "description": "SIDs of cblink, assigned by hand from RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md): not globally unique, so for no operational deployment; numbers are forever within it, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
     "dependency-revision": [
@@ -346,6 +346,11 @@
         "namespace": "data",
         "identifier": "/cblink:get/with-defaults",
         "sid": "60064"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:get/with-origin",
+        "sid": "60065"
       }
     ]
   }

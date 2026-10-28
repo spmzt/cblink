@@ -140,9 +140,13 @@ cbl_ysay(cbl_req *req, int error, uint64_t sid, const char *tag,
 int
 cbl_yfailed(cbl_req *req, int error, uint64_t sid, const char *what)
 {
+	char text[160];
 
-	return (cbl_ysay(req, error, sid, NULL, req->err_msg == NULL ? what :
-	    NULL));
+	/* The handler's own word, or what failed and the errno's. */
+	if (req->err_msg != NULL)
+		return (cbl_ysay(req, error, sid, NULL, NULL));
+	(void)snprintf(text, sizeof(text), "%s: %s", what, strerror(error));
+	return (cbl_ysay(req, error, sid, NULL, text));
 }
 
 /*

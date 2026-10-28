@@ -588,6 +588,26 @@ cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 	pthread_mutex_unlock(&d->lock);
 	if (t == NULL && ds == CBL_YDS_CANDIDATE && d->cand != NULL)
 		return (ENOMEM);
+	/* Running: the nodes asked for alone, read for it; all of it
+	 * where none is named. */
+	if (t == NULL && n > 0) {
+		bool was = req->yds_running;
+
+		req->yds_running = true;
+		error = cbl_yread_tree(req, v, n, &t, NULL);
+		req->yds_running = was;
+		if (error != 0)
+			return (error);
+		if (t == NULL) {
+			pthread_rwlock_rdlock(&req->conn->ctx->famlock);
+			t = req->conn->ctx->nysrv > 0 ? cbl_dtree_new(
+			    req->conn->ctx->ysrv[0].srv->schema) : NULL;
+			pthread_rwlock_unlock(&req->conn->ctx->famlock);
+			if (t == NULL)
+				return (ENOMEM);
+		}
+		prune_state(cbl_dtree_root(t));
+	}
 	if (t == NULL && (error = cbl_yds_running(req, &t)) != 0)
 		return (error);
 	if ((error = cbl_ywd_apply(t, wd)) == 0)

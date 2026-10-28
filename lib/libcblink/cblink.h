@@ -172,6 +172,7 @@ enum cbl_transport {
 #define	CBL_LF_UNIX_TRUSTED	0x0004u	/* AF_UNIX peers are authenticated */
 #define	CBL_LF_PROXY		0x0008u	/* tcp: PROXY protocol header first */
 #define	CBL_CF_NONBLOCK		0x0100u	/* connect returns EINPROGRESS */
+#define	CBL_CF_ACCEPT		0x0200u	/* cbl_conn_new_fd(): the accepting side */
 
 /* Event loop. */
 #define	CBL_TF_REPEAT		0x0001u
@@ -238,6 +239,8 @@ struct cbl_conn_cbs {
 int		 cbl_ctx_set_conn_cbs(cbl_ctx *ctx,
 		    const struct cbl_conn_cbs *cbs, void *arg);
 int		 cbl_conn_new(cbl_ctx *ctx, const char *uri, uint32_t flags,
+		    cbl_conn **connp);
+int		 cbl_conn_new_fd(cbl_ctx *ctx, int fd, uint32_t flags,
 		    cbl_conn **connp);
 int		 cbl_conn_set_limit(cbl_conn *conn, enum cbl_limit lim,
 		    uint64_t v);

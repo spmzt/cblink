@@ -325,6 +325,69 @@ cbl_conn_new(cbl_ctx *ctx, const char *uri, uint32_t flags,
 	return (0);
 }
 
+/*
+ * A connection over an AF_UNIX stream socket already connected, one
+ * side of a socketpair(2) say, open at once: the peer's credentials by
+ * getpeereid(3), never TLS.  With CBL_CF_ACCEPT this side numbers its
+ * streams as an accepted one does, the other side being the initiator.
+ * The descriptor is the connection's, also when this fails.
+ */
+int
+cbl_conn_new_fd(cbl_ctx *ctx, int fd, uint32_t flags, cbl_conn **connp)
+{
+	struct sockaddr_storage ss;
+	struct cbl_limits lim;
+	socklen_t len = sizeof(ss);
+	cbl_conn *conn;
+	int error, type;
+
+	if (ctx == NULL || fd < 0 || connp == NULL ||
+	    (flags & ~CBL_CF_ACCEPT) != 0) {
+		if (fd >= 0)
+			close(fd);
+		return (EINVAL);
+	}
+	error = 0;
+	if (getsockname(fd, (struct sockaddr *)&ss, &len) == -1)
+		error = errno;
+	else if (ss.ss_family != AF_UNIX)
+		error = EAFNOSUPPORT;
+	else if (len = sizeof(type), getsockopt(fd, SOL_SOCKET, SO_TYPE,
+	    &type, &len) == -1)
+		error = errno;
+	else if (type != SOCK_STREAM)
+		error = EPROTOTYPE;
+	else if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		error = errno;
+	else
+		error = cbl_sock_nonblock(fd);
+	if (error != 0) {
+		close(fd);
+		return (error);
+	}
+	cbl_ctx_freeze(ctx, &lim);
+	if ((error = cbl_conn_alloc(ctx, &lim, &conn)) != 0) {
+		close(fd);
+		return (error);
+	}
+	conn->uri.transport = CBL_TR_UNIX;
+	conn->flags = flags;
+	conn->ops = &cbl_tr_unix_ops;
+	conn->fd = fd;
+	if (getpeereid(fd, &conn->peer.uid, &conn->peer.gid) == 0)
+		conn->peer.has_cred = true;
+	conn->peer.flags |= CBL_PEER_LOCAL;
+	peer_set_addr(conn, NULL, 0);
+	if ((flags & CBL_CF_ACCEPT) != 0)
+		conn->next_stream_id = 2;	/* the acceptor uses even ids */
+	else
+		conn->initiator = true;
+	conn->state = CBL_CS_CONNECTING;
+	cbl_conn_opened(conn);
+	*connp = conn;
+	return (0);
+}
+
 static int
 wait_fd(int fd, short events, int timeout_ms)
 {

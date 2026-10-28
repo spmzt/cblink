@@ -9,6 +9,7 @@ CBLINK_1.0 {
 	cbl_conn_interest;
 	cbl_conn_is_open;
 	cbl_conn_new;
+	cbl_conn_new_fd;
 	cbl_conn_notify;
 	cbl_conn_peer;
 	cbl_conn_process;

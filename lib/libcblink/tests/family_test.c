@@ -866,6 +866,73 @@ ATF_TC_BODY(dump_iterator, tc)
 	teardown(&f);
 }
 
+/*
+ * Over a socketpair: the accepting side served by a loop, the other a
+ * blocking client; the peer is root's, by its credentials; when the
+ * server's side goes, a request fails.  Neither a fd of another kind
+ * nor a flag of another use is taken.
+ */
+ATF_TC_WITHOUT_HEAD(socketpair_conn);
+ATF_TC_BODY(socketpair_conn, tc)
+{
+	cbl_ctx *sctx, *cctx;
+	cbl_family *fam;
+	cbl_loop *loop;
+	cbl_conn *s, *c;
+	cbl_msg *req, *rsp;
+	pthread_t thr;
+	uid_t uid;
+	gid_t gid;
+	char str[64];
+	int sp[2], fd;
+
+	sctx = test_ctx();
+	cctx = test_ctx();
+	ATF_REQUIRE_EQ(0, cbl_family_register(sctx, &test_def, NULL, &fam));
+	ATF_REQUIRE_EQ(0, cbl_loop_new(sctx, &loop));
+	ATF_REQUIRE_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, sp));
+	ATF_REQUIRE_EQ(0, cbl_conn_new_fd(sctx, sp[1], CBL_CF_ACCEPT, &s));
+	ATF_REQUIRE_EQ(0, cbl_conn_attach(s, loop));
+	ATF_REQUIRE_EQ(0, pthread_create(&thr, NULL, loop_thread, loop));
+	ATF_REQUIRE_EQ(0, cbl_conn_new_fd(cctx, sp[0], 0, &c));
+	ATF_REQUIRE(cbl_conn_is_open(c));
+	ATF_REQUIRE_EQ(CBL_TR_UNIX, cbl_conn_transport(c));
+	ATF_REQUIRE_EQ(0, cbl_peer_cred(cbl_conn_peer(c), &uid, &gid));
+	ATF_REQUIRE_EQ(geteuid(), uid);
+
+	cbl_msg_new(cctx, cbl_family_id(fam), T_ECHO, 0, &req);
+	t_put_str(req, TA_VAL, "pair");
+	ATF_REQUIRE_EQ(0, cbl_request(c, req, &rsp, 2000));
+	ATF_REQUIRE(t_get_str(rsp, TA_VAL, str, sizeof(str)));
+	ATF_REQUIRE_STREQ("pair", str);
+	cbl_msg_free(rsp);
+	ATF_REQUIRE_EQ(0, cbl_ping(c, 2000));
+
+	cbl_conn_free(s);
+	cbl_msg_new(cctx, cbl_family_id(fam), T_ECHO, 0, &req);
+	t_put_str(req, TA_VAL, "gone");
+	ATF_REQUIRE(cbl_request(c, req, &rsp, 2000) != 0);
+	cbl_msg_free(rsp);
+	cbl_conn_free(c);
+
+	ATF_REQUIRE((fd = socket(AF_INET, SOCK_STREAM, 0)) != -1);
+	ATF_REQUIRE_EQ(EAFNOSUPPORT, cbl_conn_new_fd(cctx, fd, 0, &c));
+	ATF_REQUIRE_EQ(0, socketpair(AF_UNIX, SOCK_DGRAM, 0, sp));
+	ATF_REQUIRE_EQ(EPROTOTYPE, cbl_conn_new_fd(cctx, sp[0], 0, &c));
+	close(sp[1]);
+	ATF_REQUIRE_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, sp));
+	ATF_REQUIRE_EQ(EINVAL, cbl_conn_new_fd(cctx, sp[0], CBL_PLAINTEXT,
+	    &c));
+	close(sp[1]);
+
+	ATF_REQUIRE_EQ(0, cbl_loop_stop(loop));
+	pthread_join(thr, NULL);
+	cbl_loop_free(loop);
+	ATF_REQUIRE_EQ(0, cbl_family_unregister(fam));
+	cbl_ctx_free(sctx);
+	cbl_ctx_free(cctx);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, dump_iterator);
@@ -880,5 +947,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, unread_replies_kept);
 	ATF_TP_ADD_TC(tp, slow_dump_consumer);
 	ATF_TP_ADD_TC(tp, inflight_limit);
+	ATF_TP_ADD_TC(tp, socketpair_conn);
 	return (atf_no_error());
 }

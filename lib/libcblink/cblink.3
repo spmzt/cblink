@@ -336,6 +336,13 @@ accept connections;
 and
 .Fn cbl_conn_connect
 open one.
+.Fn cbl_conn_new_fd
+makes one, open at once, of an
+.Ux Ns -domain
+stream socket already connected, a side of a
+.Xr socketpair 2 ;
+one side passes
+.Dv CBL_CF_ACCEPT .
 TLS is configured with a
 .Vt cbl_tls
 .Pq Fn cbl_tls_new , Fn cbl_tls_set_cert , Fn cbl_tls_set_ca , Fn cbl_tls_set_crl ,

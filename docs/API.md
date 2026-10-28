@@ -200,6 +200,7 @@ Endpoints are given as URIs:
 #define	CBL_LF_UNIX_TRUSTED	0x0004	/* AF_UNIX: treat peers as authenticated */
 #define	CBL_LF_PROXY		0x0008	/* tcp listener: a PROXY protocol header comes first (TRANSPORTS.md) */
 #define	CBL_CF_NONBLOCK		0x0100	/* cbl_conn_connect() returns EINPROGRESS */
+#define	CBL_CF_ACCEPT		0x0200	/* cbl_conn_new_fd(): this side accepts */
 
 int	cbl_listener_new(cbl_ctx *, const char *uri, uint32_t flags, cbl_listener **);
 int	cbl_listener_set_tls(cbl_listener *, cbl_tls *);	/* also on a started TLS listener */
@@ -211,6 +212,12 @@ const char *cbl_listener_errstr(const cbl_listener *);
 void	cbl_listener_free(cbl_listener *);
 
 int	cbl_conn_new(cbl_ctx *, const char *uri, uint32_t flags, cbl_conn **);
+/*
+ * A connected AF_UNIX stream socket (a socketpair(2)'s side, say) as a
+ * connection, open at once; the fd is the connection's even on failure.
+ * One side passes CBL_CF_ACCEPT, numbering its streams as an accepted one.
+ */
+int	cbl_conn_new_fd(cbl_ctx *, int fd, uint32_t flags, cbl_conn **);
 int	cbl_conn_set_tls(cbl_conn *, cbl_tls *);
 int	cbl_conn_set_limit(cbl_conn *, enum cbl_limit, uint64_t);
 int	cbl_conn_connect(cbl_conn *);		/* blocking unless CBL_CF_NONBLOCK */

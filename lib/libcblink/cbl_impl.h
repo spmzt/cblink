@@ -180,8 +180,12 @@ void	cbl_ynacm_free(cbl_ctx *ctx);
 void	cbl_yds_req_free(cbl_req *req);
 void	cbl_yds_conn_closed(cbl_conn *conn);
 void	cbl_yds_free(cbl_ctx *ctx);
+/* cbl_ysub.c: the configured subscriptions ended, their threads waited
+ * for. */
+void	cbl_ysub_free(cbl_ctx *ctx);
 
 struct cbl_ysub_replay;
+struct cbl_ysub_rcv;
 struct cbl_ynacm;
 struct timespec;
 
@@ -231,6 +235,22 @@ struct cbl_ctx {
 	 * SIDs), ysublock's. */
 	uint64_t		*ytold;
 	size_t			 nytold;
+	/* Its configured subscriptions (cbl_ysub.c), ysublock's: each, the
+	 * configuration they were made from, the connection their reads
+	 * are made on, the program's transport to their receivers, the
+	 * threads they run (ycv told when one ends). */
+	TAILQ_HEAD(, cbl_ysub)	 ycsubs;
+	struct cbl_dtree	*ycfg;
+	struct cbl_conn		*yconn;
+	int			(*ytr_connect)(struct cbl_ysub_rcv *, void *);
+	int			(*ytr_send)(struct cbl_ysub_rcv *, uint64_t,
+				    const uint8_t *, size_t,
+				    const struct timespec *, void *);
+	void			(*ytr_disconnect)(struct cbl_ysub_rcv *,
+				    void *);
+	void			*ytr_arg;
+	unsigned		 ycthreads;
+	pthread_cond_t		 ycv;
 	/* Who a request is for (cbl_ynacm.c), and NACM's rules as last
 	 * read, read again once nacmgen moves; its counters. */
 	cbl_user_f		*user_fn;

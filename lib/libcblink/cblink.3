@@ -255,6 +255,24 @@ names the top-level nodes whose changes the program tells by
 an on-change subscription that reads only those is read when told, a
 dampening period after its last read at the soonest, not every period.
 .Pp
+Configured subscriptions (RFC 8639 section 2.5, the configured feature)
+are running's subscriptions list, which the program keeps and tells
+.Fn cbl_ysub_configure
+whenever it changes, from its edit handler of the container and at its
+start: each entry is made, changed or ended by the difference from what
+was told last, its receivers told subscription-started, -modified or
+-terminated.
+Their records go through the transport the program gives
+.Fn cbl_ysub_set_transport :
+a function that connects a receiver (an error: tried again later, a
+second on and doubling to a minute), one that sends it a record (an
+error: it is down, what it misses excluded), one that disconnects it;
+each on a thread of the subscription's own.
+A stream subscription with configured-replay is replayed to a receiver
+connected again from the last record it had, by the program's replay.
+.Fn cbl_ysub_reset
+has a receiver connected anew, for its reset action.
+.Pp
 NACM (RFC 8341) is checked where a served module set has
 ietf-netconf-acm and a get handler for its nacm container, as the user
 .Fn cbl_req_user

@@ -131,8 +131,11 @@ resync_rpc(cbl_req *req, const void *in, void *out, cbl_yarena *a)
 	    ((const struct ietf_yang_push_resync_subscription_input *)in)->id));
 }
 
-/* The alerts kept, two, a minute and a half and a minute old. */
+/* The alerts kept, two, a minute and a half and a minute old; and,
+ * with missed set, one kept just now (a configured subscription's
+ * receiver missed it). */
 static struct timespec kept_at[2];
+static atomic_bool missed;
 
 static int
 replay(const struct timespec *from, struct cbl_ysub_replay *r, void *arg)
@@ -141,6 +144,9 @@ replay(const struct timespec *from, struct cbl_ysub_replay *r, void *arg)
 		{ .level = "high", .text = "old 1" },
 		{ .level = "low", .text = "old 2" },
 	};
+	static const struct subdemo_alert late = { .level = "high",
+	    .text = "missed" };
+	struct timespec now;
 
 	(void)from;
 	(void)arg;
@@ -148,6 +154,11 @@ replay(const struct timespec *from, struct cbl_ysub_replay *r, void *arg)
 	for (int i = 0; i < 2; i++)
 		ATF_REQUIRE_EQ(0, cbl_ysub_replay_emit(r, n_alert, &kept[i],
 		    &kept_at[i]));
+	if (atomic_load(&missed)) {
+		clock_gettime(CLOCK_REALTIME, &now);
+		ATF_REQUIRE_EQ(0, cbl_ysub_replay_emit(r, n_alert, &late,
+		    &now));
+	}
 	cbl_ysub_replay_live(r);
 	return (0);
 }
@@ -906,6 +917,10 @@ ATF_TC_BODY(resync, tc)
 	teardown(&f);
 }
 
+/* What cbl_ysub_each() tells, copied: a configured subscription's
+ * receivers' into a place that outlives the call. */
+static struct cbl_ysub_rcv_info rcvs_kept[4][2];
+
 static int
 collect(const struct cbl_ysub_info *in, void *arg)
 {
@@ -915,6 +930,13 @@ collect(const struct cbl_ysub_info *in, void *arg)
 		if (v[i].id == 0) {
 			v[i] = *in;
 			v[i].stream = v[i].xpath = v[i].receiver = NULL;
+			v[i].nrcvs = in->nrcvs < 2 ? in->nrcvs : 2;
+			for (size_t k = 0; k < v[i].nrcvs; k++) {
+				rcvs_kept[i][k] = in->rcvs[k];
+				rcvs_kept[i][k].name = NULL;
+				rcvs_kept[i][k].instance = NULL;
+			}
+			v[i].rcvs = rcvs_kept[i];
 			return (0);
 		}
 	return (ENOSPC);
@@ -950,9 +972,258 @@ ATF_TC_BODY(each_kill, tc)
 	teardown(&f);
 }
 
+/*
+ * A stand-in transport for the configured subscriptions: what it is
+ * told, as the client keeps it; down, it refuses to connect and fails
+ * a send.
+ */
+static struct cli tr_cli;
+static atomic_bool tr_down;
+static atomic_int tr_connects, tr_disconnects;
+static char tr_name[32], tr_instance[32];
+
+static int
+tr_connect(struct cbl_ysub_rcv *r, void *arg)
+{
+
+	ATF_REQUIRE_EQ(arg, (void *)&tr_cli);
+	strlcpy(tr_name, r->name, sizeof(tr_name));
+	strlcpy(tr_instance, r->instance != NULL ? r->instance : "",
+	    sizeof(tr_instance));
+	if (atomic_load(&tr_down))
+		return (ECONNREFUSED);
+	r->arg = tr_name;
+	tr_connects++;
+	return (0);
+}
+
+static int
+tr_send(struct cbl_ysub_rcv *r, uint64_t sid, const uint8_t *content,
+    size_t len, const struct timespec *when, void *arg)
+{
+	struct cli *c = arg;
+	struct cbl_ybuf b = { 0 };
+	const struct cbl_ynode *n;
+	cbl_yarena *a;
+	struct tm tm;
+	char buf[32];
+	void *p;
+	ATF_REQUIRE_EQ(r->arg, (void *)tr_name);
+	if (atomic_load(&tr_down))
+		return (EPIPE);
+	c->arrived++;
+	if ((a = cbl_yarena_new()) == NULL)
+		return (ENOMEM);
+	if ((n = cbl_yschema_node(&ysubh_schema, sid)) != NULL &&
+	    (p = cbl_yarena_alloc(a, n->size)) != NULL &&
+	    cbl_ydecode(n, content, len, p, a, CBL_YD_STRICT, NULL, 0) == 0 &&
+	    cbl_yjson(n, p, &b) == 0) {
+		gmtime_r(&when->tv_sec, &tm);
+		strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+		pthread_mutex_lock(&c->mtx);
+		if (c->records < (int)nitems(c->json)) {
+			c->json[c->records] = strndup((const char *)b.p,
+			    b.len);
+			c->kind[c->records] = n->name;
+			c->when[c->records] = strdup(buf);
+		}
+		c->records++;
+		pthread_mutex_unlock(&c->mtx);
+	}
+	cbl_ybuf_free(&b);
+	cbl_yarena_free(a);
+	return (0);
+}
+
+static void
+tr_disconnect(struct cbl_ysub_rcv *r, void *arg)
+{
+
+	(void)arg;
+	ATF_REQUIRE_EQ(r->arg, (void *)tr_name);
+	tr_disconnects++;
+}
+
+static const struct cbl_ysub_transport tr = {
+	.connect = tr_connect,
+	.send = tr_send,
+	.disconnect = tr_disconnect,
+};
+
+typedef struct ietf_subscribed_notifications_subscriptions_subscription
+    cfg_sub;
+#define	CS(x)	IETF_SUBSCRIBED_NOTIFICATIONS_SUBSCRIPTIONS_SUBSCRIPTION_##x
+
+/* running's subscriptions: one of id, the NETCONF stream filtered by
+ * xpath, replayed to a receiver connected again, to receiver "console"
+ * (no receiver instance: that module is the program's); told to the
+ * server. */
+static int
+configure(struct fixture *f, uint32_t id, const char *xpath, bool replay_it,
+    char *why, size_t whylen)
+{
+	struct ietf_subscribed_notifications data = { 0 };
+	struct ietf_subscribed_notifications_subscriptions subs = { 0 };
+	struct ietf_subscribed_notifications_subscriptions_subscription_receivers
+	    rs = { 0 };
+	struct ietf_subscribed_notifications_subscriptions_subscription_receivers_receiver
+	    r = { .name = "console" };
+	cfg_sub s = { 0 };
+
+	s.id = id;
+	s.target = CS(TARGET_STREAM);
+	s.stream = "NETCONF";
+	if (xpath != NULL) {
+		s.stream_filter = CS(STREAM_FILTER_WITHIN_SUBSCRIPTION);
+		s.filter_spec = CS(FILTER_SPEC_STREAM_XPATH_FILTER);
+		s.stream_xpath_filter = xpath;
+	}
+	s.configured_replay = replay_it;
+	rs.receiver.n = 1;
+	rs.receiver.v = &r;
+	s.receivers = &rs;
+	subs.subscription.n = id != 0 ? 1 : 0;
+	subs.subscription.v = &s;
+	data.subscriptions = &subs;
+	return (cbl_ysub_configure(f->sctx, top("ietf-subscribed-notifications",
+	    "subscriptions"), &data, why, whylen));
+}
+
+/*
+ * A configured subscription made by the configuration: its receiver
+ * connected and told subscription-started, the stream's records sent
+ * it; down, what it misses is excluded, connected again it is told
+ * subscription-started with the time of the last record it had, what
+ * was kept since replayed, then replay-completed; a change of the
+ * filter told subscription-modified; taken out of the configuration,
+ * subscription-terminated and disconnected.
+ */
+ATF_TC_WITHOUT_HEAD(configured);
+ATF_TC_BODY(configured, tc)
+{
+	struct subdemo_alert live = { .level = "high", .text = "now" };
+	struct subdemo_alert lost = { .level = "high", .text = "lost" };
+	struct subdemo_alert low = { .level = "low", .text = "quiet" };
+	struct cbl_ysub_info v[4];
+	struct fixture f;
+	char why[160];
+
+	setup(&f);
+	cli_init(&tr_cli);
+	atomic_store(&tr_down, false);
+	atomic_store(&missed, false);
+	tr_connects = tr_disconnects = 0;
+	ATF_REQUIRE_EQ(0, cbl_ysub_set_transport(f.sctx, &tr, &tr_cli));
+	/* Refused: no receiver, a bad filter; nothing is made. */
+	{
+		struct ietf_subscribed_notifications data = { 0 };
+		struct ietf_subscribed_notifications_subscriptions subs = { 0 };
+		cfg_sub s = { .id = 3, .target = CS(TARGET_STREAM),
+		    .stream = "NETCONF" };
+
+		subs.subscription.n = 1;
+		subs.subscription.v = &s;
+		data.subscriptions = &subs;
+		int error = cbl_ysub_configure(f.sctx,
+		    top("ietf-subscribed-notifications", "subscriptions"),
+		    &data, why, sizeof(why));
+
+		ATF_REQUIRE_EQ_MSG(EINVAL, error, "%d: %s", error, why);
+		ATF_REQUIRE_MATCH("subscription 3: .*receiver", why);
+	}
+	ATF_REQUIRE_EQ_MSG(EINVAL, configure(&f, 7, "/subdemo:alert[", true,
+	    why, sizeof(why)), "%s", why);
+	ATF_REQUIRE_MATCH("subscription 7: ", why);
+	memset(v, 0, sizeof(v));
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, collect, v));
+	ATF_REQUIRE_EQ(0, v[0].id);
+	/* Made: connected, started; a record of the stream sent. */
+	ATF_REQUIRE_EQ_MSG(0, configure(&f, 7, NULL, true, why, sizeof(why)),
+	    "%s", why);
+	/* A replay from when it was made first: nothing kept since, told
+	 * complete. */
+	wait_for(&tr_cli.records, 2, 3000);
+	ATF_REQUIRE_EQ(2, tr_cli.records);
+	ATF_REQUIRE_STREQ("console", tr_name);
+	ATF_REQUIRE_STREQ("", tr_instance);
+	ATF_REQUIRE_STREQ("subscription-started", tr_cli.kind[0]);
+	ATF_REQUIRE_MATCH("\"id\":7,.*\"stream\":\"NETCONF\"", tr_cli.json[0]);
+	ATF_REQUIRE_STREQ("replay-completed", tr_cli.kind[1]);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &live));
+	wait_for(&tr_cli.records, 3, 3000);
+	ATF_REQUIRE_EQ(3, tr_cli.records);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"now\"}",
+	    tr_cli.json[2]);
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, collect, v));
+	ATF_REQUIRE_EQ(7, v[0].id);
+	ATF_REQUIRE(v[0].configured);
+	ATF_REQUIRE_EQ(1, v[0].nrcvs);
+	ATF_REQUIRE_EQ(CBL_YSUB_RCV_ACTIVE, v[0].rcvs[0].state);
+	ATF_REQUIRE_EQ(3, v[0].rcvs[0].sent);
+	/* Down: the send fails, the receiver disconnected; what comes
+	 * meanwhile is excluded.  Up again a second on: started, with
+	 * the last record's time, what was kept since replayed. */
+	atomic_store(&tr_down, true);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &lost));
+	wait_for(&tr_disconnects, 1, 3000);
+	ATF_REQUIRE_EQ(1, tr_disconnects);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &lost));
+	usleep(100000);
+	memset(v, 0, sizeof(v));
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, collect, v));
+	ATF_REQUIRE_EQ(CBL_YSUB_RCV_CONNECTING, v[0].rcvs[0].state);
+	ATF_REQUIRE(v[0].rcvs[0].excluded >= 1);
+	atomic_store(&missed, true);
+	atomic_store(&tr_down, false);
+	wait_for(&tr_cli.records, 6, 5000);
+	ATF_REQUIRE_EQ(6, tr_cli.records);
+	ATF_REQUIRE_EQ(2, tr_connects);
+	ATF_REQUIRE_STREQ("subscription-started", tr_cli.kind[3]);
+	ATF_REQUIRE_MATCH("\"replay-previous-event-time\":\"20", tr_cli.json[3]);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"missed\"}",
+	    tr_cli.json[4]);
+	ATF_REQUIRE_STREQ("replay-completed", tr_cli.kind[5]);
+	/* The filter changed: told subscription-modified; what the filter
+	 * leaves out is not sent. */
+	ATF_REQUIRE_EQ_MSG(0, configure(&f, 7, "/subdemo:alert[level='high']",
+	    true, why, sizeof(why)), "%s", why);
+	wait_for(&tr_cli.records, 7, 3000);
+	ATF_REQUIRE_EQ(7, tr_cli.records);
+	ATF_REQUIRE_STREQ("subscription-modified", tr_cli.kind[6]);
+	ATF_REQUIRE_MATCH("\"stream-xpath-filter\":\"/subdemo:alert",
+	    tr_cli.json[6]);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &low));
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &live));
+	wait_for(&tr_cli.records, 8, 3000);
+	usleep(100000);
+	ATF_REQUIRE_EQ(8, tr_cli.records);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"now\"}",
+	    tr_cli.json[7]);
+	/* The same again: nothing happens. */
+	ATF_REQUIRE_EQ_MSG(0, configure(&f, 7, "/subdemo:alert[level='high']",
+	    true, why, sizeof(why)), "%s", why);
+	usleep(100000);
+	ATF_REQUIRE_EQ(8, tr_cli.records);
+	ATF_REQUIRE_EQ(2, tr_connects);
+	/* Taken out: terminated, disconnected, gone from the list. */
+	ATF_REQUIRE_EQ_MSG(0, configure(&f, 0, NULL, false, why, sizeof(why)),
+	    "%s", why);
+	wait_for(&tr_disconnects, 2, 3000);
+	ATF_REQUIRE_EQ(2, tr_disconnects);
+	ATF_REQUIRE_EQ(9, tr_cli.records);
+	ATF_REQUIRE_STREQ("subscription-terminated", tr_cli.kind[8]);
+	ATF_REQUIRE_MATCH("no-such-subscription", tr_cli.json[8]);
+	memset(v, 0, sizeof(v));
+	ATF_REQUIRE_EQ(0, cbl_ysub_each(f.sctx, collect, v));
+	ATF_REQUIRE_EQ(0, v[0].id);
+	cli_fini(&tr_cli);
+	teardown(&f);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
+	ATF_TP_ADD_TC(tp, configured);
 	ATF_TP_ADD_TC(tp, periodic);
 	ATF_TP_ADD_TC(tp, stream);
 	ATF_TP_ADD_TC(tp, on_change);

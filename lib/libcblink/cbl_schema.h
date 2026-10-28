@@ -788,6 +788,17 @@ uint64_t	 cbl_msg_err_sid(const cbl_msg *msg);
  * copies what it keeps and calls no cbl_ysub_* function; it stops at
  * fn's first error, which it returns.
  */
+/* A configured subscription's receiver, as cbl_ysub_each() tells it. */
+#define	CBL_YSUB_RCV_CONNECTING	0
+#define	CBL_YSUB_RCV_ACTIVE	1
+#define	CBL_YSUB_RCV_SUSPENDED	2
+struct cbl_ysub_rcv_info {
+	const char	*name;
+	const char	*instance;	/* its receiver-instance-ref, or NULL */
+	uint64_t	 sent, excluded;
+	int		 state;		/* CBL_YSUB_RCV_* */
+};
+
 struct cbl_ysub_info {
 	uint32_t	 id;
 	const char	*stream;	/* or NULL: a datastore's */
@@ -802,7 +813,60 @@ struct cbl_ysub_info {
 	uint64_t	 excluded;
 	bool		 suspended;
 	const char	*receiver;	/* the peer's certificate subject */
+	/* A configured one (RFC 8639 section 2.5): its receivers; whether
+	 * its stop-time has come (concluded). */
+	bool		 configured, concluded;
+	const struct cbl_ysub_rcv_info *rcvs;
+	size_t		 nrcvs;
 };
+
+/*
+ * Configured subscriptions (RFC 8639 section 2.5, the configured
+ * feature): those of running's subscriptions container, which the
+ * program keeps and tells cbl_ysub_configure() whenever it changes (its
+ * edit handler of the container, a commit's or an EDIT's, and at its
+ * start with what it kept): subs the container's node, data its
+ * module's data struct (NULL, or without the container: none).  Each
+ * entry of the list is made, changed (its receivers told
+ * subscription-modified) or ended (told subscription-terminated,
+ * no-such-subscription) by the difference from what was told last;
+ * one that cannot be made is refused, said in why, and nothing
+ * changes.  A configured subscription reads as the recovery session
+ * (NACM does not apply: its records go where the configuration says).
+ * Its records go to its receivers by the program's transport
+ * (cbl_ysub_set_transport()), on a thread of the subscription's own:
+ * connect() opens the receiver (0: open, told subscription-started,
+ * active; else an errno, tried again later, a second on and doubling to
+ * a minute); send() one record, notification sid's YANG-CBOR content,
+ * at when (NULL: now) (an errno: the receiver is down, disconnect()
+ * called, what it misses counted excluded, connected again later);
+ * disconnect() when it is taken away or the subscription ends.  arg of
+ * the receiver is the transport's own, kept for it.  A stream
+ * subscription with configured-replay, or a replay-start-time, is
+ * replayed to a receiver connected again from the last record it had
+ * (the program's replay, cbl_ysub_set_replay()), then told
+ * replay-completed.  cbl_ysub_reset() has a receiver connected anew
+ * (its reset action).
+ */
+struct cbl_ysub_rcv {
+	uint32_t	 id;		/* the subscription's */
+	const char	*name;
+	const char	*instance;	/* its receiver-instance-ref, or NULL */
+	void		*arg;		/* the transport's own */
+};
+struct cbl_ysub_transport {
+	int		(*connect)(struct cbl_ysub_rcv *r, void *arg);
+	int		(*send)(struct cbl_ysub_rcv *r, uint64_t sid,
+			    const uint8_t *content, size_t len,
+			    const struct timespec *when, void *arg);
+	void		(*disconnect)(struct cbl_ysub_rcv *r, void *arg);
+};
+int		 cbl_ysub_set_transport(cbl_ctx *ctx,
+		    const struct cbl_ysub_transport *tr, void *arg);
+int		 cbl_ysub_configure(cbl_ctx *ctx,
+		    const struct cbl_ynode *subs, const void *data, char *why,
+		    size_t whylen);
+int		 cbl_ysub_reset(cbl_ctx *ctx, uint32_t id, const char *name);
 
 /*
  * Replay (RFC 8639 section 2.4.2.1, the replay feature): fn, given to

@@ -39,6 +39,19 @@
  * its stream, closed when stop-time comes, on delete or kill; a
  * dynamic subscription's end is its transport's (RFC 8639 section
  * 2.4.2), so no state notification is sent.
+ *
+ * A configured subscription (section 2.5) is an entry of running's
+ * subscriptions list, told by the program (cbl_ysub_configure()) and
+ * kept here beside the dynamic ones: the same reading and filtering, no
+ * stream but receivers, each with the state machine of section 2.5.1
+ * (connecting, active) and a queue of the live records for it.  A
+ * thread of the subscription's own does all its sending through the
+ * program's transport, so that a slow receiver holds no lock and the
+ * receivers are changed by nobody else: it connects those due, told
+ * subscription-started, replays to one connected again what it missed
+ * where the stream is replayed, pushes at each period, drains the queues,
+ * and ends with subscription-terminated (or subscription-completed at
+ * the stop-time, the subscription then concluded).
  */
 
 #include <sys/param.h>
@@ -73,6 +86,12 @@ struct ynodes {
 	const struct cbl_ynode	*n_susp, *n_resumed, *n_modified, *n_replayed,
 				*mod_in, *out_rev;
 	uint64_t		 unsupportable;	/* a suspension's reason */
+	/* A configured subscription's: the list entry, its
+	 * subscription-started, -terminated and -completed; the reason
+	 * no-such-subscription. */
+	const struct cbl_ynode	*entry, *n_started, *n_terminated,
+				*n_completed;
+	uint64_t		 no_such;
 };
 
 /* A record held while a replay is sent, in the order it came. */
@@ -84,10 +103,52 @@ struct yrec {
 	bool			 has_when;
 };
 
+/*
+ * A configured subscription's receiver.  Its list is the subscription
+ * thread's: changed by it alone, under ysublock; read by others under
+ * it.  A new one waits in the subscription's newrcvs until the thread
+ * takes it; one taken out of the configuration is marked gone, the
+ * thread disconnects and frees it.
+ */
+struct yrcv {
+	struct cbl_ysub_rcv	 pub;
+	TAILQ_ENTRY(yrcv)	 link;
+	int			 state;
+	_Atomic uint64_t	 sent, excluded;
+	struct timespec		 retry;		/* connect again then */
+	unsigned		 backoff;	/* seconds */
+	/* The last record's event time and bytes: a replay begins there,
+	 * that record itself not sent again. */
+	struct timespec		 last;
+	bool			 has_last;
+	uint8_t			*lastp;
+	size_t			 lastlen;
+	/* ysublock's: live records waiting for the thread (listed:
+	 * taking them); asked to connect anew; out of the configuration. */
+	struct yrec		*q;
+	size_t			 nq, capq;
+	bool			 listed, reset, gone;
+};
+
 struct cbl_ysub {
 	TAILQ_ENTRY(cbl_ysub)	 link;
 	cbl_ctx			*ctx;
-	cbl_stream		*s;		/* a reference */
+	cbl_stream		*s;		/* a reference; a configured
+						 * subscription's NULL */
+	/* A configured subscription: its entry's bytes, by which a change
+	 * is seen; its receivers (ysublock's, the thread's); told
+	 * subscription-modified at the thread's next turn; replayed to a
+	 * receiver connected again; its stop-time come. */
+	bool			 cfg, configured_replay, modified, concluded;
+	uint8_t			*cfgp;
+	size_t			 cfglen;
+	struct timespec		 made;
+	/* A configure's: still in the configuration; what replaces it;
+	 * why it ends. */
+	bool			 seen;
+	struct cbl_ysub		*repl;
+	uint64_t		 end_reason;
+	TAILQ_HEAD(, yrcv)	 rcvs, newrcvs;
 	struct ynodes		 y;
 	uint32_t		 id;
 	char			*stream;	/* or NULL: a datastore's */
@@ -135,6 +196,13 @@ struct cbl_ysub {
 static bool	selects(const struct cbl_ysub *, const struct cbl_ynode *,
 		    const uint8_t *, size_t);
 static bool	ts_before(const struct timespec *, const struct timespec *);
+static void	rcv_free(struct yrcv *);
+static void	rcvs_free(struct cbl_ysub *);
+static struct cbl_ysub *cfg_find(cbl_ctx *, uint32_t);
+static struct cbl_ysub *sub_find(cbl_ctx *, const cbl_conn *, uint32_t);
+static int	retire(struct cbl_ysub *, void *);
+static int	rec_add(struct yrec **, size_t *, size_t *, uint64_t,
+		    const void *, size_t, const struct timespec *);
 
 static const struct cbl_ymodule *
 mod_named(const struct cbl_yschema *s, const char *name)
@@ -244,7 +312,27 @@ nodes(cbl_ctx *ctx, struct ynodes *y)
 	y->mod_in = child_kind(top_named(m, "modify-subscription"),
 	    CBL_YN_INPUT);
 	y->out_rev = child_named(y->out, "replay-start-time-revision");
+	y->entry = child_named(top_named(m, "subscriptions"), "subscription");
+	y->n_started = top_named(m, "subscription-started");
+	y->n_terminated = top_named(m, "subscription-terminated");
+	y->n_completed = top_named(m, "subscription-completed");
+	for (uint32_t i = 0; i < s->nident; i++) {
+		id = &s->ident[i];
+		if (strcmp(id->name, "no-such-subscription") == 0 &&
+		    strcmp(id->module->name,
+		    "ietf-subscribed-notifications") == 0)
+			y->no_such = id->sid;
+	}
 	return (true);
+}
+
+/* The connection a subscription reads on: its stream's, or the
+ * configured subscriptions' own. */
+static cbl_conn *
+sub_conn(const struct cbl_ysub *sub)
+{
+
+	return (sub->s != NULL ? cbl_stream_conn(sub->s) : sub->ctx->yconn);
 }
 
 /* yang:date-and-time, into ts; false: it is none. */
@@ -378,6 +466,37 @@ targets(struct cbl_ysub *sub)
 }
 
 static void
+rcv_free(struct yrcv *r)
+{
+
+	for (size_t i = 0; i < r->nq; i++)
+		free(r->q[i].p);
+	free(r->q);
+	free(r->lastp);
+	free((char *)(uintptr_t)r->pub.name);
+	free((char *)(uintptr_t)r->pub.instance);
+	free(r);
+}
+
+/* Every receiver freed: the subscription goes, its thread done. */
+static void
+rcvs_free(struct cbl_ysub *sub)
+{
+	struct yrcv *r;
+
+	if (!sub->cfg)
+		return;
+	while ((r = TAILQ_FIRST(&sub->rcvs)) != NULL) {
+		TAILQ_REMOVE(&sub->rcvs, r, link);
+		rcv_free(r);
+	}
+	while ((r = TAILQ_FIRST(&sub->newrcvs)) != NULL) {
+		TAILQ_REMOVE(&sub->newrcvs, r, link);
+		rcv_free(r);
+	}
+}
+
+static void
 sub_rele(struct cbl_ysub *sub)
 {
 
@@ -387,7 +506,10 @@ sub_rele(struct cbl_ysub *sub)
 		return;
 	}
 	pthread_mutex_unlock(&sub->ctx->ysublock);
-	cbl_stream_rele(sub->s);
+	if (sub->s != NULL)
+		cbl_stream_rele(sub->s);
+	rcvs_free(sub);
+	free(sub->cfgp);
 	cbl_dtree_free(sub->last);
 	for (size_t i = 0; i < sub->nheld; i++)
 		free(sub->held[i].p);
@@ -413,10 +535,81 @@ sub_end(struct cbl_ysub *sub)
 
 	sub->dead = true;
 	if (sub->listed) {
-		TAILQ_REMOVE(&sub->ctx->ysubs, sub, link);
+		if (sub->cfg)
+			TAILQ_REMOVE(&sub->ctx->ycsubs, sub, link);
+		else
+			TAILQ_REMOVE(&sub->ctx->ysubs, sub, link);
 		sub->listed = false;
 	}
 	pthread_cond_broadcast(&sub->cv);
+}
+
+/*
+ * A configured subscription's receiver down: what it was to be sent
+ * meanwhile is counted excluded, it is connected again a while on (a
+ * second, doubling to a minute).  The thread's; the transport told
+ * without the lock.
+ */
+static void
+rcv_down(struct cbl_ysub *sub, struct yrcv *r)
+{
+	cbl_ctx *ctx = sub->ctx;
+	bool was;
+
+	pthread_mutex_lock(&ctx->ysublock);
+	was = r->state == CBL_YSUB_RCV_ACTIVE;
+	r->state = CBL_YSUB_RCV_CONNECTING;
+	r->listed = false;
+	atomic_fetch_add(&r->excluded, r->nq);
+	for (size_t i = 0; i < r->nq; i++)
+		free(r->q[i].p);
+	r->nq = 0;
+	(void)clock_gettime(CLOCK_REALTIME, &r->retry);
+	r->retry.tv_sec += r->backoff;
+	r->backoff = r->backoff == 0 ? 1 : r->backoff >= 60 ? 60 :
+	    r->backoff * 2;
+	pthread_mutex_unlock(&ctx->ysublock);
+	if (was && ctx->ytr_disconnect != NULL)
+		ctx->ytr_disconnect(&r->pub, ctx->ytr_arg);
+}
+
+/* One record to one receiver, by the transport; the thread's. */
+static int
+rcv_send(struct cbl_ysub *sub, struct yrcv *r, uint64_t sid,
+    const uint8_t *content, size_t len, const struct timespec *when)
+{
+	cbl_ctx *ctx = sub->ctx;
+	struct timespec now;
+	uint8_t *p;
+	int error;
+
+	if (r->state != CBL_YSUB_RCV_ACTIVE) {
+		atomic_fetch_add(&r->excluded, 1);
+		return (0);
+	}
+	if (ctx->ytr_send == NULL)
+		return (0);
+	if (when == NULL) {
+		(void)clock_gettime(CLOCK_REALTIME, &now);
+		when = &now;
+	}
+	if ((error = ctx->ytr_send(&r->pub, sid, content, len, when,
+	    ctx->ytr_arg)) != 0) {
+		atomic_fetch_add(&r->excluded, 1);
+		rcv_down(sub, r);
+		return (error);
+	}
+	atomic_fetch_add(&r->sent, 1);
+	atomic_fetch_add(&sub->sent, 1);
+	if ((p = malloc(len > 0 ? len : 1)) != NULL) {
+		memcpy(p, content, len);
+		free(r->lastp);
+		r->lastp = p;
+		r->lastlen = len;
+		r->last = *when;
+		r->has_last = true;
+	}
+	return (0);
 }
 
 /*
@@ -430,9 +623,19 @@ static int
 send_at(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
     size_t len, const struct timespec *when, bool state)
 {
+	struct yrcv *r, *next;
 	cbl_msg *m;
 	int error;
 
+	/* A configured subscription's: to each active receiver, on its
+	 * own thread; one that fails is down, the others go on. */
+	if (sub->cfg) {
+		for (r = TAILQ_FIRST(&sub->rcvs); r != NULL; r = next) {
+			next = TAILQ_NEXT(r, link);
+			(void)rcv_send(sub, r, sid, content, len, when);
+		}
+		return (0);
+	}
 	if (!state && atomic_load(&sub->suspended)) {
 		atomic_fetch_add(&sub->excluded, 1);
 		return (0);
@@ -466,7 +669,7 @@ event_ok(struct cbl_ysub *sub, uint64_t sid)
 	if (sub->stream == NULL ||
 	    (n = cbl_yschema_node(sub->y.srv->schema, sid)) == NULL)
 		return (true);
-	return (cbl_ynacm_notif(sub->ctx, cbl_stream_conn(sub->s),
+	return (cbl_ynacm_notif(sub->ctx, sub_conn(sub),
 	    &(struct cbl_ywho){ sub->user, sub->recovery }, n));
 }
 
@@ -484,18 +687,16 @@ send_record(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
  * subscription-modified, what the subscription is now.
  */
 static int
-send_state(struct cbl_ysub *sub, const struct cbl_ynode *n, uint64_t reason)
+state_content(struct cbl_ysub *sub, const struct cbl_ynode *n,
+    uint64_t reason, const char *prev, struct cbl_ybuf *b)
 {
 	const struct cbl_ynode *c, *g;
-	struct cbl_ybuf b = { 0 };
 	cbl_dtree *t;
 	cbl_dnode *dn, *dc;
 	const char *s;
 	uint32_t u;
 	int error;
 
-	if (n == NULL)
-		return (0);
 	if ((t = cbl_dtree_new(sub->y.srv->schema)) == NULL)
 		return (ENOMEM);
 	if ((error = cbl_dnode_add(cbl_dtree_root(t), n, NULL, &dn)) == 0 &&
@@ -504,7 +705,10 @@ send_state(struct cbl_ysub *sub, const struct cbl_ynode *n, uint64_t reason)
 	if (error == 0 && reason != 0 && (c = child_named(n, "reason")) !=
 	    NULL)
 		error = cbl_dnode_add(dn, c, &reason, NULL);
-	if (error == 0 && n == sub->y.n_modified) {
+	if (error == 0 && prev != NULL &&
+	    (c = child_named(n, "replay-previous-event-time")) != NULL)
+		error = cbl_dnode_add(dn, c, &prev, NULL);
+	if (error == 0 && (n == sub->y.n_modified || n == sub->y.n_started)) {
 		if (sub->stream != NULL &&
 		    (c = child_named(n, "stream")) != NULL &&
 		    (error = cbl_dnode_add(dn, c, &sub->stream, NULL)) == 0 &&
@@ -536,10 +740,40 @@ send_state(struct cbl_ysub *sub, const struct cbl_ynode *n, uint64_t reason)
 				error = cbl_dnode_add(dc, c, &s, NULL);
 		}
 	}
-	if (error == 0 && (error = cbl_dnode_encode(dn, &b)) == 0)
+	if (error == 0)
+		error = cbl_dnode_encode(dn, b);
+	cbl_dtree_free(t);
+	return (error);
+}
+
+static int
+send_state(struct cbl_ysub *sub, const struct cbl_ynode *n, uint64_t reason)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (n == NULL)
+		return (0);
+	if ((error = state_content(sub, n, reason, NULL, &b)) == 0)
 		error = send_at(sub, n->sid, b.p, b.len, NULL, true);
 	cbl_ybuf_free(&b);
-	cbl_dtree_free(t);
+	return (error);
+}
+
+/* A state notification to one receiver of a configured subscription,
+ * with replay-previous-event-time prev where it replays. */
+static int
+send_state_to(struct cbl_ysub *sub, struct yrcv *r, const struct cbl_ynode *n,
+    uint64_t reason, const char *prev)
+{
+	struct cbl_ybuf b = { 0 };
+	int error;
+
+	if (n == NULL)
+		return (0);
+	if ((error = state_content(sub, n, reason, prev, &b)) == 0)
+		error = rcv_send(sub, r, n->sid, b.p, b.len, NULL);
+	cbl_ybuf_free(&b);
 	return (error);
 }
 
@@ -607,7 +841,7 @@ read_filtered(struct cbl_ysub *sub, bool *incomplete)
 
 	*incomplete = false;
 	memset(&r, 0, sizeof(r));
-	r.conn = cbl_stream_conn(sub->s);
+	r.conn = sub_conn(sub);
 	r.user = sub->user;
 	r.recovery = sub->recovery;
 	atomic_init(&r.refs, 1);
@@ -1025,12 +1259,16 @@ waits_told(const struct cbl_ysub *sub)
  * An on-change one that waits to be told reads at its tick only once
  * told of a change, or asked to push the whole of it again.
  */
+static bool	cfg_service(struct cbl_ysub *, const struct timespec *,
+		    struct timespec *);
+static void	cfg_finish(struct cbl_ysub *, bool);
+
 static void *
 sub_thread(void *p)
 {
 	struct cbl_ysub *sub = p;
-	struct timespec now, due, wake;
-	bool stop = false;
+	struct timespec now, due, wake, rwake;
+	bool stop = false, has_wake, has_rwake;
 	int error;
 
 	pthread_mutex_lock(&sub->ctx->ysublock);
@@ -1050,45 +1288,64 @@ sub_thread(void *p)
 			stop = true;
 			break;
 		}
-		if (sub->period != 0 && sub->synced && !sub->dirty &&
-		    !atomic_load(&sub->resync) && waits_told(sub)) {
-			if (sub->has_stop)
-				(void)pthread_cond_timedwait(&sub->cv,
-				    &sub->ctx->ysublock, &sub->stop);
-			else
-				(void)pthread_cond_wait(&sub->cv,
-				    &sub->ctx->ysublock);
-			continue;
-		}
-		if (sub->period != 0 && !ts_before(&now, &due)) {
-			sub->dirty = false;
-			pthread_mutex_unlock(&sub->ctx->ysublock);
-			error = sub->onchange ? change_push(sub) : push(sub);
-			pthread_mutex_lock(&sub->ctx->ysublock);
-			if (error == EPIPE)
-				break;
-			/* Read whole and compared; else read again, told or
-			 * not. */
-			if (error == 0)
-				sub->synced = true;
-			else if (sub->onchange)
-				sub->dirty = true;
-			(void)clock_gettime(CLOCK_REALTIME, &now);
-			now.tv_nsec++;
-			next_tick(sub, &now, &due);
-			continue;
-		}
-		if (sub->period != 0) {
+		/* The receivers' turn: it lets the lock go meanwhile. */
+		has_rwake = sub->cfg && cfg_service(sub, &now, &rwake);
+		if (sub->dead)
+			break;
+		has_wake = false;
+		if (sub->period != 0 && !(sub->synced && !sub->dirty &&
+		    !atomic_load(&sub->resync) && waits_told(sub))) {
+			if (!ts_before(&now, &due)) {
+				sub->dirty = false;
+				pthread_mutex_unlock(&sub->ctx->ysublock);
+				error = sub->onchange ? change_push(sub) :
+				    push(sub);
+				pthread_mutex_lock(&sub->ctx->ysublock);
+				if (error == EPIPE)
+					break;
+				/* Read whole and compared; else read again,
+				 * told or not. */
+				if (error == 0)
+					sub->synced = true;
+				else if (sub->onchange)
+					sub->dirty = true;
+				(void)clock_gettime(CLOCK_REALTIME, &now);
+				now.tv_nsec++;
+				next_tick(sub, &now, &due);
+				continue;
+			}
 			wake = due;
-			if (sub->has_stop && ts_before(&sub->stop, &wake))
-				wake = sub->stop;
+			has_wake = true;
+		}
+		if (sub->has_stop && (!has_wake || ts_before(&sub->stop,
+		    &wake))) {
+			wake = sub->stop;
+			has_wake = true;
+		}
+		if (has_rwake && (!has_wake || ts_before(&rwake, &wake))) {
+			wake = rwake;
+			has_wake = true;
+		}
+		if (has_wake)
 			(void)pthread_cond_timedwait(&sub->cv,
 			    &sub->ctx->ysublock, &wake);
-		} else if (sub->has_stop)
-			(void)pthread_cond_timedwait(&sub->cv,
-			    &sub->ctx->ysublock, &sub->stop);
 		else
 			(void)pthread_cond_wait(&sub->cv, &sub->ctx->ysublock);
+	}
+	if (sub->cfg) {
+		/* Its receivers told, disconnected; at the stop-time the
+		 * subscription stays, concluded. */
+		sub->threaded = false;
+		if (stop)
+			sub->concluded = true;
+		pthread_mutex_unlock(&sub->ctx->ysublock);
+		cfg_finish(sub, stop);
+		pthread_mutex_lock(&sub->ctx->ysublock);
+		sub->ctx->ycthreads--;
+		pthread_cond_broadcast(&sub->ctx->ycv);
+		pthread_mutex_unlock(&sub->ctx->ysublock);
+		sub_rele(sub);
+		return (NULL);
 	}
 	if (stop)
 		sub_end(sub);
@@ -1140,6 +1397,44 @@ static const struct cbl_stream_cbs sub_cbs = {
 	.on_writable = sub_writable,
 };
 
+/* A configured subscription's receivers, from its receivers container:
+ * each its name and receiver-instance-ref; 0, or said. */
+static int
+rcvs_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *drs)
+{
+	const cbl_dnode *e, *c;
+	struct yrcv *r;
+	const char *name;
+
+	for (e = cbl_dnode_first(drs); e != NULL; e = cbl_dnode_next(e)) {
+		if (strcmp(cbl_dnode_schema(e)->name, "receiver") != 0)
+			continue;
+		if ((r = calloc(1, sizeof(*r))) == NULL)
+			return (ENOMEM);
+		r->pub.id = sub->id;
+		for (c = cbl_dnode_first(e); c != NULL; c = cbl_dnode_next(c)) {
+			name = cbl_dnode_schema(c)->name;
+			if (strcmp(name, "name") == 0)
+				r->pub.name = strdup(*(const char *const *)
+				    cbl_dnode_value(c));
+			else if (strcmp(name, "receiver-instance-ref") == 0)
+				r->pub.instance = strdup(*(const char *const *)
+				    cbl_dnode_value(c));
+		}
+		if (r->pub.name == NULL) {
+			rcv_free(r);
+			return (cbl_ysay(req, EINVAL, cbl_dnode_schema(e)->sid,
+			    "missing-element", "a receiver has a name"));
+		}
+		TAILQ_INSERT_TAIL(&sub->newrcvs, r, link);
+	}
+	if (TAILQ_EMPTY(&sub->newrcvs))
+		return (cbl_ysay(req, EINVAL, cbl_dnode_schema(drs)->sid,
+		    "missing-element", "a configured subscription has a "
+		    "receiver"));
+	return (0);
+}
+
 /* The input read into sub, by its leaves' names; 0, or said. */
 static int
 sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
@@ -1179,6 +1474,20 @@ sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
 				    "invalid-value",
 				    "replay-start-time is no time"));
 			sub->has_replay = true;
+		} else if (sub->cfg && strcmp(name, "id") == 0) {
+			sub->id = *(const uint32_t *)v;
+		} else if (sub->cfg && strcmp(name, "configured-replay") == 0) {
+			sub->configured_replay = true;
+		} else if (sub->cfg && (strcmp(name, "transport") == 0 ||
+		    strcmp(name, "encoding") == 0 ||
+		    strcmp(name, "purpose") == 0 ||
+		    strcmp(name, "configured-subscription-state") == 0)) {
+			/* The program's transport knows its own. */
+		} else if (sub->cfg && strcmp(name, "receivers") == 0) {
+			int error;
+
+			if ((error = rcvs_input(req, sub, c)) != 0)
+				return (error);
 		} else if (strcmp(name, "periodic") == 0) {
 			for (pc = cbl_dnode_first(c); pc != NULL;
 			    pc = cbl_dnode_next(pc)) {
@@ -1308,11 +1617,15 @@ sub_check(cbl_req *req, struct cbl_ysub *sub)
 		return (cbl_ysay(req, EOPNOTSUPP, y->rpc->sid,
 		    "operation-not-supported", sub->stream == NULL ?
 		    "replay is a stream's" : "nothing is kept to replay"));
-	/* A stop-time gone by ends a replay, after it; else nothing. */
+	/* A stop-time gone by ends a replay, after it; else nothing: a
+	 * configured subscription's is concluded, a dynamic one refused. */
 	if (sub->has_stop && !ts_before(&now, &sub->stop) &&
-	    (!sub->has_replay || !ts_before(&sub->replay_from, &sub->stop)))
-		return (cbl_ysay(req, EINVAL, y->rpc->sid, "invalid-value",
-		    "stop-time has passed"));
+	    (!sub->has_replay || !ts_before(&sub->replay_from, &sub->stop))) {
+		if (!sub->cfg)
+			return (cbl_ysay(req, EINVAL, y->rpc->sid,
+			    "invalid-value", "stop-time has passed"));
+		sub->concluded = true;
+	}
 	if (sub->xpath != NULL) {
 		/* The filter, tried on nothing: a bad one refused now. */
 		if ((t = cbl_dtree_new(y->srv->schema)) == NULL)
@@ -1330,11 +1643,24 @@ sub_check(cbl_req *req, struct cbl_ysub *sub)
 	return (sub->stream == NULL ? targets(sub) : 0);
 }
 
+/* With ysublock held: the configured subscription of id; NULL: none. */
+static struct cbl_ysub *
+cfg_find(cbl_ctx *ctx, uint32_t id)
+{
+	struct cbl_ysub *sub;
+
+	TAILQ_FOREACH(sub, &ctx->ycsubs, link)
+		if (sub->id == id)
+			return (sub);
+	return (NULL);
+}
+
 struct cbl_ysub_replay {
 	struct cbl_ysub		*sub;
+	struct yrcv		*rcv;		/* a configured one's receiver */
 	struct yrec		*v;
 	size_t			 n, cap;
-	struct timespec		 oldest;
+	struct timespec		 from, oldest;
 	bool			 has_oldest, live;
 	int			 error;
 };
@@ -1386,8 +1712,7 @@ cbl_ysub_replay_emit(struct cbl_ysub_replay *r, const struct cbl_ynode *n,
 
 	if (r == NULL || n == NULL || p == NULL || n->kind != CBL_YN_NOTIF)
 		return (EINVAL);
-	if (r->live || (when != NULL && ts_before(when,
-	    &r->sub->replay_from)))
+	if (r->live || (when != NULL && ts_before(when, &r->from)))
 		return (0);
 	/* What the filter leaves out is not replayed either. */
 	if ((error = cbl_yencode(n, p, &b)) == 0 && (r->sub->xpath == NULL ||
@@ -1422,9 +1747,14 @@ cbl_ysub_replay_live(struct cbl_ysub_replay *r)
 		return;
 	sub = r->sub;
 	pthread_mutex_lock(&sub->ctx->ysublock);
-	sub->replaying = true;
-	TAILQ_INSERT_TAIL(&sub->ctx->ysubs, sub, link);
-	sub->listed = true;
+	if (r->rcv != NULL)
+		/* A configured one's receiver: its queue takes them. */
+		r->rcv->listed = true;
+	else {
+		sub->replaying = true;
+		TAILQ_INSERT_TAIL(&sub->ctx->ysubs, sub, link);
+		sub->listed = true;
+	}
 	pthread_mutex_unlock(&sub->ctx->ysublock);
 	r->live = true;
 }
@@ -1481,6 +1811,8 @@ sub_start(struct cbl_ysub *sub)
 	}
 	(void)pthread_detach(tid);
 	sub->threaded = true;
+	if (sub->cfg)
+		sub->ctx->ycthreads++;
 	return (0);
 }
 
@@ -1585,8 +1917,11 @@ cbl_ysub_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s,
 		return (ENOMEM);
 	}
 	pthread_mutex_lock(&ctx->ysublock);
-	if (++ctx->ysubid == 0)
-		ctx->ysubid = 1;
+	/* An id no configured subscription has. */
+	do {
+		if (++ctx->ysubid == 0)
+			ctx->ysubid = 1;
+	} while (cfg_find(ctx, ctx->ysubid) != NULL);
 	sub->id = ctx->ysubid;
 	pthread_mutex_unlock(&ctx->ysublock);
 	cbl_stream_ref(s);
@@ -1594,6 +1929,7 @@ cbl_ysub_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s,
 	/* A replay: what is kept since its start, live after it. */
 	memset(&r, 0, sizeof(r));
 	r.sub = sub;
+	r.from = sub->replay_from;
 	rev = NULL;
 	if (sub->has_replay) {
 		error = ctx->yreplay(&sub->replay_from, &r, ctx->yreplay_arg);
@@ -1665,10 +2001,32 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
     const uint8_t *content, size_t len)
 {
 	struct cbl_ysub *sub, **v = NULL;
+	struct yrcv *r;
+	struct timespec now;
 	size_t nv = 0, cap = 0;
+	bool any;
 
 	/* Those of the stream, held: sent without the lock. */
 	pthread_mutex_lock(&ctx->ysublock);
+	/* A configured subscription's receivers queue it for its thread. */
+	(void)clock_gettime(CLOCK_REALTIME, &now);
+	TAILQ_FOREACH(sub, &ctx->ycsubs, link) {
+		if (sub->stream == NULL || sub->dead || sub->concluded ||
+		    sub->y.srv->schema != n->module->schema)
+			continue;
+		any = false;
+		TAILQ_FOREACH(r, &sub->rcvs, link)
+			if (r->listed)
+				any = true;
+		if (!any || (sub->xpath != NULL && !selects(sub, n, content,
+		    len)) || !event_ok(sub, n->sid))
+			continue;
+		TAILQ_FOREACH(r, &sub->rcvs, link)
+			if (r->listed)
+				(void)rec_add(&r->q, &r->nq, &r->capq, n->sid,
+				    content, len, &now);
+		pthread_cond_broadcast(&sub->cv);
+	}
 	TAILQ_FOREACH(sub, &ctx->ysubs, link) {
 		if (sub->stream == NULL || sub->dead ||
 		    sub->y.srv->schema != n->module->schema)
@@ -1968,6 +2326,24 @@ cbl_ysub_told(cbl_ctx *ctx, const struct cbl_ynode *const *tops, size_t n)
 	return (0);
 }
 
+/* With ysublock held: an on-change subscription of top told. */
+static void
+changed_one(struct cbl_ysub *sub, const struct cbl_ynode *top)
+{
+	size_t i;
+
+	if (!sub->onchange || sub->dead || sub->concluded || (top != NULL &&
+	    sub->y.srv->schema != top->module->schema))
+		return;
+	for (i = 0; top != NULL && i < sub->ntop; i++)
+		if (sub->top[i] == top->sid)
+			break;
+	if (top != NULL && i == sub->ntop)
+		return;
+	sub->dirty = true;
+	pthread_cond_broadcast(&sub->cv);
+}
+
 void
 cbl_ysub_changed(cbl_ctx *ctx, const struct cbl_ynode *top)
 {
@@ -1977,18 +2353,10 @@ cbl_ysub_changed(cbl_ctx *ctx, const struct cbl_ynode *top)
 	if (ctx == NULL)
 		return;
 	pthread_mutex_lock(&ctx->ysublock);
-	TAILQ_FOREACH(sub, &ctx->ysubs, link) {
-		if (!sub->onchange || sub->dead || (top != NULL &&
-		    sub->y.srv->schema != top->module->schema))
-			continue;
-		for (i = 0; top != NULL && i < sub->ntop; i++)
-			if (sub->top[i] == top->sid)
-				break;
-		if (top != NULL && i == sub->ntop)
-			continue;
-		sub->dirty = true;
-		pthread_cond_broadcast(&sub->cv);
-	}
+	for (sub = TAILQ_FIRST(&ctx->ysubs), i = 0; i < 2; sub = i++ == 0 ?
+	    TAILQ_FIRST(&ctx->ycsubs) : NULL)
+		for (; sub != NULL; sub = TAILQ_NEXT(sub, link))
+			changed_one(sub, top);
 	pthread_mutex_unlock(&ctx->ysublock);
 }
 
@@ -2006,13 +2374,18 @@ cbl_ysub_each(cbl_ctx *ctx, int (*fn)(const struct cbl_ysub_info *, void *),
     void *arg)
 {
 	struct cbl_ysub_info in;
+	struct cbl_ysub_rcv_info *rv;
 	struct cbl_ysub *sub;
+	struct yrcv *r;
+	size_t i, k;
 	int error = 0;
 
 	if (ctx == NULL || fn == NULL)
 		return (EINVAL);
 	pthread_mutex_lock(&ctx->ysublock);
-	TAILQ_FOREACH(sub, &ctx->ysubs, link) {
+	for (sub = TAILQ_FIRST(&ctx->ysubs), i = 0; error == 0 && i < 2;
+	    sub = i++ == 0 ? TAILQ_FIRST(&ctx->ycsubs) : NULL)
+	    for (; error == 0 && sub != NULL; sub = TAILQ_NEXT(sub, link)) {
 		memset(&in, 0, sizeof(in));
 		in.id = sub->id;
 		in.stream = sub->stream;
@@ -2027,9 +2400,582 @@ cbl_ysub_each(cbl_ctx *ctx, int (*fn)(const struct cbl_ysub_info *, void *),
 		in.excluded = atomic_load(&sub->excluded);
 		in.suspended = atomic_load(&sub->suspended);
 		in.receiver = sub->receiver;
-		if ((error = fn(&in, arg)) != 0)
-			break;
+		in.configured = sub->cfg;
+		in.concluded = sub->concluded;
+		rv = NULL;
+		if (sub->cfg) {
+			k = 0;
+			TAILQ_FOREACH(r, &sub->rcvs, link)
+				k++;
+			TAILQ_FOREACH(r, &sub->newrcvs, link)
+				k++;
+			if ((rv = calloc(k > 0 ? k : 1, sizeof(*rv))) == NULL) {
+				error = ENOMEM;
+				break;
+			}
+			k = 0;
+			TAILQ_FOREACH(r, &sub->rcvs, link) {
+				if (r->gone)
+					continue;
+				rv[k].name = r->pub.name;
+				rv[k].instance = r->pub.instance;
+				rv[k].sent = atomic_load(&r->sent);
+				rv[k].excluded = atomic_load(&r->excluded);
+				rv[k].state = r->state;
+				k++;
+			}
+			TAILQ_FOREACH(r, &sub->newrcvs, link) {
+				rv[k].name = r->pub.name;
+				rv[k].instance = r->pub.instance;
+				rv[k].state = CBL_YSUB_RCV_CONNECTING;
+				k++;
+			}
+			in.rcvs = rv;
+			in.nrcvs = k;
+		}
+		error = fn(&in, arg);
+		free(rv);
 	}
 	pthread_mutex_unlock(&ctx->ysublock);
 	return (error);
+}
+
+/* yang:date-and-time of ts, in buf. */
+static const char *
+timestr(const struct timespec *ts, char *buf, size_t len)
+{
+	struct tm tm;
+
+	(void)gmtime_r(&ts->tv_sec, &tm);
+	(void)strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &tm);
+	return (buf);
+}
+
+/*
+ * A receiver connected by the transport: told subscription-started;
+ * where the stream is replayed, what it missed since the last record it
+ * had (or since replay-start-time, or since the subscription was made,
+ * the first time), then replay-completed; live from then on.  The
+ * thread's, without the lock.
+ */
+static void
+cfg_connect(struct cbl_ysub *sub, struct yrcv *r)
+{
+	cbl_ctx *ctx = sub->ctx;
+	struct cbl_ysub_replay rp;
+	struct timespec now;
+	char prev[32];
+	bool replay;
+	int error;
+
+	error = ctx->ytr_connect != NULL ? ctx->ytr_connect(&r->pub,
+	    ctx->ytr_arg) : EAGAIN;
+	pthread_mutex_lock(&ctx->ysublock);
+	if (error != 0) {
+		(void)clock_gettime(CLOCK_REALTIME, &r->retry);
+		r->retry.tv_sec += r->backoff == 0 ? 1 : r->backoff;
+		r->backoff = r->backoff == 0 ? 1 : r->backoff >= 60 ? 60 :
+		    r->backoff * 2;
+		pthread_mutex_unlock(&ctx->ysublock);
+		return;
+	}
+	r->state = CBL_YSUB_RCV_ACTIVE;
+	r->backoff = 0;
+	pthread_mutex_unlock(&ctx->ysublock);
+	replay = sub->stream != NULL && ctx->yreplay != NULL &&
+	    (sub->configured_replay || sub->has_replay);
+	if (send_state_to(sub, r, sub->y.n_started, 0, replay && r->has_last ?
+	    timestr(&r->last, prev, sizeof(prev)) : NULL) != 0)
+		return;
+	if (!replay) {
+		pthread_mutex_lock(&ctx->ysublock);
+		r->listed = true;
+		pthread_mutex_unlock(&ctx->ysublock);
+		return;
+	}
+	memset(&rp, 0, sizeof(rp));
+	rp.sub = sub;
+	rp.rcv = r;
+	rp.from = r->has_last ? r->last : sub->has_replay ? sub->replay_from :
+	    sub->made;
+	error = ctx->yreplay(&rp.from, &rp, ctx->yreplay_arg);
+	cbl_ysub_replay_live(&rp);
+	(void)clock_gettime(CLOCK_REALTIME, &now);
+	for (size_t i = 0; i < rp.n; i++) {
+		struct yrec *v = &rp.v[i];
+
+		/* The record it had last is not sent again. */
+		if (!(r->has_last && v->has_when && v->when.tv_sec ==
+		    r->last.tv_sec && v->when.tv_nsec == r->last.tv_nsec &&
+		    v->len == r->lastlen && memcmp(v->p, r->lastp, v->len) ==
+		    0) && r->state == CBL_YSUB_RCV_ACTIVE)
+			(void)rcv_send(sub, r, v->sid, v->p, v->len,
+			    v->has_when ? &v->when : &now);
+		free(v->p);
+	}
+	free(rp.v);
+	(void)send_state_to(sub, r, sub->y.n_replayed, 0, NULL);
+}
+
+/*
+ * The receivers' turn, with ysublock held and let go meanwhile: the new
+ * ones taken in, those gone or reset disconnected, those due connected,
+ * the queues sent, subscription-modified told.  *wake: when a receiver
+ * is next due, or now when a queue is not empty; false: never.
+ */
+static bool
+cfg_service(struct cbl_ysub *sub, const struct timespec *now,
+    struct timespec *wake) __no_lock_analysis
+{
+	cbl_ctx *ctx = sub->ctx;
+	struct yrcv *r, *next, **down = NULL, **conn = NULL;
+	struct yrec *q;
+	size_t ndown = 0, nconn = 0, nq;
+	bool modified, has_wake = false;
+
+	while ((r = TAILQ_FIRST(&sub->newrcvs)) != NULL) {
+		TAILQ_REMOVE(&sub->newrcvs, r, link);
+		TAILQ_INSERT_TAIL(&sub->rcvs, r, link);
+	}
+	for (r = TAILQ_FIRST(&sub->rcvs); r != NULL; r = next) {
+		next = TAILQ_NEXT(r, link);
+		if (r->gone || r->reset) {
+			struct yrcv **v = reallocarray(down, ndown + 1,
+			    sizeof(*v));
+
+			if (v == NULL)
+				continue;
+			down = v;
+			down[ndown++] = r;
+			if (r->gone)
+				TAILQ_REMOVE(&sub->rcvs, r, link);
+			else {
+				r->reset = false;
+				r->state = CBL_YSUB_RCV_CONNECTING;
+				r->listed = false;
+				r->backoff = 0;
+				r->retry = *now;
+			}
+			continue;
+		}
+		if (r->state != CBL_YSUB_RCV_ACTIVE && !ts_before(now,
+		    &r->retry)) {
+			struct yrcv **v = reallocarray(conn, nconn + 1,
+			    sizeof(*v));
+
+			if (v != NULL) {
+				conn = v;
+				conn[nconn++] = r;
+			}
+		}
+	}
+	modified = sub->modified;
+	sub->modified = false;
+	pthread_mutex_unlock(&ctx->ysublock);
+	for (size_t i = 0; i < ndown; i++) {
+		r = down[i];
+		if (ctx->ytr_disconnect != NULL)
+			ctx->ytr_disconnect(&r->pub, ctx->ytr_arg);
+		if (r->gone)
+			rcv_free(r);
+	}
+	free(down);
+	for (size_t i = 0; i < nconn; i++)
+		cfg_connect(sub, conn[i]);
+	free(conn);
+	/* Each queue taken whole, sent in order. */
+	for (r = TAILQ_FIRST(&sub->rcvs); r != NULL; r = TAILQ_NEXT(r, link)) {
+		pthread_mutex_lock(&ctx->ysublock);
+		q = r->q;
+		nq = r->nq;
+		r->q = NULL;
+		r->nq = r->capq = 0;
+		pthread_mutex_unlock(&ctx->ysublock);
+		for (size_t i = 0; i < nq; i++) {
+			if (r->state == CBL_YSUB_RCV_ACTIVE)
+				(void)rcv_send(sub, r, q[i].sid, q[i].p, q[i].len,
+				    q[i].has_when ? &q[i].when : NULL);
+			free(q[i].p);
+		}
+		free(q);
+	}
+	if (modified)
+		(void)send_state(sub, sub->y.n_modified, 0);
+	pthread_mutex_lock(&ctx->ysublock);
+	TAILQ_FOREACH(r, &sub->rcvs, link) {
+		if (r->listed && r->nq > 0) {
+			*wake = *now;
+			return (true);
+		}
+		if (r->state != CBL_YSUB_RCV_ACTIVE && !r->gone &&
+		    (!has_wake || ts_before(&r->retry, wake))) {
+			*wake = r->retry;
+			has_wake = true;
+		}
+	}
+	if (!TAILQ_EMPTY(&sub->newrcvs)) {
+		*wake = *now;
+		return (true);
+	}
+	return (has_wake);
+}
+
+/* The subscription's end: each receiver told subscription-completed (at
+ * the stop-time) or -terminated, and disconnected.  Without the lock. */
+static void
+cfg_finish(struct cbl_ysub *sub, bool stop)
+{
+	cbl_ctx *ctx = sub->ctx;
+	struct yrcv *r;
+	bool was;
+
+	TAILQ_FOREACH(r, &sub->rcvs, link) {
+		if (r->gone)
+			continue;
+		if (stop)
+			(void)send_state_to(sub, r, sub->y.n_completed, 0, NULL);
+		else
+			(void)send_state_to(sub, r, sub->y.n_terminated,
+			    sub->end_reason != 0 ? sub->end_reason :
+			    sub->y.no_such, NULL);
+		pthread_mutex_lock(&ctx->ysublock);
+		was = r->state == CBL_YSUB_RCV_ACTIVE;
+		r->state = CBL_YSUB_RCV_CONNECTING;
+		r->listed = false;
+		pthread_mutex_unlock(&ctx->ysublock);
+		if (was && ctx->ytr_disconnect != NULL)
+			ctx->ytr_disconnect(&r->pub, ctx->ytr_arg);
+	}
+}
+
+int
+cbl_ysub_set_transport(cbl_ctx *ctx, const struct cbl_ysub_transport *tr,
+    void *arg)
+{
+
+	if (ctx == NULL)
+		return (EINVAL);
+	pthread_mutex_lock(&ctx->ysublock);
+	ctx->ytr_connect = tr != NULL ? tr->connect : NULL;
+	ctx->ytr_send = tr != NULL ? tr->send : NULL;
+	ctx->ytr_disconnect = tr != NULL ? tr->disconnect : NULL;
+	ctx->ytr_arg = arg;
+	pthread_mutex_unlock(&ctx->ysublock);
+	return (0);
+}
+
+/* A configured subscription, as its entry e says; NULL and why. */
+static struct cbl_ysub *
+cfg_new(cbl_ctx *ctx, const struct ynodes *y, const cbl_dnode *e, char *why,
+    size_t whylen, int *errorp)
+{
+	struct cbl_req r;
+	struct cbl_ysub *sub;
+	int error;
+
+	if ((sub = calloc(1, sizeof(*sub))) == NULL) {
+		*errorp = ENOMEM;
+		return (NULL);
+	}
+	sub->ctx = ctx;
+	sub->cfg = true;
+	sub->refs = 1;
+	sub->recovery = true;
+	sub->y = *y;
+	TAILQ_INIT(&sub->rcvs);
+	TAILQ_INIT(&sub->newrcvs);
+	pthread_cond_init(&sub->cv, NULL);
+	(void)clock_gettime(CLOCK_REALTIME, &sub->made);
+	memset(&r, 0, sizeof(r));
+	r.conn = ctx->yconn;
+	atomic_init(&r.refs, 1);
+	if ((error = sub_input(&r, sub, e)) == 0 && TAILQ_EMPTY(&sub->newrcvs))
+		error = cbl_ysay(&r, EINVAL, y->entry->sid, "missing-element",
+		    "a configured subscription has a receiver");
+	if (error == 0)
+		error = sub_check(&r, sub);
+	if (error != 0) {
+		(void)snprintf(why, whylen, "subscription %u: %s", sub->id,
+		    r.err_msg != NULL ? r.err_msg : strerror(error));
+		free(r.err_msg);
+		/* Its own alone: nobody else has it. */
+		rcvs_free(sub);
+		pthread_cond_destroy(&sub->cv);
+		free(sub->stream);
+		free(sub->xpath);
+		free(sub->anchor_s);
+		free(sub->stop_s);
+		free(sub->top);
+		free(sub);
+		*errorp = error;
+		return (NULL);
+	}
+	free(r.err_msg);
+	return (sub);
+}
+
+/* With ysublock held: old changed to what sub says, where its target
+ * and its kind of trigger are the same; false: it is not. */
+static bool
+cfg_modify(struct cbl_ysub *old, struct cbl_ysub *sub)
+{
+	struct yrcv *r, *n, *next;
+
+	if ((old->stream == NULL) != (sub->stream == NULL) ||
+	    old->onchange != sub->onchange || (old->stream != NULL &&
+	    strcmp(old->stream, sub->stream) != 0) ||
+	    old->datastore != sub->datastore)
+		return (false);
+	(void)retire(old, old->xpath);
+	old->xpath = sub->xpath;
+	sub->xpath = NULL;
+	(void)retire(old, old->stop_s);
+	old->stop_s = sub->stop_s;
+	sub->stop_s = NULL;
+	old->stop = sub->stop;
+	old->has_stop = sub->has_stop;
+	(void)retire(old, old->top);
+	old->top = sub->top;
+	old->ntop = sub->ntop;
+	sub->top = NULL;
+	sub->ntop = 0;
+	old->period = sub->period;
+	old->dampening = sub->dampening;
+	old->sync = sub->sync;
+	old->excluded_ops = sub->excluded_ops;
+	(void)retire(old, old->anchor_s);
+	old->anchor_s = sub->anchor_s;
+	sub->anchor_s = NULL;
+	old->anchor = sub->anchor;
+	old->configured_replay = sub->configured_replay;
+	old->has_replay = sub->has_replay;
+	old->replay_from = sub->replay_from;
+	free(old->cfgp);
+	old->cfgp = sub->cfgp;
+	old->cfglen = sub->cfglen;
+	sub->cfgp = NULL;
+	/* The receivers by name: one gone is marked so, a new one taken
+	 * in by the thread; one whose instance changed is both. */
+	TAILQ_FOREACH(r, &old->rcvs, link) {
+		if (r->gone)
+			continue;
+		TAILQ_FOREACH(n, &sub->newrcvs, link)
+			if (strcmp(n->pub.name, r->pub.name) == 0 &&
+			    ((n->pub.instance == NULL && r->pub.instance ==
+			    NULL) || (n->pub.instance != NULL &&
+			    r->pub.instance != NULL && strcmp(n->pub.instance,
+			    r->pub.instance) == 0)))
+				break;
+		if (n == NULL)
+			r->gone = true;
+		else {
+			TAILQ_REMOVE(&sub->newrcvs, n, link);
+			rcv_free(n);
+		}
+	}
+	for (n = TAILQ_FIRST(&sub->newrcvs); n != NULL; n = next) {
+		next = TAILQ_NEXT(n, link);
+		TAILQ_REMOVE(&sub->newrcvs, n, link);
+		TAILQ_INSERT_TAIL(&old->newrcvs, n, link);
+	}
+	old->modified = true;
+	old->concluded = sub->concluded;
+	old->kick = true;
+	pthread_cond_broadcast(&old->cv);
+	return (true);
+}
+
+int
+cbl_ysub_configure(cbl_ctx *ctx, const struct cbl_ynode *subs,
+    const void *data, char *why, size_t whylen)
+{
+	struct ynodes y;
+	struct cbl_ybuf b = { 0 };
+	cbl_dtree *t;
+	cbl_dnode *dsubs = NULL, *e;
+	struct cbl_ysub *sub, *old, *next, **drop = NULL, **v;
+	size_t ndrop = 0;
+	TAILQ_HEAD(, cbl_ysub) made = TAILQ_HEAD_INITIALIZER(made);
+	int error = 0;
+
+	if (ctx == NULL || subs == NULL || why == NULL)
+		return (EINVAL);
+	why[0] = '\0';
+	if (!nodes(ctx, &y) || y.entry == NULL || y.n_started == NULL ||
+	    subs->module->schema != y.srv->schema) {
+		(void)snprintf(why, whylen, "no configured subscriptions: "
+		    "ietf-subscribed-notifications' configured feature is not "
+		    "served");
+		return (EOPNOTSUPP);
+	}
+	if ((t = cbl_dtree_new(y.srv->schema)) == NULL)
+		return (ENOMEM);
+	if (data != NULL && cbl_ymember_present(subs, data) &&
+	    ((error = cbl_yencode_member(subs, data, &b)) != 0 ||
+	    (error = cbl_dnode_decode(cbl_dtree_root(t), subs, b.p, b.len, 0,
+	    why, whylen, &dsubs)) != 0)) {
+		cbl_ybuf_free(&b);
+		cbl_dtree_free(t);
+		return (error);
+	}
+	cbl_ybuf_free(&b);
+	pthread_mutex_lock(&ctx->ysublock);
+	/* The reads' connection: the context's own, counted with it. */
+	if (ctx->yconn == NULL) {
+		if ((error = cbl_conn_alloc(ctx, &ctx->lim, &ctx->yconn)) != 0)
+			goto out;
+		atomic_fetch_sub(&ctx->nobjs, 1);
+	}
+	TAILQ_FOREACH(old, &ctx->ycsubs, link) {
+		old->seen = false;
+		old->repl = NULL;
+	}
+	/* Each entry: the same as before, changed, or new; all of them
+	 * made before any is put in place. */
+	for (e = dsubs != NULL ? cbl_dnode_first(dsubs) : NULL; e != NULL;
+	    e = cbl_dnode_next(e)) {
+		if (cbl_dnode_schema(e) != y.entry)
+			continue;
+		memset(&b, 0, sizeof(b));
+		if ((error = cbl_dnode_encode(e, &b)) != 0)
+			break;
+		if ((sub = cfg_new(ctx, &y, e, why, whylen, &error)) == NULL) {
+			cbl_ybuf_free(&b);
+			break;
+		}
+		sub->cfgp = b.p;
+		sub->cfglen = b.len;
+		TAILQ_INSERT_TAIL(&made, sub, link);
+		old = cfg_find(ctx, sub->id);
+		if (old == NULL && sub_find(ctx, NULL, sub->id) != NULL) {
+			(void)snprintf(why, whylen, "subscription %u: a "
+			    "dynamic subscription has that id", sub->id);
+			error = EEXIST;
+			break;
+		}
+		if (old != NULL && old->seen) {
+			(void)snprintf(why, whylen, "subscription %u: twice",
+			    sub->id);
+			error = EEXIST;
+			break;
+		}
+		if (old == NULL)
+			continue;
+		old->seen = true;
+		if (old->cfglen == b.len && memcmp(old->cfgp, b.p, b.len) == 0)
+			sub->dead = true;	/* unchanged: dropped */
+		else
+			old->repl = sub;
+	}
+	if (error != 0) {
+		/* Nothing changes: what was made goes. */
+		TAILQ_FOREACH(old, &ctx->ycsubs, link)
+			old->repl = NULL;
+		goto out;
+	}
+	/* Those gone from the configuration ended; those changed, changed
+	 * or ended and made anew; the new ones started. */
+	for (old = TAILQ_FIRST(&ctx->ycsubs); old != NULL; old = next) {
+		next = TAILQ_NEXT(old, link);
+		if (old->seen && old->repl == NULL)
+			continue;
+		if (old->repl != NULL && cfg_modify(old, old->repl)) {
+			old->repl->dead = true;	/* taken over: dropped */
+			if (!old->concluded && !old->threaded)
+				(void)sub_start(old);
+			continue;
+		}
+		old->end_reason = y.no_such;
+		old->refs++;
+		sub_end(old);
+		if ((v = reallocarray(drop, ndrop + 1, sizeof(*v))) != NULL)
+			(drop = v)[ndrop++] = old;
+	}
+	for (sub = TAILQ_FIRST(&made); sub != NULL; sub = next) {
+		next = TAILQ_NEXT(sub, link);
+		TAILQ_REMOVE(&made, sub, link);
+		if (sub->dead) {
+			sub->refs++;
+			if ((v = reallocarray(drop, ndrop + 1, sizeof(*v))) !=
+			    NULL)
+				(drop = v)[ndrop++] = sub;
+			continue;
+		}
+		TAILQ_INSERT_TAIL(&ctx->ycsubs, sub, link);
+		sub->listed = true;
+		if (!sub->concluded && sub_start(sub) != 0) {
+			sub_end(sub);
+			sub->refs++;
+			if ((v = reallocarray(drop, ndrop + 1, sizeof(*v))) !=
+			    NULL)
+				(drop = v)[ndrop++] = sub;
+		}
+	}
+out:
+	pthread_mutex_unlock(&ctx->ysublock);
+	/* Let go without the lock: an ended one's thread may hold it. */
+	for (size_t i = 0; i < ndrop; i++) {
+		sub_rele(drop[i]);	/* the list's */
+		sub_rele(drop[i]);	/* ours */
+	}
+	free(drop);
+	for (sub = TAILQ_FIRST(&made); sub != NULL; sub = next) {
+		next = TAILQ_NEXT(sub, link);
+		sub_rele(sub);
+	}
+	cbl_dtree_free(t);
+	return (error);
+}
+
+int
+cbl_ysub_reset(cbl_ctx *ctx, uint32_t id, const char *name)
+{
+	struct cbl_ysub *sub;
+	struct yrcv *r;
+
+	if (ctx == NULL || name == NULL)
+		return (EINVAL);
+	pthread_mutex_lock(&ctx->ysublock);
+	if ((sub = cfg_find(ctx, id)) == NULL) {
+		pthread_mutex_unlock(&ctx->ysublock);
+		return (ENOENT);
+	}
+	TAILQ_FOREACH(r, &sub->rcvs, link)
+		if (!r->gone && strcmp(r->pub.name, name) == 0)
+			break;
+	if (r == NULL) {
+		pthread_mutex_unlock(&ctx->ysublock);
+		return (ENOENT);
+	}
+	r->reset = true;
+	pthread_cond_broadcast(&sub->cv);
+	pthread_mutex_unlock(&ctx->ysublock);
+	return (0);
+}
+
+void
+cbl_ysub_free(cbl_ctx *ctx)
+{
+	struct cbl_ysub *sub, *next, **v = NULL, **nv;
+	size_t n = 0;
+
+	pthread_mutex_lock(&ctx->ysublock);
+	for (sub = TAILQ_FIRST(&ctx->ycsubs); sub != NULL; sub = next) {
+		next = TAILQ_NEXT(sub, link);
+		sub->end_reason = sub->y.no_such;
+		sub_end(sub);
+		if ((nv = reallocarray(v, n + 1, sizeof(*v))) != NULL)
+			(v = nv)[n++] = sub;
+	}
+	while (ctx->ycthreads > 0)
+		pthread_cond_wait(&ctx->ycv, &ctx->ysublock);
+	pthread_mutex_unlock(&ctx->ysublock);
+	for (size_t i = 0; i < n; i++)
+		sub_rele(v[i]);
+	free(v);
+	if (ctx->yconn != NULL) {
+		atomic_fetch_add(&ctx->nobjs, 1);
+		cbl_conn_rele(ctx->yconn);
+		ctx->yconn = NULL;
+	}
 }

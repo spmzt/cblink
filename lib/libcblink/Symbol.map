@@ -207,6 +207,9 @@ CBLINK_1.0 {
 	cbl_ysub_told;
 	cbl_ysub_changed;
 	cbl_ysub_each;
+	cbl_ysub_set_transport;
+	cbl_ysub_configure;
+	cbl_ysub_reset;
 	cbl_ctx_set_user;
 	cbl_msg_set_user;
 	cbl_conn_set_user;

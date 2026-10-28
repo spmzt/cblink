@@ -188,7 +188,24 @@ The YANG family (family 1, WIRE-FORMAT.md section 7.6) serves a
 program's modules in CORECONF's shape: GET, EDIT (create, replace,
 delete; all or nothing), RPC, NOTIFY, GET-SID, and SUBSCRIBE: RFC
 8639's dynamic subscriptions and RFC 8641's YANG-Push, periodic and
-on-change (changes as a YANG Patch), on a push stream. Anydata is shown in RFC 7951's JSON as its members, where the
+on-change (changes as a YANG Patch), on a push stream. Configured
+subscriptions (RFC 8639 section 2.5, the `configured` feature) are the
+entries of running's `subscriptions` list, which the program keeps and
+tells `cbl_ysub_configure()` whenever it changes (from its edit handler
+of the container, and at its start): each is made, changed (its
+receivers told `subscription-modified`) or ended (`subscription-terminated`)
+by the difference from what was told last, and reads as the recovery
+session. Its records go to its receivers through the program's
+transport (`cbl_ysub_set_transport()`: connect, send a record, disconnect),
+on a thread of the subscription's own, each receiver with its state
+(connecting, active): connected, told `subscription-started`; down, what
+it misses is excluded and it is connected again later, a second on and
+doubling to a minute; a stream subscription with `configured-replay`
+(or a `replay-start-time`) is then replayed from the last record the
+receiver had, by the program's replay, and told `replay-completed`. At
+the stop-time the receivers are told `subscription-completed` and the
+subscription stays, concluded. `cbl_ysub_each()` lists both kinds, with
+a configured one's receivers. Anydata is shown in RFC 7951's JSON as its members, where the
 tables have its nodes. The control family (family
 0, section 7.2) is the module `cblink-ctrl`; errors, credit and closes
 are the module `cblink`'s structures (section 6).

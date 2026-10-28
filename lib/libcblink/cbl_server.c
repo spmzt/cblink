@@ -41,8 +41,10 @@ send_error_ext(cbl_conn *conn, const struct cbl_hdr *h, int code,
 	if (cookie != NULL)
 		(void)cbl_msg_put_cookie(msg, cookie, cookie_len);
 	/* Family 1's: the node at fault by its SID, the tag. */
-	if (yreq != NULL && (yreq->err_ysid != 0 || yreq->err_ytag != NULL))
-		cbl_fw_yerr(msg, yreq->err_ysid, yreq->err_ytag);
+	if (yreq != NULL && (yreq->err_ysid != 0 || yreq->err_ytag != NULL ||
+	    yreq->err_yapptag != NULL))
+		cbl_fw_yerr(msg, yreq->err_ysid, yreq->err_ytag,
+		    yreq->err_yapptag);
 	return (cbl_conn_enqueue_ctl(conn, msg));
 }
 
@@ -62,6 +64,9 @@ req_free(cbl_req *req)
 	if (req->dump.priv_free != NULL)
 		req->dump.priv_free(req->dump.priv);
 	free(req->err_msg);
+	free(req->err_yapptag);
+	free(req->user);
+	cbl_yds_req_free(req);
 	cbl_msg_free(req->msg);
 	cbl_family_rele(req->fam);
 	atomic_fetch_sub(&conn->inflight, 1);
@@ -324,6 +329,14 @@ cbl_server_dispatch(cbl_conn *conn, cbl_msg *msg)
 	req->hdr = msg->hdr;
 	req->err_miss = -1;
 
+	/* Whom it is for; NACM's say on an op that asks for it. */
+	if ((error = cbl_req_who(req)) != 0 || ((op->flags & CBL_OPF_NACM) !=
+	    0 && (error = cbl_ynacm_op(req, fam->def->name, op->name,
+	    (op->flags & CBL_OPF_DENY) != 0)) != 0)) {
+		(void)req_end(req, error);
+		req_rele(req);
+		return;
+	}
 	if ((f & CBL_F_S_OPEN) != 0) {
 		cbl_server_stream_open(req);
 		return;
@@ -464,7 +477,7 @@ const cbl_peer *
 cbl_req_peer(const cbl_req *req)
 {
 
-	return (req != NULL ? &req->conn->peer : NULL);
+	return (req != NULL && req->conn != NULL ? &req->conn->peer : NULL);
 }
 
 cbl_conn *
@@ -478,7 +491,7 @@ cbl_ctx *
 cbl_req_ctx(const cbl_req *req)
 {
 
-	return (req != NULL ? req->conn->ctx : NULL);
+	return (req != NULL && req->conn != NULL ? req->conn->ctx : NULL);
 }
 
 /* Builder for one dump part. */

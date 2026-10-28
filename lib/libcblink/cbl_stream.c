@@ -214,6 +214,7 @@ cbl_stream_open(cbl_conn *conn, cbl_msg *open_req, uint32_t flags,
 		cbl_msg_free(open_req);
 		return (ENOTCONN);
 	}
+	cbl_conn_stamp(conn, open_req);
 	if ((s = stream_alloc(conn)) == NULL) {
 		cbl_msg_free(open_req);
 		return (ENOMEM);

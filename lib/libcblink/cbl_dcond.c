@@ -166,8 +166,69 @@ fail(struct cond *r, int error, const cbl_dnode *at, const char *tag,
 	return (error);
 }
 
+/*
+ * A mandatory leaf, a list or leaf-list of min-elements, of n's schema
+ * that brings a when (an augment's, a uses'), missing where the when
+ * holds: what the struct validator cannot judge (cbl_yvalid.c leaves
+ * them here).  A node's own when, or one in a case, is not judged.
+ */
 static int
-check(struct cond *r, const cbl_dnode *n, int depth)
+mandatory_whens(struct cond *r, const cbl_dnode *n, int depth)
+{
+	const struct cbl_ynode *sn = n->sn;
+	struct cbl_d_view view;
+	char why[128];
+	bool ok;
+	int error;
+
+	if (depth > CBL_D_DEPTH_MAX)
+		return (ELOOP);
+	for (uint32_t i = 0; sn != NULL && i < sn->nchild; i++) {
+		const struct cbl_ynode *c = sn->child[i];
+		const cbl_dnode *x;
+		bool need, own = false;
+
+		if (c->nwhen == 0 || c->choice != NULL ||
+		    (c->flags & CBL_YNF_CONFIG) == 0)
+			continue;
+		need = (c->kind == CBL_YN_LEAF && (c->flags &
+		    CBL_YNF_MANDATORY) != 0) || ((c->kind == CBL_YN_LIST ||
+		    c->kind == CBL_YN_LEAFLIST) && c->min > 0);
+		if (!need)
+			continue;
+		for (x = n->first; x != NULL; x = x->next)
+			if (x->sn == c)
+				break;
+		if (x != NULL)
+			continue;
+		ok = true;
+		for (uint16_t k = 0; ok && k < c->nwhen; k++) {
+			const struct cbl_ywhen *w = &c->when[k];
+
+			if (w->ctx == CBL_YWC_SELF) {
+				own = true;
+				break;
+			}
+			view = (struct cbl_d_view){ .hpar = n,
+			    .hide = hide_when, .harg = w };
+			if ((error = eval_bool(r->t, w->expr, w->ctx ==
+			    CBL_YWC_ROOT ? &r->t->root : n, &view, &ok, why,
+			    sizeof(why))) != 0)
+				return (fail(r, error, n, "operation-failed",
+				    NULL, "%s: %s", c->name, why));
+		}
+		if (ok && !own)
+			return (fail(r, EINVAL, n, "missing-element", NULL,
+			    "%s: mandatory, missing", c->name));
+	}
+	return (0);
+}
+
+static int	check(struct cond *, const cbl_dnode *, int);
+
+/* Node c: its whens and musts, what must be under it, and below. */
+static int
+check_node(struct cond *r, const cbl_dnode *c, int depth)
 {
 	const struct cbl_yschema *s = r->t->schema;
 	char why[128];
@@ -175,41 +236,47 @@ check(struct cond *r, const cbl_dnode *n, int depth)
 	bool ok;
 	int error;
 
-	if (depth > CBL_D_DEPTH_MAX)
-		return (ELOOP);
-	for (const cbl_dnode *c = n->first; c != NULL; c = c->next) {
-		if ((error = whens(r->t, c, &ok, &expr, why,
+	if ((error = whens(r->t, c, &ok, &expr, why, sizeof(why))) != 0)
+		return (fail(r, error, c, "operation-failed", NULL, "%s: %s",
+		    c->sn->name, why));
+	/* A default under a false when: not in use, no error. */
+	if (!ok && (c->flags & CBL_DN_DEFAULT) != 0)
+		return (0);
+	if (!ok)
+		return (fail(r, EINVAL, c, "unknown-element", NULL,
+		    "%s: when %s: false", c->sn->name, s->xpath[expr]));
+	for (uint16_t i = 0; i < c->sn->nmust; i++) {
+		const struct cbl_ymust *m = &c->sn->must[i];
+
+		if ((error = eval_bool(r->t, m->expr, c, NULL, &ok, why,
 		    sizeof(why))) != 0)
 			return (fail(r, error, c, "operation-failed", NULL,
 			    "%s: %s", c->sn->name, why));
-		/* A default under a false when: not in use, no error. */
-		if (!ok && (c->flags & CBL_DN_DEFAULT) != 0)
+		if (ok)
 			continue;
-		if (!ok)
-			return (fail(r, EINVAL, c, "unknown-element", NULL,
-			    "%s: when %s: false", c->sn->name,
-			    s->xpath[expr]));
-		for (uint16_t i = 0; i < c->sn->nmust; i++) {
-			const struct cbl_ymust *m = &c->sn->must[i];
-
-			if ((error = eval_bool(r->t, m->expr, c, NULL, &ok, why,
-			    sizeof(why))) != 0)
-				return (fail(r, error, c, "operation-failed",
-				    NULL, "%s: %s", c->sn->name, why));
-			if (ok)
-				continue;
-			if (m->emsg != NULL)
-				return (fail(r, EINVAL, c, "operation-failed",
-				    m->eapptag != NULL ? m->eapptag :
-				    "must-violation", "%s", m->emsg));
+		if (m->emsg != NULL)
 			return (fail(r, EINVAL, c, "operation-failed",
 			    m->eapptag != NULL ? m->eapptag : "must-violation",
-			    "%s: must %s: false", c->sn->name,
-			    s->xpath[m->expr]));
-		}
-		if (c->first != NULL && (error = check(r, c, depth + 1)) != 0)
-			return (error);
+			    "%s", m->emsg));
+		return (fail(r, EINVAL, c, "operation-failed", m->eapptag !=
+		    NULL ? m->eapptag : "must-violation", "%s: must %s: false",
+		    c->sn->name, s->xpath[m->expr]));
 	}
+	if ((error = mandatory_whens(r, c, depth)) != 0)
+		return (error);
+	return (c->first != NULL ? check(r, c, depth + 1) : 0);
+}
+
+static int
+check(struct cond *r, const cbl_dnode *n, int depth)
+{
+	int error;
+
+	if (depth > CBL_D_DEPTH_MAX)
+		return (ELOOP);
+	for (const cbl_dnode *c = n->first; c != NULL; c = c->next)
+		if ((error = check_node(r, c, depth)) != 0)
+			return (error);
 	return (0);
 }
 
@@ -223,6 +290,19 @@ cbl_dtree_check_conds(const cbl_dtree *t, struct cbl_dederr *err)
 	if (t == NULL)
 		return (EINVAL);
 	return (check(&r, &t->root, 0));
+}
+
+int
+cbl_dnode_check_conds(const cbl_dtree *t, const cbl_dnode *n,
+    struct cbl_dederr *err)
+{
+	struct cond r = { .t = t, .err = err };
+
+	if (err != NULL)
+		memset(err, 0, sizeof(*err));
+	if (t == NULL || n == NULL)
+		return (EINVAL);
+	return (check_node(&r, n, 0));
 }
 
 /* The leaves and leaf-list entries of n's subtree, n's own if one. */

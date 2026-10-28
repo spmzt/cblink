@@ -255,6 +255,45 @@ names the top-level nodes whose changes the program tells by
 an on-change subscription that reads only those is read when told, a
 dampening period after its last read at the soonest, not every period.
 .Pp
+NACM (RFC 8341) is checked where a served module set has
+ietf-netconf-acm and a get handler for its nacm container, as the user
+.Fn cbl_req_user
+names: what the program's function given to
+.Fn cbl_ctx_set_user
+makes of the peer and of the user a client says with
+.Fn cbl_msg_set_user ,
+or for every request of a connection with
+.Fn cbl_conn_set_user ,
+or of a thread with
+.Fn cbl_thread_set_user ;
+NULL is the recovery session.
+An op of a family flagged
+.Dv CBL_OPF_NACM
+is an rpc of the module named as its family, with
+.Dv CBL_OPF_DENY
+one nacm:default-deny-all marks.
+.Fn cbl_ynacm_changed
+says the program changed the rules itself;
+.Fn cbl_ynacm_counters
+gives the denied operations, writes and notifications.
+.Pp
+.Fn cbl_ydatastores
+gives family 1 RFC 8342's running and candidate datastores, a client
+naming one with
+.Fn cbl_msg_set_datastore ;
+ietf-netconf's commit, confirmed commit, cancel-commit and
+discard-changes are answered by the library, an undo a handler fails
+told to the program.
+A handler refuses what is to be accepted first with
+.Fn cbl_req_set_yapptag ,
+which a request accepts with
+.Fn cbl_msg_set_accept
+.Pq Fn cbl_req_yaccepts ;
+it tells what it did with
+.Fn cbl_req_ywarn ,
+read with
+.Fn cbl_msg_ywarnings .
+.Pp
 An operation's handler receives a
 .Vt cbl_req
 and answers with

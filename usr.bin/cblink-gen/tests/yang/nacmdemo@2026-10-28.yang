@@ -1,0 +1,118 @@
+module nacmdemo {
+  yang-version 1.1;
+  namespace "urn:example:nacmdemo";
+  prefix nd;
+
+  import ietf-netconf-acm {
+    prefix nacm;
+  }
+
+  description
+    "Data, rpcs and notifications that NACM is checked on, for
+     ynacm_test: some marked nacm:default-deny-all or -write.";
+
+  revision 2026-10-28 {
+    description
+      "Initial revision.";
+  }
+
+  container data {
+    description
+      "What users read and change.";
+    leaf public {
+      type string;
+      description
+        "Anyone's to read.";
+    }
+    leaf secret {
+      nacm:default-deny-all;
+      type string;
+      description
+        "Read only by a rule that permits it.";
+    }
+    list item {
+      key "name";
+      description
+        "An item, named after its owner.";
+      leaf name {
+        type string;
+        description
+          "Its owner.";
+      }
+      leaf note {
+        type string;
+        description
+          "What it says.";
+      }
+    }
+  }
+
+  container locked {
+    nacm:default-deny-write;
+    description
+      "Changed only by a rule that permits it.";
+    leaf x {
+      type int32;
+      description
+        "A value.";
+    }
+  }
+
+  rpc ping {
+    description
+      "A rule denies it.";
+    output {
+      leaf ok {
+        type boolean;
+        description
+          "Whether it ran.";
+      }
+    }
+  }
+
+  rpc echo {
+    description
+      "No rule names it.";
+    output {
+      leaf ok {
+        type boolean;
+        description
+          "Whether it ran.";
+      }
+    }
+  }
+
+  rpc reboot {
+    nacm:default-deny-all;
+    description
+      "Run only by a rule that permits it.";
+    output {
+      leaf ok {
+        type boolean;
+        description
+          "Whether it ran.";
+      }
+    }
+  }
+
+  notification event {
+    description
+      "Anyone's to receive.";
+    leaf what {
+      type string;
+      description
+        "What happened.";
+    }
+  }
+
+  notification alarm {
+    nacm:default-deny-all;
+    description
+      "Received only by a rule that permits it.";
+    leaf what {
+      type string;
+      description
+        "What happened.";
+    }
+  }
+}

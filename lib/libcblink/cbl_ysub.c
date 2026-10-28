@@ -33,8 +33,9 @@
  * period (a second at least) compared with the last one: what changed,
  * a YANG Patch (RFC 8072), its targets RFC 8040's api-paths.  A
  * stop-time is kept by the same thread.  A
- * record that does not fit in the stream's credit is left out and
- * counted; RFC 8639's suspension is not done.  A subscription ends by
+ * record that does not fit in the stream's credit is left out and the
+ * subscription suspended (RFC 8639's subscription-suspended), resumed
+ * once the subscriber has read.  A subscription ends by
  * its stream, closed when stop-time comes, on delete or kill; a
  * dynamic subscription's end is its transport's (RFC 8639 section
  * 2.4.2), so no state notification is sent.
@@ -124,6 +125,9 @@ struct cbl_ysub {
 	/* ysublock's: a thread runs it; push now (resync, modify); its
 	 * first read done; told of a change since its last read. */
 	bool			 dead, listed, threaded, kick, synced, dirty;
+	/* Whom it was made for: NACM's to say what it is sent. */
+	char			*user;
+	bool			 recovery;
 	int			 refs;
 	pthread_cond_t		 cv;
 };
@@ -398,6 +402,7 @@ sub_rele(struct cbl_ysub *sub)
 	free(sub->stop_s);
 	free(sub->top);
 	free(sub->receiver);
+	free(sub->user);
 	free(sub);
 }
 
@@ -449,6 +454,20 @@ send_at(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
 	if (error == 0)
 		atomic_fetch_add(&sub->sent, 1);
 	return (error);
+}
+
+/* Whether an event of the stream, by its notification's SID, may go to
+ * the subscriber (NACM's read of it). */
+static bool
+event_ok(struct cbl_ysub *sub, uint64_t sid)
+{
+	const struct cbl_ynode *n;
+
+	if (sub->stream == NULL ||
+	    (n = cbl_yschema_node(sub->y.srv->schema, sid)) == NULL)
+		return (true);
+	return (cbl_ynacm_notif(sub->ctx, cbl_stream_conn(sub->s),
+	    &(struct cbl_ywho){ sub->user, sub->recovery }, n));
 }
 
 static int
@@ -589,10 +608,16 @@ read_filtered(struct cbl_ysub *sub, bool *incomplete)
 	*incomplete = false;
 	memset(&r, 0, sizeof(r));
 	r.conn = cbl_stream_conn(sub->s);
+	r.user = sub->user;
+	r.recovery = sub->recovery;
 	atomic_init(&r.refs, 1);
 	if (cbl_yread_tree(&r, sub->top, sub->ntop, &t, incomplete) != 0)
 		*incomplete = true;
 	free(r.err_msg);
+	/* What the subscriber may not read is no part of it. */
+	if (t != NULL && cbl_ynacm_read(sub->ctx, r.conn, &(struct cbl_ywho){
+	    sub->user, sub->recovery }, t) != 0)
+		*incomplete = true;
 	if (t == NULL || sub->xpath == NULL)
 		return (t);
 	ft = cbl_dtree_filter_xpath(t, sub->xpath, why, sizeof(why));
@@ -1415,8 +1440,9 @@ replay_send(struct cbl_ysub *sub, struct cbl_ysub_replay *r)
 	struct yrec rec;
 
 	for (size_t i = 0; i < r->n; i++) {
-		(void)send_at(sub, r->v[i].sid, r->v[i].p, r->v[i].len,
-		    r->v[i].has_when ? &r->v[i].when : NULL, false);
+		if (event_ok(sub, r->v[i].sid))
+			(void)send_at(sub, r->v[i].sid, r->v[i].p, r->v[i].len,
+			    r->v[i].has_when ? &r->v[i].when : NULL, false);
 		free(r->v[i].p);
 	}
 	free(r->v);
@@ -1432,7 +1458,9 @@ replay_send(struct cbl_ysub *sub, struct cbl_ysub_replay *r)
 		}
 		rec = sub->held[i];
 		pthread_mutex_unlock(&sub->ctx->ysublock);
-		(void)send_at(sub, rec.sid, rec.p, rec.len, NULL, false);
+		if (event_ok(sub, rec.sid))
+			(void)send_at(sub, rec.sid, rec.p, rec.len, NULL,
+			    false);
 		free(rec.p);
 		pthread_mutex_lock(&sub->ctx->ysublock);
 	}
@@ -1517,6 +1545,11 @@ cbl_ysub_open(cbl_req *req, const cbl_msg *msg, cbl_stream *s,
 	sub->ctx = ctx;
 	sub->refs = 1;
 	pthread_cond_init(&sub->cv, NULL);
+	sub->recovery = req->recovery;
+	if (req->user != NULL && (sub->user = strdup(req->user)) == NULL) {
+		sub_rele(sub);
+		return (ENOMEM);
+	}
 	if (!nodes(ctx, &sub->y)) {
 		sub_rele(sub);
 		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
@@ -1663,8 +1696,10 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
 	pthread_mutex_unlock(&ctx->ysublock);
 	for (size_t i = 0; i < nv; i++) {
 		sub = v[i];
-		/* What the filter leaves out is no record of it. */
-		if (sub->xpath == NULL || selects(sub, n, content, len))
+		/* What the filter leaves out is no record of it; what the
+		 * subscriber may not read, not sent. */
+		if ((sub->xpath == NULL || selects(sub, n, content, len)) &&
+		    event_ok(sub, n->sid))
 			(void)send_record(sub, n->sid, content, len);
 		sub_rele(sub);
 	}

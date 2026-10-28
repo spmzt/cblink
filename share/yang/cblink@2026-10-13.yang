@@ -483,4 +483,92 @@ module cblink {
          sender implements, keyed by its SID.";
     }
   }
+
+  sx:structure datastore {
+    description
+      "Beside a GET or an EDIT: the datastore it reads or changes (RFC
+       8342).  Without it a GET reads the operational state and an EDIT
+       changes running.";
+    reference
+      "RFC 8342: Network Management Datastore Architecture (NMDA)";
+    leaf name {
+      type enumeration {
+        enum running {
+          description
+            "The configuration in use.";
+        }
+        enum candidate {
+          description
+            "A configuration being made, put in use by a commit (RFC
+             6241 section 8.3).";
+        }
+        enum operational {
+          description
+            "The state in use, configuration and all.";
+        }
+      }
+      mandatory true;
+      description
+        "The datastore.";
+    }
+  }
+
+  sx:structure accept {
+    description
+      "Beside a request: the warnings it goes on despite, each by the
+       error-app-tag the refusal that said it carried.";
+    leaf-list warning {
+      type string {
+        length "1..64";
+      }
+      description
+        "An error-app-tag.";
+    }
+  }
+
+  sx:structure warnings {
+    description
+      "In an answer: what the request did that its sender should know,
+       as RFC 6241's errors of severity warning.";
+    reference
+      "RFC 6241: Network Configuration Protocol (NETCONF), Section 4.3";
+    list warning {
+      description
+        "A warning.";
+      leaf error-path {
+        type uint64;
+        description
+          "The SID of the node it is about; 0, none.";
+      }
+      leaf error-app-tag {
+        type string;
+        description
+          "What it is, for a request to accept it by.";
+      }
+      leaf error-message {
+        type string;
+        description
+          "What it says.";
+      }
+    }
+  }
+
+  sx:structure user {
+    description
+      "Beside a request: the user it is made for, RFC 8341's, which
+       its access is checked as.  A peer that serves many users over
+       one session (a console, a proxy) says whose request each one
+       is; the receiver takes it only from a peer it trusts to say so.";
+    reference
+      "RFC 8341: Network Configuration Access Control Model,
+       Section 2.2";
+    leaf name {
+      type string {
+        length "1..253";
+      }
+      mandatory true;
+      description
+        "The user's name, as NACM's groups list it.";
+    }
+  }
 }

@@ -1,0 +1,71 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "dsdemo",
+    "module-revision": "2026-10-28",
+    "sid-file-version": 1,
+    "description": "yds_test's tables, numbered for the test alone.",
+    "assignment-range": [
+      {
+        "entry-point": "82900",
+        "size": "50"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "dsdemo",
+        "sid": "82900"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg",
+        "sid": "82901"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/a",
+        "sid": "82902"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/b",
+        "sid": "82903"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/hits",
+        "sid": "82904"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/c",
+        "sid": "82905"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/kind",
+        "sid": "82906"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/opt",
+        "sid": "82907"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/opt/x-val",
+        "sid": "82908"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/opt/y-val",
+        "sid": "82909"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/tag-id",
+        "sid": "82910"
+      }
+    ]
+  }
+}

@@ -140,6 +140,9 @@ struct cbl_member {
 	LIST_ENTRY(cbl_member)	 clink;		/* in the connection */
 	struct cbl_group	*g;
 	cbl_conn		*conn;
+	/* Whom it joined for: its notifications are NACM's to send. */
+	char			*user;
+	bool			 recovery;
 };
 
 /* A client-side subscription. */
@@ -161,7 +164,25 @@ void	cbl_notify_conn_closed(cbl_conn *conn);
 void	cbl_notify_family_gone(cbl_ctx *ctx, const cbl_family *fam);
 void	cbl_sub_free_all(cbl_conn *conn);
 
+/* cbl_ynacm.c: whom a request is for, from its peer and what it said;
+ * NACM's verdict on a family's op (EACCES, said for the request); the
+ * rules let go. */
+int	cbl_req_who(cbl_req *req);
+void	cbl_conn_stamp(cbl_conn *conn, cbl_msg *msg);
+struct cbl_ynode;
+int	cbl_notify_if(cbl_family *fam, uint32_t group_idx, cbl_msg *msg,
+	    const struct cbl_ynode *n);
+int	cbl_ynacm_op(cbl_req *req, const char *module, const char *name,
+	    bool deny);
+void	cbl_ynacm_free(cbl_ctx *ctx);
+/* cbl_yds.c: a request's accepted warnings and warnings let go; a
+ * connection gone (a confirmed commit of its own undone); all freed. */
+void	cbl_yds_req_free(cbl_req *req);
+void	cbl_yds_conn_closed(cbl_conn *conn);
+void	cbl_yds_free(cbl_ctx *ctx);
+
 struct cbl_ysub_replay;
+struct cbl_ynacm;
 struct timespec;
 
 struct cbl_ctx {
@@ -208,6 +229,17 @@ struct cbl_ctx {
 	 * SIDs), ysublock's. */
 	uint64_t		*ytold;
 	size_t			 nytold;
+	/* Who a request is for (cbl_ynacm.c), and NACM's rules as last
+	 * read, read again once nacmgen moves; its counters. */
+	cbl_user_f		*user_fn;
+	void			*user_arg;
+	pthread_mutex_t		 nacmlock;
+	struct cbl_ynacm	*nacm;
+	uint64_t		 nacmgen, nacmread;
+	atomic_uint		 nacm_denied_ops, nacm_denied_writes,
+				 nacm_denied_notifs;
+	/* Family 1's datastores (cbl_yds.c), NULL: none. */
+	struct cbl_yds		*yds;
 };
 
 cbl_family *cbl_family_lookup(cbl_ctx *ctx, uint16_t id);
@@ -272,7 +304,25 @@ struct cbl_req {
 	/* Family 1's (cbl_yfamily.c): the node at fault, its tag, arg. */
 	uint64_t		 err_ysid;
 	const char		*err_ytag;
+	char			*err_yapptag;
 	void			*yarg;
+	/* Whom it is for (cbl_ynacm.c): NULL, with recovery, the recovery
+	 * session. */
+	char			*user;
+	bool			 recovery;
+	/* Family 1's datastores (cbl_yds.c): the warnings it accepts, read
+	 * once; those it is to be told. */
+	char			**accepts;
+	size_t			 naccepts;
+	bool			 accepts_read;
+	bool			 yds_running;	/* read for running */
+	bool			 yds_undo;	/* an edit undoing a commit */
+	struct cbl_ywarn_out {
+		uint64_t	 sid;
+		char		*tag;
+		char		*text;
+	}			*warns;
+	size_t			 nwarns;
 };
 
 /* Peer identity. */
@@ -357,6 +407,7 @@ struct cbl_msg {
 	/* Builder. */
 	bool			 decoded;	/* received: read only */
 	bool			 finalized;
+	bool			 has_user;	/* cbl_msg_set_user()'s */
 	uint32_t		 window;	/* stream window, 0: default */
 	int			 error;		/* sticky */
 	const char		*errstr;
@@ -375,6 +426,7 @@ struct cbl_msg {
 	uint64_t		*err_pathv;
 	size_t			 err_npath;
 	uint64_t		 err_ysid;	/* error-path a SID alone */
+	const char		*err_apptag;	/* error-app-tag */
 	int			 err_miss;
 	const void		*err_cookiep;
 	size_t			 err_cookielen;
@@ -393,6 +445,7 @@ struct cbl_msg {
 		size_t		 cookielen;
 		uint64_t	 ysid;	/* error-path: a SID, not path */
 		const char	*ytag;	/* error-tag, not the errno's */
+		const char	*yapptag;	/* error-app-tag */
 	}			 fwout;
 
 	struct cbl_arena	 arena;
@@ -410,7 +463,8 @@ const struct cbl_ynode *cbl_fw_node(const char *name);
 int	 cbl_fw_error(cbl_msg *msg, int code, const char *text,
 	    const struct cbl_path_elem *path, size_t pathlen, int miss_type);
 int	 cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len);
-void	 cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag);
+void	 cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag,
+	    const char *apptag);
 int	 cbl_fw_flush(cbl_msg *msg);
 int	 cbl_fw_credit(cbl_msg *msg, uint32_t increment);
 int	 cbl_fw_close(cbl_msg *msg, uint32_t code, const char *text);
@@ -638,6 +692,7 @@ enum cbl_conn_state {
 struct cbl_conn {
 	struct cbl_src			 src;
 	pthread_mutex_t			 mtx;
+	char				*user;	/* cbl_conn_set_user(), mtx's */
 	pthread_cond_t			 cv;
 	atomic_uint			 refs;
 	cbl_ctx				*ctx;

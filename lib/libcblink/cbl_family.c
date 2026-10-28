@@ -67,7 +67,11 @@ def_check(const struct cbl_family_def *def, bool builtin)
 		if (op->cmd == 0 || (i > 0 && op->cmd <= def->ops[i - 1].cmd))
 			return (EINVAL);
 		if ((op->flags & ~(CBL_OPF_DO | CBL_OPF_DUMP | CBL_OPF_STREAM |
-		    CBL_OPF_PUSH | CBL_OPF_AUTH)) != 0)
+		    CBL_OPF_PUSH | CBL_OPF_AUTH | CBL_OPF_NACM |
+		    CBL_OPF_DENY)) != 0)
+			return (EINVAL);
+		if ((op->flags & CBL_OPF_DENY) != 0 &&
+		    (op->flags & CBL_OPF_NACM) == 0)
 			return (EINVAL);
 		if (((op->flags & CBL_OPF_DO) != 0) != (op->doit != NULL))
 			return (EINVAL);

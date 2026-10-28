@@ -81,6 +81,18 @@ module cblink-ctrl {
         description
           "The command needs an authenticated peer.";
       }
+      bit nacm {
+        position 5;
+        description
+          "NACM (RFC 8341) is asked about the command, an rpc of the
+           module named as its family.";
+      }
+      bit deny {
+        position 6;
+        description
+          "With nacm: the command is as nacm:default-deny-all marks
+           one, run only where a rule permits it.";
+      }
     }
     description
       "What a command does: the CBL_OPF_* values.";

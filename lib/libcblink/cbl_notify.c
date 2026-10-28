@@ -25,6 +25,7 @@
 
 #include "cbl_impl.h"
 #include "cbl_schema.h"
+#include "cbl_yimpl.h"
 
 static int
 group_cmp(struct cbl_group *a, struct cbl_group *b)
@@ -59,6 +60,7 @@ member_remove(cbl_ctx *ctx, struct cbl_member *m)
 
 	LIST_REMOVE(m, glink);
 	LIST_REMOVE(m, clink);
+	free(m->user);
 	free(m);
 	if (LIST_EMPTY(&g->members)) {
 		RB_REMOVE(cbl_group_tree, &ctx->groups, g);
@@ -105,9 +107,13 @@ cbl_sub_change(cbl_req *req, uint16_t family, uint32_t gid, bool subscribe)
 			break;
 	if (subscribe && m == NULL) {
 		if ((g = group_find(ctx, gid, true)) == NULL ||
-		    (m = calloc(1, sizeof(*m))) == NULL)
+		    (m = calloc(1, sizeof(*m))) == NULL ||
+		    (req->user != NULL && (m->user = strdup(req->user)) ==
+		    NULL)) {
+			free(m);
 			error = ENOMEM;
-		else {
+		} else {
+			m->recovery = req->recovery;
 			m->g = g;
 			m->conn = conn;
 			LIST_INSERT_HEAD(&g->members, m, glink);
@@ -249,8 +255,25 @@ notify_prepare(cbl_family *fam, uint32_t group_idx, cbl_msg *msg)
 int
 cbl_notify(cbl_family *fam, uint32_t group_idx, cbl_msg *msg)
 {
+
+	return (cbl_notify_if(fam, group_idx, msg, NULL));
+}
+
+/*
+ * The same, to the members a YANG notification of n may go to, as NACM
+ * says (n NULL: all).  Who each is is copied under the lock and asked
+ * about after it: the rules may be read through the program's handler.
+ */
+int
+cbl_notify_if(cbl_family *fam, uint32_t group_idx, cbl_msg *msg,
+    const struct cbl_ynode *n)
+{
 	struct cbl_member *m;
 	struct cbl_group *g;
+	struct cbl_ywho *who = NULL;
+	cbl_conn **conns = NULL;
+	char **users = NULL;
+	size_t k = 0, nm = 0;
 	cbl_ctx *ctx;
 	int error;
 
@@ -260,12 +283,44 @@ cbl_notify(cbl_family *fam, uint32_t group_idx, cbl_msg *msg)
 	}
 	ctx = fam->ctx;
 	pthread_mutex_lock(&ctx->submtx);
-	if ((g = group_find(ctx, msg->hdr.stream, false)) != NULL)
+	g = group_find(ctx, msg->hdr.stream, false);
+	if (g != NULL && n == NULL)
 		LIST_FOREACH(m, &g->members, glink)
 			(void)deliver(m->conn, msg);
+	else if (g != NULL) {
+		LIST_FOREACH(m, &g->members, glink)
+			nm++;
+		if ((who = calloc(nm, sizeof(*who))) == NULL ||
+		    (conns = calloc(nm, sizeof(*conns))) == NULL ||
+		    (users = calloc(nm, sizeof(*users))) == NULL)
+			error = ENOMEM;
+		LIST_FOREACH(m, &g->members, glink) {
+			if (error != 0)
+				break;
+			if (m->user != NULL && (users[k] = strdup(m->user)) ==
+			    NULL) {
+				error = ENOMEM;
+				break;
+			}
+			who[k].user = users[k];
+			who[k].recovery = m->recovery;
+			conns[k] = m->conn;
+			cbl_conn_ref(m->conn);
+			k++;
+		}
+	}
 	pthread_mutex_unlock(&ctx->submtx);
+	for (size_t i = 0; i < k; i++) {
+		if (error == 0 && cbl_ynacm_notif(ctx, conns[i], &who[i], n))
+			(void)deliver(conns[i], msg);
+		cbl_conn_rele(conns[i]);
+		free(users[i]);
+	}
+	free(users);
+	free(conns);
+	free(who);
 	cbl_msg_free(msg);
-	return (0);
+	return (error);
 }
 
 /* Send a notification to one peer only. */

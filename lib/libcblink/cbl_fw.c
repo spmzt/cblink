@@ -164,13 +164,14 @@ cbl_fw_cookie(cbl_msg *msg, const void *p, size_t len)
 
 /* Family 1's: the node at fault by its SID alone, and the tag. */
 void
-cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag)
+cbl_fw_yerr(cbl_msg *msg, uint64_t sid, const char *tag, const char *apptag)
 {
 	struct cbl_fwout *o = &msg->fwout;
 
 	o->has = true;
 	o->ysid = sid;
 	o->ytag = tag;
+	o->yapptag = apptag;
 }
 
 /* An unsigned integer's CBOR head, into p: its length. */
@@ -217,6 +218,7 @@ cbl_fw_flush(cbl_msg *msg)
 		e.errno_ = (uint32_t)o->code;
 	}
 	e.error_message = o->text;
+	e.error_app_tag = o->yapptag;
 	/*
 	 * The path: a node's SID alone, as an instance-identifier is for
 	 * one not in a list; else the array shape, [a, b, ...].
@@ -373,6 +375,12 @@ cbl_fw_extract(cbl_msg *msg)
 	}
 	if (e.error_path.p != NULL)
 		fw_path(msg, &e.error_path);
+	if (e.error_app_tag != NULL && strlen(e.error_app_tag) <= 64 &&
+	    (s = cbl_arena_alloc(&msg->arena, strlen(e.error_app_tag) + 1)) !=
+	    NULL) {
+		memcpy(s, e.error_app_tag, strlen(e.error_app_tag) + 1);
+		msg->err_apptag = s;
+	}
 	/* missing-element: what is missing is the path's last. */
 	if (e.has_error_tag && e.error_tag == fw_tag("missing-element") &&
 	    msg->err_npath > 0 && msg->err_pathv[msg->err_npath - 1] <=

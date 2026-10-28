@@ -271,6 +271,15 @@ ATF_TC_BODY(tables, tc)
 	    NULL);
 	ATF_CHECK(n->kind == CBL_YN_LEAFLIST && (n->flags &
 	    CBL_YNF_USERORDER));
+	/* NACM's extensions, where ietf-system has them, and not elsewhere. */
+	n = child(top(sys, "system"), "authentication");
+	ATF_CHECK((n->flags & (CBL_YNF_DENY_WRITE | CBL_YNF_DENY_ALL)) ==
+	    CBL_YNF_DENY_WRITE);
+	n = top(sys, "set-current-datetime");
+	ATF_REQUIRE(n != NULL && n->kind == CBL_YN_RPC);
+	ATF_CHECK((n->flags & CBL_YNF_DENY_ALL) != 0);
+	ATF_CHECK((child(top(sys, "system"), "hostname")->flags &
+	    (CBL_YNF_DENY_WRITE | CBL_YNF_DENY_ALL)) == 0);
 }
 
 /* Every identityref base under n: in the table, its closure too. */

@@ -419,6 +419,71 @@ ATF_TC_BODY(module, tc)
 	cbl_ybuf_free(&out);
 }
 
+/*
+ * A union of strings told apart by their patterns (inet:host: an IPv4
+ * or IPv6 address, or a domain name) comes back from CBOR as the member
+ * it was, the first whose restrictions it meets (RFC 7950 9.12), not
+ * the first string.
+ */
+ATF_TC_WITHOUT_HEAD(union_member);
+ATF_TC_BODY(union_member, tc)
+{
+	static const char *const hosts[] = { "192.0.2.1", "2001:db8::1",
+	    "ntp.example.org" };
+	const struct cbl_ynode *server = sn("ietf-system:system/ntp/server");
+	const struct cbl_ynode *udp = sn("ietf-system:system/ntp/server/udp");
+	const struct cbl_ynode *addr =
+	    sn("ietf-system:system/ntp/server/udp/address");
+	const char *name = "a";
+	const void *keys[1] = { &name };
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	cbl_dnode *sys, *ntp, *e, *u, *x;
+	cbl_dtree *t, *back;
+	cbl_yarena *a;
+	unsigned seen[3];
+	char why[160];
+	void *v;
+
+	for (int i = 0; i < 3; i++) {
+		ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+		ATF_REQUIRE((v = cbl_yarena_alloc(a, addr->type->csize)) !=
+		    NULL);
+		memset(v, 0, addr->type->csize);
+		ATF_REQUIRE_EQ(0, cbl_yvalue_parse(addr, addr->type,
+		    hosts[i], v, a));
+		seen[i] = *(const unsigned *)v;
+		ATF_REQUIRE((t = cbl_dtree_new(&yangh_schema)) != NULL);
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(cbl_dtree_root(t),
+		    sn("ietf-system:system"), NULL, &sys));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(sys,
+		    sn("ietf-system:system/ntp"), NULL, &ntp));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add_entry(ntp, server, keys, &e));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(e, udp, NULL, &u));
+		ATF_REQUIRE_EQ(0, cbl_dnode_add(u, addr, v, NULL));
+		ATF_REQUIRE_EQ(0, cbl_dtree_encode(t, &b));
+		ATF_REQUIRE((back = cbl_dtree_new(&yangh_schema)) != NULL);
+		ATF_REQUIRE_EQ_MSG(0, cbl_dtree_decode(back, b.p, b.len, 0,
+		    why, sizeof(why)), "%s", why);
+		x = cbl_dnode_child(cbl_dtree_root(back),
+		    sn("ietf-system:system"));
+		x = x != NULL ? cbl_dnode_child(x,
+		    sn("ietf-system:system/ntp")) : NULL;
+		x = x != NULL ? cbl_dnode_entry(x, server, keys) : NULL;
+		x = x != NULL ? cbl_dnode_child(x, udp) : NULL;
+		x = x != NULL ? cbl_dnode_child(x, addr) : NULL;
+		ATF_REQUIRE(x != NULL);
+		ATF_CHECK_EQ_MSG(seen[i], *(const unsigned *)cbl_dnode_value(x),
+		    "%s", hosts[i]);
+		cbl_dtree_free(back);
+		cbl_dtree_free(t);
+		cbl_ybuf_free(&b);
+		memset(&b, 0, sizeof(b));
+		cbl_yarena_free(a);
+	}
+	/* Three values, and not all of one member. */
+	ATF_CHECK(seen[0] != seen[2] && seen[1] != seen[2]);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -428,6 +493,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, choices);
 	ATF_TP_ADD_TC(tp, defaults);
 	ATF_TP_ADD_TC(tp, roundtrip);
+	ATF_TP_ADD_TC(tp, union_member);
 	ATF_TP_ADD_TC(tp, module);
 	return (atf_no_error());
 }

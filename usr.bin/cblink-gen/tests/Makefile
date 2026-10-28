@@ -103,6 +103,42 @@ ysubh.h: ${YSUBH_SRC} ${GEN}
 	    -F ietf-yang-push:on-change -F ietf-datastores: ${YSUBH_SID} \
 	    ${YSUBH_SRC} > /dev/null
 ysubh_schema.c: ysubh.h
+# ynacm_test: NACM (RFC 8341) over family 1 and a family of its own,
+# nacmdemo's tables with ietf-netconf-acm, numbered for the test alone.
+ATF_TESTS_C+=	ynacm_test
+SRCS.ynacm_test=	ynacmh.h ynacm_test.c ynacmh_schema.c
+CFLAGS.ynacm_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
+LDADD.ynacm_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CFLAGS.ynacmh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+YNACMH_SRC=	${.CURDIR}/yang/nacmdemo@2026-10-28.yang \
+		${.CURDIR}/corpus/ietf-netconf-acm@2018-02-14.yang \
+		${.CURDIR}/corpus/ietf-netconf@2011-06-01.yang
+YNACMH_SID=	-s ${.CURDIR}/yang/nacmdemo@2026-10-28.sid \
+		-s ${.CURDIR}/yang/ietf-netconf-acm@2018-02-14.sid \
+		-s ${.CURDIR}/yang/ietf-netconf@2011-06-01.sid
+CLEANFILES+=	ynacmh.h ynacmh_schema.c
+ynacmh.h: ${YNACMH_SRC} ${GEN}
+	${GEN} -m h,schema -b ynacmh -o ${.OBJDIR} -p ${.CURDIR}/corpus \
+	    -F ietf-netconf:candidate,confirmed-commit -F nacmdemo: \
+	    -F ietf-netconf-acm: ${YNACMH_SID} ${YNACMH_SRC} > /dev/null
+ynacmh_schema.c: ynacmh.h
+# yds_test: the datastores: running, the candidate, commit and confirmed
+# commit (dsdemo's tables with ietf-netconf's), numbered for the test.
+ATF_TESTS_C+=	yds_test
+SRCS.yds_test=	ydsh.h yds_test.c ydsh_schema.c
+CFLAGS.yds_test+=	-I${.OBJDIR} -I${LIBCBLINK_SRC} -I${LIBCBLINK_SRC}/tests
+LDADD.yds_test+=	-L${LIBCBLINK_OBJ} -lcblink -lpthread
+CFLAGS.ydsh_schema.c+=	-I${.OBJDIR} -I${LIBCBLINK_SRC}
+YDSH_SRC=	${.CURDIR}/yang/dsdemo@2026-10-28.yang \
+		${.CURDIR}/corpus/ietf-netconf@2011-06-01.yang
+YDSH_SID=	-s ${.CURDIR}/yang/dsdemo@2026-10-28.sid \
+		-s ${.CURDIR}/yang/ietf-netconf@2011-06-01.sid
+CLEANFILES+=	ydsh.h ydsh_schema.c
+ydsh.h: ${YDSH_SRC} ${GEN}
+	${GEN} -m h,schema -b ydsh -o ${.OBJDIR} -p ${.CURDIR}/corpus \
+	    -F ietf-netconf:candidate,confirmed-commit -F dsdemo: \
+	    ${YDSH_SID} ${YDSH_SRC} > /dev/null
+ydsh_schema.c: ydsh.h
 # yvalid_test: the static validator on the module rules.
 ATF_TESTS_C+=	yvalid_test
 SRCS.yvalid_test=	rules.h yvalid_test.c rules_schema.c

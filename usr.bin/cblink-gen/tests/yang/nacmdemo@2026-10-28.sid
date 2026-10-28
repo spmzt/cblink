@@ -1,0 +1,147 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "nacmdemo",
+    "module-revision": "2026-10-28",
+    "sid-file-version": 0,
+    "description": "ynacm_test's tables, numbered for the test alone.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-netconf-acm",
+        "module-revision": "2018-02-14"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "82000",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "nacmdemo",
+        "sid": "82000"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:alarm",
+        "sid": "82001"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:alarm/what",
+        "sid": "82002"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data",
+        "sid": "82003"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data/item",
+        "sid": "82004"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data/item/name",
+        "sid": "82005"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data/item/note",
+        "sid": "82006"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data/public",
+        "sid": "82007"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:data/secret",
+        "sid": "82008"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:echo",
+        "sid": "82009"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:echo/input",
+        "sid": "82010"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:echo/output",
+        "sid": "82011"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:echo/output/ok",
+        "sid": "82012"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:event",
+        "sid": "82013"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:event/what",
+        "sid": "82014"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:locked",
+        "sid": "82015"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:locked/x",
+        "sid": "82016"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:ping",
+        "sid": "82017"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:ping/input",
+        "sid": "82018"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:ping/output",
+        "sid": "82019"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:ping/output/ok",
+        "sid": "82020"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:reboot",
+        "sid": "82021"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:reboot/input",
+        "sid": "82022"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:reboot/output",
+        "sid": "82023"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/nacmdemo:reboot/output/ok",
+        "sid": "82024"
+      }
+    ]
+  }
+}

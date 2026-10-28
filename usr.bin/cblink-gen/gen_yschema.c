@@ -146,6 +146,23 @@ cstr(struct buf *b, const char *s)
 	buf_puts(b, "\"");
 }
 
+/* CBL_YNF_DENY_WRITE and _ALL: NACM's extensions on the node. */
+static unsigned
+nacm_flags(const struct snode *n)
+{
+	unsigned f = 0;
+
+	for (size_t i = 0; i < n->nexts; i++) {
+		if (strcmp(n->exts[i].ext,
+		    "ietf-netconf-acm:default-deny-write") == 0)
+			f |= 0x0080;
+		else if (strcmp(n->exts[i].ext,
+		    "ietf-netconf-acm:default-deny-all") == 0)
+			f |= 0x0100;
+	}
+	return (f);
+}
+
 /* An expression's number: the same text, the same number. */
 static int32_t
 xpath_id(struct ys *y, const char *x)
@@ -950,8 +967,9 @@ node_ref(struct ys *y, const struct snode *n)
 	if ((n->kind == SN_INPUT || n->kind == SN_OUTPUT) && n->parent != NULL)
 		buf_printf(&init, "\t.base = UINT64_C(%" PRIu64 "),\n",
 		    n->parent->sid);
-	if ((n->flags & 0x7f) != 0)
-		buf_printf(&init, "\t.flags = 0x%x,\n", n->flags & 0x7f);
+	if ((n->flags & 0x7f) != 0 || nacm_flags(n) != 0)
+		buf_printf(&init, "\t.flags = 0x%x,\n", (n->flags & 0x7f) |
+		    nacm_flags(n));
 	/* Where it is in the structs. */
 	buf_init(&list);
 	if (member_of(&list, n)) {

@@ -1,0 +1,565 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-netconf",
+    "module-revision": "2011-06-01",
+    "sid-file-version": 0,
+    "description": "yds_test's tables, numbered for the test alone.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-inet-types",
+        "module-revision": "2025-12-22"
+      },
+      {
+        "module-name": "ietf-yang-metadata",
+        "module-revision": "2016-08-05"
+      },
+      {
+        "module-name": "ietf-yang-types",
+        "module-revision": "2025-12-22"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "83000",
+        "size": "200"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "ietf-netconf",
+        "sid": "83000"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "candidate",
+        "sid": "83001"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "confirmed-commit",
+        "sid": "83002"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "rollback-on-error",
+        "sid": "83003"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "startup",
+        "sid": "83004"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "url",
+        "sid": "83005"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "validate",
+        "sid": "83006"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "writable-running",
+        "sid": "83007"
+      },
+      {
+        "namespace": "feature",
+        "identifier": "xpath",
+        "sid": "83008"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:cancel-commit",
+        "sid": "83009"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:cancel-commit/input",
+        "sid": "83010"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:cancel-commit/input/persist-id",
+        "sid": "83011"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:cancel-commit/output",
+        "sid": "83012"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:close-session",
+        "sid": "83013"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:close-session/input",
+        "sid": "83014"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:close-session/output",
+        "sid": "83015"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit",
+        "sid": "83016"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/input",
+        "sid": "83017"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/input/confirm-timeout",
+        "sid": "83018"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/input/confirmed",
+        "sid": "83019"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/input/persist",
+        "sid": "83020"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/input/persist-id",
+        "sid": "83021"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:commit/output",
+        "sid": "83022"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config",
+        "sid": "83023"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input",
+        "sid": "83024"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source",
+        "sid": "83025"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source/candidate",
+        "sid": "83026"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source/config",
+        "sid": "83027"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source/running",
+        "sid": "83028"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source/startup",
+        "sid": "83029"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/source/url",
+        "sid": "83030"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/target",
+        "sid": "83031"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/target/candidate",
+        "sid": "83032"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/target/running",
+        "sid": "83033"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/target/startup",
+        "sid": "83034"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/input/target/url",
+        "sid": "83035"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:copy-config/output",
+        "sid": "83036"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config",
+        "sid": "83037"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config/input",
+        "sid": "83038"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config/input/target",
+        "sid": "83039"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config/input/target/startup",
+        "sid": "83040"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config/input/target/url",
+        "sid": "83041"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:delete-config/output",
+        "sid": "83042"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:discard-changes",
+        "sid": "83043"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:discard-changes/input",
+        "sid": "83044"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:discard-changes/output",
+        "sid": "83045"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config",
+        "sid": "83046"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input",
+        "sid": "83047"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/config",
+        "sid": "83048"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/default-operation",
+        "sid": "83049"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/error-option",
+        "sid": "83050"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/target",
+        "sid": "83051"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/target/candidate",
+        "sid": "83052"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/target/running",
+        "sid": "83053"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/test-option",
+        "sid": "83054"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/input/url",
+        "sid": "83055"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:edit-config/output",
+        "sid": "83056"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get",
+        "sid": "83057"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config",
+        "sid": "83058"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input",
+        "sid": "83059"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input/filter",
+        "sid": "83060"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input/source",
+        "sid": "83061"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input/source/candidate",
+        "sid": "83062"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input/source/running",
+        "sid": "83063"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/input/source/startup",
+        "sid": "83064"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/output",
+        "sid": "83065"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get-config/output/data",
+        "sid": "83066"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get/input",
+        "sid": "83067"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get/input/filter",
+        "sid": "83068"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get/output",
+        "sid": "83069"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:get/output/data",
+        "sid": "83070"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:kill-session",
+        "sid": "83071"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:kill-session/input",
+        "sid": "83072"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:kill-session/input/session-id",
+        "sid": "83073"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:kill-session/output",
+        "sid": "83074"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock",
+        "sid": "83075"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/input",
+        "sid": "83076"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/input/target",
+        "sid": "83077"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/input/target/candidate",
+        "sid": "83078"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/input/target/running",
+        "sid": "83079"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/input/target/startup",
+        "sid": "83080"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:lock/output",
+        "sid": "83081"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error",
+        "sid": "83082"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error/error-app-tag",
+        "sid": "83083"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error/error-path",
+        "sid": "83084"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error/error-severity",
+        "sid": "83085"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error/error-tag",
+        "sid": "83086"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:rpc-error/error-type",
+        "sid": "83087"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock",
+        "sid": "83088"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/input",
+        "sid": "83089"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/input/target",
+        "sid": "83090"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/input/target/candidate",
+        "sid": "83091"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/input/target/running",
+        "sid": "83092"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/input/target/startup",
+        "sid": "83093"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:unlock/output",
+        "sid": "83094"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate",
+        "sid": "83095"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input",
+        "sid": "83096"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source",
+        "sid": "83097"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source/candidate",
+        "sid": "83098"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source/config",
+        "sid": "83099"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source/running",
+        "sid": "83100"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source/startup",
+        "sid": "83101"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/input/source/url",
+        "sid": "83102"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf:validate/output",
+        "sid": "83103"
+      },
+      {
+        "namespace": "annotation",
+        "identifier": "operation",
+        "sid": "83104"
+      },
+      {
+        "namespace": "annotation",
+        "identifier": "select",
+        "sid": "83105"
+      },
+      {
+        "namespace": "annotation",
+        "identifier": "type",
+        "sid": "83106"
+      }
+    ]
+  }
+}

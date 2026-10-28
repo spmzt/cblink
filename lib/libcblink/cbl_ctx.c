@@ -83,6 +83,7 @@ cbl_ctx_new(cbl_ctx **ctxp)
 	pthread_cond_init(&ctx->famcv, NULL);
 	pthread_mutex_init(&ctx->submtx, NULL);
 	pthread_mutex_init(&ctx->ysublock, NULL);
+	pthread_mutex_init(&ctx->nacmlock, NULL);
 	TAILQ_INIT(&ctx->ysubs);
 	RB_INIT(&ctx->groups);
 	RB_INIT(&ctx->fams);
@@ -114,6 +115,9 @@ cbl_ctx_free(cbl_ctx *ctx)
 	cbl_yfamily_free(ctx);
 	cbl_tls_free(ctx->tls);
 	free(ctx->ytold);
+	cbl_ynacm_free(ctx);
+	cbl_yds_free(ctx);
+	pthread_mutex_destroy(&ctx->nacmlock);
 	pthread_mutex_destroy(&ctx->ysublock);
 	pthread_mutex_destroy(&ctx->submtx);
 	pthread_cond_destroy(&ctx->famcv);

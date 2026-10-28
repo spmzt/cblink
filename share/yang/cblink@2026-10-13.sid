@@ -2,7 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "cblink",
     "module-revision": "2026-10-13",
-    "sid-file-version": 3,
+    "sid-file-version": 5,
     "sid-file-status": "unpublished",
     "description": "SIDs of cblink, assigned by hand from RFC 9595's experimental range (60 000 to 99 999), for now (Arcana share/yang/SIDS.md): not globally unique, so for no operational deployment; numbers are forever within it, never reused or removed; an item that goes is marked obsolete and a revision adds items at the end of the range.",
     "dependency-revision": [
@@ -286,6 +286,61 @@
         "namespace": "data",
         "identifier": "/cblink:get/xpath-filter",
         "sid": "60052"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:user",
+        "sid": "60053"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:user/name",
+        "sid": "60054"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:accept",
+        "sid": "60055"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:accept/warning",
+        "sid": "60056"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:datastore",
+        "sid": "60057"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:datastore/name",
+        "sid": "60058"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:warnings",
+        "sid": "60059"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:warnings/warning",
+        "sid": "60060"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:warnings/warning/error-app-tag",
+        "sid": "60061"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:warnings/warning/error-message",
+        "sid": "60062"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/cblink:warnings/warning/error-path",
+        "sid": "60063"
       }
     ]
   }

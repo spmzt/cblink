@@ -1,0 +1,152 @@
+{
+  "ietf-sid-file:sid-file": {
+    "module-name": "ietf-netconf-acm",
+    "module-revision": "2018-02-14",
+    "sid-file-version": 0,
+    "description": "ynacm_test's tables, numbered for the test alone.",
+    "dependency-revision": [
+      {
+        "module-name": "ietf-yang-types",
+        "module-revision": "2025-12-22"
+      }
+    ],
+    "assignment-range": [
+      {
+        "entry-point": "82100",
+        "size": "100"
+      }
+    ],
+    "item": [
+      {
+        "namespace": "module",
+        "identifier": "ietf-netconf-acm",
+        "sid": "82100"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm",
+        "sid": "82101"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/denied-data-writes",
+        "sid": "82102"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/denied-notifications",
+        "sid": "82103"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/denied-operations",
+        "sid": "82104"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/enable-external-groups",
+        "sid": "82105"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/enable-nacm",
+        "sid": "82106"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/exec-default",
+        "sid": "82107"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/groups",
+        "sid": "82108"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/groups/group",
+        "sid": "82109"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/groups/group/name",
+        "sid": "82110"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/groups/group/user-name",
+        "sid": "82111"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/read-default",
+        "sid": "82112"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list",
+        "sid": "82113"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/group",
+        "sid": "82114"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/name",
+        "sid": "82115"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule",
+        "sid": "82116"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/access-operations",
+        "sid": "82117"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/action",
+        "sid": "82118"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/comment",
+        "sid": "82119"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/module-name",
+        "sid": "82120"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/name",
+        "sid": "82121"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/notification-name",
+        "sid": "82122"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/path",
+        "sid": "82123"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/rule-list/rule/rpc-name",
+        "sid": "82124"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/ietf-netconf-acm:nacm/write-default",
+        "sid": "82125"
+      }
+    ]
+  }
+}

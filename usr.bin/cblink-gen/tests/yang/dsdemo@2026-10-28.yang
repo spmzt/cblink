@@ -1,0 +1,95 @@
+module dsdemo {
+  yang-version 1.1;
+  namespace "urn:example:dsdemo";
+  prefix dd;
+
+  description
+    "Configuration and state for yds_test: running, the candidate and
+     a confirmed commit (RFC 6241 section 8.3 and 8.4).";
+
+  revision 2026-10-28 {
+    description
+      "Initial revision.";
+  }
+
+  container cfg {
+    description
+      "What the handlers keep.";
+    leaf a {
+      type int32;
+      description
+        "A value: 13 refused unless the warning is accepted, 99 failing
+         when it is undone.";
+    }
+    leaf b {
+      type string;
+      description
+        "Another.";
+    }
+    leaf hits {
+      type uint32;
+      config false;
+      description
+        "State: how often it was read.";
+    }
+    leaf kind {
+      type enumeration {
+        enum plain {
+          description
+            "No tag.";
+        }
+        enum tagged {
+          description
+            "A tag-id is needed.";
+        }
+      }
+      description
+        "Whether tag-id is needed: a when over a mandatory leaf.";
+    }
+    uses tagging {
+      when "kind = 'tagged'";
+    }
+    leaf c {
+      type string;
+      must "string-length(.) <= 8" {
+        error-message "c is 8 characters at most";
+      }
+      description
+        "A must.";
+    }
+    container opt {
+      description
+        "Absent, the mandatory leaf of a case in it is not needed.";
+      choice mode {
+        case x {
+          leaf x-val {
+            type string;
+            mandatory true;
+            description
+              "Mandatory in its case.";
+          }
+        }
+        case y {
+          leaf y-val {
+            type string;
+            description
+              "The other case.";
+          }
+        }
+        description
+          "Two cases.";
+      }
+    }
+  }
+
+  grouping tagging {
+    description
+      "What kind tagged needs.";
+    leaf tag-id {
+      type uint16;
+      mandatory true;
+      description
+        "Mandatory where its when holds.";
+    }
+  }
+}

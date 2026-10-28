@@ -274,6 +274,13 @@ any other item, its value YANG-CBOR (RFC 9254):
 | `close`   | 60 000 + 42 | `code`, `message` | `S_CLOSE` |
 | `hello`   | 60 000 + 33 | `limits`, `implementation`, `content-id` | the control family's `hello` |
 | `notification` | 60 000 + 45 | `event-time`, `event` | `NOTIFY` of YANG notifications |
+| `user`    | 60 000 + 53 | `name` | beside a request: the user it is made for (RFC 8341), taken only from a peer the receiver trusts to say so |
+| `accept`  | 60 000 + 55 | `warning` (error-app-tags) | beside a request: the warnings it goes on despite |
+| `datastore` | 60 000 + 57 | `name` (running, candidate, operational) | beside a family-1 GET or EDIT: the datastore (RFC 8342) |
+| `warnings` | 60 000 + 59 | `warning[]` (`error-path`, `error-app-tag`, `error-message`) | in an answer: RFC 6241's errors of severity warning |
+
+An `ERROR` frame's `error` structure also carries `error-app-tag` where
+the refusal has one: a warning the request may accept.
 
 The SIDs are the module's `.sid` file's (`share/yang/cblink@2026-10-13.sid`);
 see `share/yang/SIDS.md` in Arcana for the block they are taken from.

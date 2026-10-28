@@ -122,6 +122,10 @@ const cbl_dnode *cbl_d_iid_node(const cbl_dtree *t,
 	    const struct cbl_bytes *v, cbl_yarena *a);
 /* n's value set to a copy of value, the one it had freed; and freed. */
 int	cbl_d_set_value(cbl_dnode *n, const void *value);
+/* Value p of type t within t's restrictions (cbl_yvalid.c): the
+ * decoder's choice of a union's member, RFC 7950 9.12. */
+bool	cbl_ytype_admits(const struct cbl_yschema *s,
+	    const struct cbl_ytype *t, const void *p);
 void	cbl_d_meta_free(cbl_dnode *n);
 /* YANG-CBOR of the tree, in cbl_ycodec.c: parent the root and sn NULL,
  * the top-level map. */

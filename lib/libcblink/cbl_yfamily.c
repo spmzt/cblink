@@ -136,8 +136,8 @@ cbl_ysay(cbl_req *req, int error, uint64_t sid, const char *tag,
 }
 
 /* A handler's failure: the node, and its message if it gave none. */
-static int
-yfailed(cbl_req *req, int error, uint64_t sid, const char *what)
+int
+cbl_yfailed(cbl_req *req, int error, uint64_t sid, const char *what)
 {
 
 	return (cbl_ysay(req, error, sid, NULL, req->err_msg == NULL ? what :
@@ -168,8 +168,9 @@ yvalid(cbl_req *req, const struct cbl_ynode *n, const void *p, int flags)
 	return (yverdict(req, cbl_yvalidate(n, p, flags, &ve), &ve));
 }
 
-static int
-yvalid_member(cbl_req *req, const struct cbl_ynode *n, const void *parent)
+int
+cbl_yvalid_member(cbl_req *req, const struct cbl_ynode *n,
+    const void *parent)
 {
 	struct cbl_yverr ve;
 
@@ -339,12 +340,17 @@ cbl_yread_tree(cbl_req *req, const uint64_t *v, size_t n, cbl_dtree **tp,
 		else {
 			req->yarg = f.arg;
 			if ((error = f.h->get(req, data, a)) != 0)
-				error = yfailed(req, error, v[i],
+				error = cbl_yfailed(req, error, v[i],
 				    "reading it failed");
 			else if (cbl_ymember_present(f.n, data) &&
-			    (error = cbl_yencode_member(f.n, data, &b)) == 0)
-				error = cbl_dnode_decode(cbl_dtree_root(t), f.n,
-				    b.p, b.len, 0, why, sizeof(why), NULL);
+			    (error = cbl_yencode_member(f.n, data, &b)) == 0 &&
+			    (error = cbl_dnode_decode(cbl_dtree_root(t), f.n,
+			    b.p, b.len, 0, why, sizeof(why), NULL)) != 0 &&
+			    error != ENOMEM && incomplete == NULL)
+				/* What the handler gave is not what its
+				 * schema allows: a server's bug, said. */
+				error = cbl_ysay(req, error, v[i],
+				    "operation-failed", why);
 			cbl_ybuf_free(&b);
 			memset(&b, 0, sizeof(b));
 			if (error != 0 && error != ENOMEM &&
@@ -380,6 +386,12 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 
 	if ((error = cbl_yread_tree(req, v, n, &t, NULL)) != 0 || t == NULL)
 		return (error);
+	/* What the user may not read is not there to be selected. */
+	if ((error = cbl_ynacm_read(req->conn->ctx, req->conn,
+	    &(struct cbl_ywho){ req->user, req->recovery }, t)) != 0) {
+		cbl_dtree_free(t);
+		return (error);
+	}
 	if ((ft = cbl_dtree_filter_xpath(t, xpath, why, sizeof(why))) ==
 	    NULL) {
 		error = errno;
@@ -400,6 +412,37 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 	return (error);
 }
 
+/*
+ * A node's value into reply as the user may read it: read as a tree,
+ * what NACM denies taken out (RFC 8341 section 3.4.5, read as
+ * omission).
+ */
+static int
+get_pruned(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
+{
+	struct cbl_ybuf b = { NULL, 0, 0 };
+	cbl_dtree *t;
+	cbl_dnode *c;
+	int error;
+
+	if ((error = cbl_yread_tree(req, &sid, 1, &t, NULL)) != 0 ||
+	    t == NULL)
+		return (error);
+	error = cbl_ynacm_read(req->conn->ctx, req->conn,
+	    &(struct cbl_ywho){ req->user, req->recovery }, t);
+	for (c = cbl_dnode_first(cbl_dtree_root(t)); error == 0 && c != NULL;
+	    c = cbl_dnode_next(c)) {
+		if ((error = cbl_dnode_encode(c, &b)) == 0 &&
+		    (error = cbl_msg_put_sid_raw(reply,
+		    cbl_dnode_schema(c)->sid, b.p, b.len)) == 0)
+			*put = true;
+		cbl_ybuf_free(&b);
+		memset(&b, 0, sizeof(b));
+	}
+	cbl_dtree_free(t);
+	return (error);
+}
+
 /* A node's value into reply, through its get handler. */
 static int
 get_one(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
@@ -416,6 +459,9 @@ get_one(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
 	if (f.h == NULL || f.h->get == NULL)
 		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
 		    "the node is not read"));
+	if (!cbl_ynacm_reads_all(req->conn->ctx, req->conn,
+	    &(struct cbl_ywho){ req->user, req->recovery }))
+		return (get_pruned(req, reply, sid, put));
 	if ((a = cbl_yarena_new()) == NULL)
 		return (ENOMEM);
 	if ((data = cbl_yarena_alloc(a, f.n->module->size)) == NULL)
@@ -423,7 +469,7 @@ get_one(cbl_req *req, cbl_msg *reply, uint64_t sid, bool *put)
 	else {
 		req->yarg = f.arg;
 		if ((error = f.h->get(req, data, a)) != 0)
-			error = yfailed(req, error, sid, "reading it failed");
+			error = cbl_yfailed(req, error, sid, "reading it failed");
 		else if (cbl_ymember_present(f.n, data)) {
 			error = cbl_msg_put_ymember(reply, f.n, data);
 			*put = error == 0;
@@ -443,6 +489,11 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	bool put;
 	int error;
 
+	enum cbl_yds_name ds;
+	bool said;
+
+	if ((error = cbl_yds_of(req, &ds, &said)) != 0)
+		return (error);
 	if ((error = get_targets(req, msg, &v, &n, &xpath)) != 0)
 		return (error);
 	if ((error = cbl_req_reply_new(req, 0, &reply)) != 0) {
@@ -450,9 +501,13 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		free(xpath);
 		return (error);
 	}
-	if (xpath != NULL)
+	/* A datastore's: running or the candidate, configuration alone. */
+	if (ds != CBL_YDS_OPERATIONAL)
+		error = cbl_yds_get(req, reply, v, n, xpath, ds);
+	else if (xpath != NULL)
 		error = get_filtered(req, reply, v, n, xpath);
-	for (size_t i = 0; xpath == NULL && error == 0 && i < n; i++)
+	for (size_t i = 0; ds == CBL_YDS_OPERATIONAL && xpath == NULL &&
+	    error == 0 && i < n; i++)
 		error = get_one(req, reply, v[i], &put);
 	free(v);
 	free(xpath);
@@ -489,6 +544,15 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 	int error;
 
 	if (d == NULL) {
+		enum cbl_yds_name ds;
+		bool said;
+
+		if ((error = cbl_yds_of(req, &ds, &said)) != 0)
+			return (error);
+		if (ds != CBL_YDS_OPERATIONAL)
+			return (cbl_ysay(req, EOPNOTSUPP, 0,
+			    "operation-not-supported", "a datastore is read by "
+			    "a GET, not a dump"));
 		if ((d = calloc(1, sizeof(*d))) == NULL)
 			return (ENOMEM);
 		if ((error = get_targets(req, msg, &d->v, &d->n, &xpath)) !=
@@ -547,8 +611,21 @@ y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	cbl_yarena *a;
 	char why[128];
 	uint64_t sid;
+	enum cbl_yds_name ds;
+	bool said;
 	int error = 0;
 
+	if ((error = cbl_yds_of(req, &ds, &said)) != 0)
+		return (error);
+	if (said && ds == CBL_YDS_CANDIDATE)
+		return (cbl_yds_edit(req, msg));
+	if (said && ds == CBL_YDS_OPERATIONAL)
+		return (cbl_ysay(req, EOPNOTSUPP, 0, "operation-not-supported",
+		    "the operational state is not edited"));
+	if (cbl_yds_running_locked(req))
+		return (cbl_ysay(req, EACCES, 0, "operation-not-supported",
+		    "running is changed by a confirmed commit of the "
+		    "candidate alone"));
 	if (body == NULL || body->count == 0)
 		return (0);
 	if ((a = cbl_yarena_new()) == NULL ||
@@ -592,24 +669,41 @@ y_edit_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 				break;
 			}
 			/* Configuration, valid as RFC 7950 has it. */
-			if ((error = yvalid_member(req, e[n].f.n,
+			if ((error = cbl_yvalid_member(req, e[n].f.n,
 			    e[n].after)) != 0)
 				break;
 		}
 		req->yarg = e[n].f.arg;
 		if (e[n].f.h->get != NULL && (error = e[n].f.h->get(req,
 		    e[n].before, a)) != 0) {
-			error = yfailed(req, error, sid, "reading it failed");
+			error = cbl_yfailed(req, error, sid, "reading it failed");
 			break;
 		}
 		n++;
 	}
+	/* NACM's, every node changed, before any is. */
+	for (size_t i = 0; error == 0 && i < n; i++)
+		error = cbl_ynacm_write(req, e[i].f.n, e[i].before, e[i].after);
 	for (done = 0; error == 0 && done < n; done++) {
 		req->yarg = e[done].f.arg;
 		if ((error = e[done].f.h->edit(req, e[done].before,
 		    e[done].after)) != 0)
-			error = yfailed(req, error, e[done].f.n->sid,
+			error = cbl_yfailed(req, error, e[done].f.n->sid,
 			    "the edit failed");
+	}
+	/* The rules changed: read again at the next check. */
+	for (size_t i = 0; error == 0 && i < n; i++)
+		if (strcmp(e[i].f.n->module->name, "ietf-netconf-acm") == 0)
+			cbl_ynacm_changed(req->conn->ctx);
+	/* What it did that the requester should know: in an answer. */
+	if (error == 0 && req->nwarns > 0) {
+		cbl_msg *reply = NULL;
+
+		if ((error = cbl_req_reply_new(req, 0, &reply)) == 0 &&
+		    (error = cbl_yds_put_warnings(req, reply)) == 0)
+			error = cbl_req_send(req, reply);
+		else if (reply != NULL)
+			cbl_msg_free(reply);
 	}
 	/* Rollback on error (RFC 6241 section 7.2): the others undone. */
 	if (error != 0)
@@ -691,11 +785,21 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	    f.n->kind != CBL_YN_ACTION))
 		return (cbl_ysay(req, ENOENT, sid, "unknown-element",
 		    "no such rpc or action"));
+	/* commit, cancel-commit, discard-changes: the datastores'. */
+	if (f.n->kind == CBL_YN_RPC) {
+		bool handled;
+
+		error = cbl_yds_rpc(req, msg, f.n, &handled);
+		if (handled)
+			return (error);
+	}
 	if (f.h == NULL || (f.n->kind == CBL_YN_RPC ? f.h->rpc == NULL :
 	    f.h->action == NULL))
 		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
 		    f.n->kind == CBL_YN_RPC ? "the rpc is not served" :
 		    "the action is not served"));
+	if ((error = cbl_ynacm_exec(req, f.n)) != 0)
+		return (error);
 	if ((in = io_of(f.n, CBL_YN_INPUT)) == NULL ||
 	    (out = io_of(f.n, CBL_YN_OUTPUT)) == NULL)
 		return (cbl_ysay(req, EOPNOTSUPP, sid, "operation-not-supported",
@@ -728,12 +832,14 @@ y_rpc_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 		error = f.h->rpc(req, pin, pout, a);
 	if (error != 0) {
 		cbl_yarena_free(a);
-		return (yfailed(req, error, sid, f.n->kind == CBL_YN_RPC ?
+		return (cbl_yfailed(req, error, sid, f.n->kind == CBL_YN_RPC ?
 		    "the rpc failed" : "the action failed"));
 	}
 	if ((error = cbl_req_reply_new(req, 0, &reply)) == 0) {
 		error = out->nchild == 0 ? cbl_msg_put_ynull(reply, sid) :
 		    cbl_msg_put_ynode(reply, out, pout);
+		if (error == 0)
+			error = cbl_yds_put_warnings(req, reply);
 		if (error == 0)
 			error = cbl_req_send(req, reply);
 		else
@@ -1017,7 +1123,9 @@ cbl_ynotify_fam(cbl_family *fam, uint32_t group_idx, uint16_t cmd,
 		cbl_msg_free(msg);
 		goto out;
 	}
-	error = cbl_notify(fam, group_idx, msg);
+	/* Family 1's: to those NACM lets read it. */
+	error = cbl_notify_if(fam, group_idx, msg, fam == fam->ctx->yfam ? n :
+	    NULL);
 out:
 	cbl_ybuf_free(&c);
 	return (error);

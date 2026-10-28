@@ -41,6 +41,8 @@ SRCS=		cbl_arena.c \
 		cbl_yctrl_schema.c \
 		cbl_yfamily.c \
 		cbl_ysub.c \
+		cbl_ynacm.c \
+		cbl_yds.c \
 		cbl_yjson.c \
 		cbl_yvalid.c \
 		cbl_ymod_schema.c

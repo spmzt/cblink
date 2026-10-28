@@ -108,6 +108,13 @@ cbl_msg_err_str(const cbl_msg *msg)
 	return (msg != NULL ? msg->err_str : NULL);
 }
 
+const char *
+cbl_msg_err_apptag(const cbl_msg *msg)
+{
+
+	return (msg != NULL ? msg->err_apptag : NULL);
+}
+
 /* The error's node of family 1's: error-path a SID alone (cbl_fw.c). */
 uint64_t
 cbl_msg_err_sid(const cbl_msg *msg)

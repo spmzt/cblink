@@ -92,9 +92,12 @@ program filled it, against what RFC 7950 says of it within the tree:
 
 The error's message is the restriction's `error-message` when it has
 one. A non-presence container that is absent is there in effect: a
-mandatory node below it is missing. The YANG family validates every
-EDIT and every rpc's input before a handler sees them, never what it
-reads back (RFC 8342 section 5.3).
+mandatory node below it is missing, but for a case's (none is given)
+and one under a `when`. What a `when` decides, `cbl_yvalidate()`
+cannot: a mandatory node an augment or a uses brings under a `when` is
+left to the tree's check below. The YANG family validates every EDIT
+and every rpc's input before a handler sees them, never what it reads
+back (RFC 8342 section 5.3).
 
 `cbl_ydefaults()` sets what a tree leaves unset to the module's
 defaults: a leaf's, a leaf-list's values, a choice's default case and
@@ -112,7 +115,12 @@ YANG Patch's insert and move (RFC 8072), an ordered-by user list's
 entries where they say, all or nothing; the difference of two trees is
 such an edit. Its references are checked against it: a leafref's value
 among its target's instances, an instance-identifier's node there,
-where they require an instance.
+where they require an instance. `cbl_dtree_check_conds()` (or
+`cbl_dnode_check_conds()`, a node and what is under it) evaluates every
+`when` and `must` (RFC 7950 sections 7.21.5 and 7.5.3) and finds a
+mandatory node missing where the `when` that brings it holds; an EDIT
+of the candidate is checked so, the nodes it edits with their defaults
+made.
 
 ## 5. Expressions and patterns
 
@@ -174,13 +182,44 @@ tables have its nodes. The control family (family
 0, section 7.2) is the module `cblink-ctrl`; errors, credit and closes
 are the module `cblink`'s structures (section 6).
 
+NACM (RFC 8341) is checked where a server serves `ietf-netconf-acm` and
+a get handler for its `nacm` container: an rpc's or an action's exec,
+a read (what is denied left out, as RFC 8341 reads it), an EDIT (all
+or nothing, every node it creates, changes or deletes), each
+notification of group `notify` and of a subscription, and the ops of a
+program's family flagged `nacm` (an rpc of the module named as the
+family). The user is a request's, as the program's `cbl_user_f` names
+it from the peer and from the `user` structure a trusted peer sends; the
+recovery session (by default root on a unix socket) is let through.
+`nacm:default-deny-write` and `-all` are the tables' node flags.
+
+Datastores (RFC 8342), where a program asks for them
+(`cbl_ydatastores()`): `running`, the configuration its handlers keep;
+`candidate`, one configuration being made, every session's (RFC 6241
+section 8.3). A GET or an EDIT names the datastore in the `datastore`
+structure; without it a GET reads the operational state and an EDIT
+changes running. The server serves `ietf-netconf` with its features
+`candidate` and `confirmed-commit`, and cblink answers its `commit`,
+`cancel-commit` and `discard-changes` itself: a commit changes, through
+the handlers, every top-level node the candidate has otherwise than
+running, all or nothing, NACM's write checks each; a confirmed commit
+(section 8.4) is undone at its `confirm-timeout`, by `cancel-commit`, or
+when its session goes without `persist`, unless a commit confirms it
+(its session's, or any with its `persist-id`). An undo a handler fails
+is the program's to hear of, and the undo stops there; an undo needs
+no consent its commit had (`cbl_req_yundo()`). A get handler
+reading for running (`cbl_req_ydatastore()`) leaves out what is no
+configuration. With `CBL_YDS_CONFIRMED` running changes by
+a confirmed commit alone. A handler refuses what its requester should be
+warned of with an `error-app-tag`, unless the request `accept`s it, and
+tells what it did in the answer's `warnings`.
+
 ## 7. Left out
 
 - **Validation of anyxml content**, and of anydata's against a schema.
 - **XPath 1.0** beyond XPath-lite, and XSD regular expressions beyond
   what is translated.
-- **Datastores**: the YANG family edits what the handlers keep; it has no
-  `startup`, no `candidate` and no locks.
+- **Datastores**: no `startup` and no `intended`, and no locks.
 - **List entries as GET targets** are not yet carried by the YANG
   family: a GET's target is a top-level node's SID.  (An action's target
   is a list entry: `cblink:action`, WIRE-FORMAT.md section 7.6.)

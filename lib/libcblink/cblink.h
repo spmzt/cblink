@@ -22,7 +22,7 @@
 
 #define	CBLINK_VERSION_MAJOR	0
 #define	CBLINK_VERSION_MINOR	2
-#define	CBLINK_VERSION_PATCH	11
+#define	CBLINK_VERSION_PATCH	12
 
 #ifdef __cplusplus
 extern "C" {
@@ -151,6 +151,8 @@ size_t		 cbl_msg_len(const cbl_msg *msg);
 /* Extended error accessors, valid on any received message. */
 int		 cbl_msg_err_code(const cbl_msg *msg);
 const char	*cbl_msg_err_str(const cbl_msg *msg);
+/* RFC 6241's error-app-tag: what in particular, a warning's to accept. */
+const char	*cbl_msg_err_apptag(const cbl_msg *msg);
 size_t		 cbl_msg_err_path(const cbl_msg *msg,
 		    struct cbl_path_elem *path, size_t max);
 int		 cbl_msg_err_miss_type(const cbl_msg *msg);
@@ -284,6 +286,11 @@ int		 cbl_conn_send(cbl_conn *conn, cbl_msg *msg);
 #define	CBL_OPF_STREAM		0x04
 #define	CBL_OPF_PUSH		0x08
 #define	CBL_OPF_AUTH		0x10
+/* Checked by NACM (RFC 8341) where the context has it (cbl_schema.h):
+ * an rpc of the module named as its family is, by its name; with
+ * CBL_OPF_DENY, one nacm:default-deny-all marks. */
+#define	CBL_OPF_NACM		0x20
+#define	CBL_OPF_DENY		0x40
 
 #define	CBL_MCF_AUTH		0x10
 
@@ -350,6 +357,30 @@ cbl_msg		*cbl_req_msg(const cbl_req *req);
 const cbl_peer	*cbl_req_peer(const cbl_req *req);
 cbl_conn	*cbl_req_conn(const cbl_req *req);
 cbl_ctx		*cbl_req_ctx(const cbl_req *req);
+
+/*
+ * Who a request is made for: RFC 8341's user, what NACM checks it as.
+ * A peer that serves many users over one session (a console, a proxy)
+ * says whose each request is with cbl_msg_set_user(), a cblink:user
+ * beside the request.  The receiver's fn, given the peer and what it
+ * said (NULL: nothing), names the user in name (len bytes) and returns
+ * 0; sets *recovery for RFC 8341's recovery session, which no rule
+ * holds back; or refuses the request with an errno (EACCES: a peer that
+ * may not say whom it asks for).  Without one: a peer that says is
+ * refused; root on a unix socket is the recovery session, another
+ * local user is its login name; a certificate's peer its subject.
+ * cbl_req_user() is NULL for the recovery session.
+ */
+typedef int	 cbl_user_f(const cbl_peer *peer, const char *said, char *name,
+		    size_t len, bool *recovery, void *arg);
+int		 cbl_ctx_set_user(cbl_ctx *ctx, cbl_user_f *fn, void *arg);
+int		 cbl_msg_set_user(cbl_msg *msg, const char *user);
+/* Every request sent on conn from now on made for user (NULL: none
+ * said), unless it says another; or every request this thread sends on
+ * any connection, which a shared one needs (before the connection's). */
+int		 cbl_conn_set_user(cbl_conn *conn, const char *user);
+int		 cbl_thread_set_user(const char *user);
+const char	*cbl_req_user(const cbl_req *req);
 
 /* Peer identity, the same on every transport. */
 #define	CBL_PEER_AUTHENTICATED	0x01

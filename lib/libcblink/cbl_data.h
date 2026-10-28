@@ -231,6 +231,9 @@ int		 cbl_dtree_check_refs(const cbl_dtree *t,
  */
 int		 cbl_dtree_check_conds(const cbl_dtree *t,
 		    struct cbl_dederr *err);
+/* The same of n and what is under it alone. */
+int		 cbl_dnode_check_conds(const cbl_dtree *t, const cbl_dnode *n,
+		    struct cbl_dederr *err);
 
 /*
  * Filters (RFC 6241 sections 6, 8.9).  What a filter selects of tree t

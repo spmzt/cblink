@@ -137,6 +137,10 @@ enum cbl_ynode_kind {
 #define	CBL_YNF_USERORDER	0x0010	/* ordered-by user */
 #define	CBL_YNF_DEPRECATED	0x0020
 #define	CBL_YNF_OBSOLETE	0x0040
+/* NACM's (RFC 8341 section 3.5): written only by a rule that permits it;
+ * read, written and run only so. */
+#define	CBL_YNF_DENY_WRITE	0x0080	/* nacm:default-deny-write */
+#define	CBL_YNF_DENY_ALL	0x0100	/* nacm:default-deny-all */
 
 /*
  * A when statement, and its context node (RFC 7950 section 7.21.5): the
@@ -610,6 +614,90 @@ int		 cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n,
 		    const void *p);
 int		 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt,
 		    cbl_yarena *a);
+
+/*
+ * NACM (RFC 8341), where a server's modules have ietf-netconf-acm and a
+ * get handler for its nacm container: its rules, read through that
+ * handler, are checked for every request to family 1 (an rpc's or an
+ * action's exec; a read, what is denied left out; an EDIT, all or
+ * nothing) and for every op of another family with CBL_OPF_NACM, as the
+ * user cbl_req_user() names; a notification is sent only where it may
+ * be read.  nacm:default-deny-write and -all are kept, as the tables
+ * have them.  The program tells a change of the rules it made itself
+ * with cbl_ynacm_changed(); an EDIT through family 1 is told by itself.
+ * cbl_ynacm_counters() has the state leaves' counts.  Rules that cannot
+ * be read deny everything but the recovery session.
+ */
+/*
+ * Datastores (RFC 8342) for family 1, where a program asks for them with
+ * cbl_ydatastores(): running, the configuration its handlers keep, read
+ * as their config true nodes; and candidate, one configuration being
+ * made, shared by every session (RFC 6241 section 8.3), changed by an
+ * EDIT of it, put in use by ietf-netconf's commit, forgotten by its
+ * discard-changes.  The server's modules have ietf-netconf with its
+ * features candidate and confirmed-commit; cblink answers those rpcs
+ * itself.  A confirmed commit (section 8.4) is undone at its
+ * confirm-timeout unless another commit confirms it, from its session
+ * or, with persist, from any by its persist-id; cancel-commit undoes it
+ * at once, and so does its session going without persist.  An undo a
+ * handler fails is told to undo_failed, which may raise an alarm and
+ * write a report; the undo stops there, what is left as committed.  With CBL_YDS_CONFIRMED running changes by a
+ * confirmed commit alone: an EDIT of it is refused.  A client names the
+ * datastore beside a GET or an EDIT with cbl_msg_set_datastore().
+ *
+ * A handler that would do what its requester should be warned of first
+ * refuses with cbl_req_set_yapptag()'s app-tag, unless the request
+ * accepts it (cbl_req_yaccepts(); a client's cbl_msg_set_accept()); one
+ * that did it tells the requester with cbl_req_ywarn(), the answer's
+ * warnings (cbl_msg_ywarnings()).
+ */
+#define	CBL_YDS_CONFIRMED	0x0001
+
+enum cbl_yds_name {
+	CBL_YDS_RUNNING,
+	CBL_YDS_CANDIDATE,
+	CBL_YDS_OPERATIONAL,
+};
+
+typedef void	 cbl_yundo_f(cbl_ctx *ctx, const struct cbl_ynode *n, int error,
+		    const char *why, void *arg);
+
+struct cbl_ywarning {
+	uint64_t	 sid;		/* the node it is about; 0: none */
+	const char	*tag;		/* error-app-tag */
+	const char	*text;
+};
+
+int		 cbl_ydatastores(cbl_ctx *ctx, unsigned flags,
+		    cbl_yundo_f *undo_failed, void *arg);
+int		 cbl_msg_set_datastore(cbl_msg *msg, enum cbl_yds_name ds);
+int		 cbl_msg_set_accept(cbl_msg *msg, const char *const *tags,
+		    size_t n);
+int		 cbl_msg_ywarnings(const cbl_msg *msg, cbl_yarena *a,
+		    const struct cbl_ywarning **vp, size_t *np);
+bool		 cbl_req_yaccepts(cbl_req *req, const char *tag);
+int		 cbl_req_set_yapptag(cbl_req *req, const char *tag);
+int		 cbl_req_ywarn(cbl_req *req, uint64_t sid, const char *tag,
+		    const char *text);
+/* The datastore a get handler reads for: running's reads leave out what
+ * is no configuration (an address a protocol gave, RFC 8342 section
+ * 5.3), the operational state's do not. */
+enum cbl_yds_name cbl_req_ydatastore(const cbl_req *req);
+/* The edit undoes a commit (one not confirmed in time, cancelled, or
+ * the others of one that failed): what it would need accepted is. */
+bool		 cbl_req_yundo(const cbl_req *req);
+/* Whether a confirmed commit waits, and until when (CLOCK_REALTIME). */
+struct timespec;
+bool		 cbl_ydatastore_pending(cbl_ctx *ctx, struct timespec *until);
+
+struct cbl_ynacm_counts {
+	uint32_t	 denied_operations;
+	uint32_t	 denied_data_writes;
+	uint32_t	 denied_notifications;
+};
+
+void		 cbl_ynacm_changed(cbl_ctx *ctx);
+void		 cbl_ynacm_counters(cbl_ctx *ctx, struct cbl_ynacm_counts *c);
 
 int		 cbl_yserver_add(cbl_ctx *ctx, const struct cbl_yserver *srv,
 		    void *arg);

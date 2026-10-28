@@ -29,6 +29,7 @@
 
 #include "cbl_pattern.h"
 #include "cbl_schema.h"
+#include "cbl_dimpl.h"
 #include "cbl_yimpl.h"
 
 #define	AT(p, off)	((const void *)((const char *)(p) + (off)))
@@ -354,6 +355,25 @@ v_value(struct yv *v, const struct cbl_ynode *n, const struct cbl_ytype *t,
 	return (0);
 }
 
+bool
+cbl_ytype_admits(const struct cbl_yschema *s, const struct cbl_ytype *t,
+    const void *p)
+{
+	struct cbl_ymodule mod;
+	struct cbl_ynode n;
+	struct yv v = { 0 };
+
+	/* An identity is told by its schema; without one, let it be. */
+	if (s == NULL && t->kind == CBL_YT_IDENTITYREF)
+		return (true);
+	memset(&mod, 0, sizeof(mod));
+	memset(&n, 0, sizeof(n));
+	mod.schema = s;
+	n.module = &mod;
+	n.name = "";
+	return (v_value(&v, &n, t, p) == 0);
+}
+
 /* Two values of type t the same, as RFC 7950 compares them. */
 static bool
 same(const struct cbl_ytype *t, const void *a, const void *b)
@@ -513,9 +533,10 @@ v_count(struct yv *v, const struct cbl_ynode *n, size_t count)
 	return (0);
 }
 
-/* A mandatory node anywhere below n, not under a presence container. */
+/* A mandatory node anywhere below n, not under a presence container;
+ * with edit, configuration alone (state is no edit's). */
 static const struct cbl_ynode *
-mandatory_below(const struct cbl_ynode *n, int depth)
+mandatory_below(const struct cbl_ynode *n, int depth, bool edit)
 {
 	const struct cbl_ynode *m;
 
@@ -524,16 +545,31 @@ mandatory_below(const struct cbl_ynode *n, int depth)
 	for (uint32_t i = 0; i < n->nchild; i++) {
 		const struct cbl_ynode *c = n->child[i];
 
+		if (edit && (c->flags & CBL_YNF_CONFIG) == 0)
+			continue;
+		/* A when's node is not there unless it holds, which
+		 * nothing absent makes it (RFC 7950 section 7.21.5). */
+		if (c->nwhen > 0)
+			continue;
+		/* A case's nodes only in the case given, which none is
+		 * here: a mandatory choice says so for them (7.9.4). */
+		if (c->choice != NULL) {
+			const struct cbl_ychoice *top = c->choice;
+
+			while (top->parent != NULL)
+				top = top->parent;
+			if (top->mandatory && top->nwhen == 0)
+				return (c);
+			continue;
+		}
 		if (c->kind == CBL_YN_LEAF && (c->flags & CBL_YNF_MANDATORY))
 			return (c);
 		if ((c->kind == CBL_YN_LIST || c->kind == CBL_YN_LEAFLIST) &&
 		    c->min > 0)
 			return (c);
-		if (c->choice != NULL && c->choice->mandatory)
-			return (c);
 		if (c->kind == CBL_YN_CONTAINER &&
 		    (c->flags & CBL_YNF_PRESENCE) == 0 &&
-		    (m = mandatory_below(c, depth + 1)) != NULL)
+		    (m = mandatory_below(c, depth + 1, edit)) != NULL)
 			return (m);
 	}
 	return (NULL);
@@ -583,10 +619,18 @@ v_struct(struct yv *v, const struct cbl_ynode *n, const void *p, int depth)
 			return (vfail(v, c, "invalid-value", NULL, NULL,
 			    "%s: state, not configuration: not edited",
 			    c->name));
+		/* State's rules are the operational datastore's. */
+		if ((v->flags & CBL_YV_EDIT) && (c->flags & CBL_YNF_CONFIG) ==
+		    0 && c->kind != CBL_YN_RPC && c->kind != CBL_YN_ACTION &&
+		    c->kind != CBL_YN_NOTIF)
+			continue;
 		switch (c->kind) {
 		case CBL_YN_LEAF:
 			if (!there) {
-				if (c->flags & CBL_YNF_MANDATORY)
+				/* Under a when: the tree's to judge
+				 * (cbl_dnode_check_conds()). */
+				if ((c->flags & CBL_YNF_MANDATORY) &&
+				    c->nwhen == 0)
 					return (vfail(v, c, "missing-element",
 					    NULL, NULL, "%s: mandatory, "
 					    "missing", c->name));
@@ -597,12 +641,18 @@ v_struct(struct yv *v, const struct cbl_ynode *n, const void *p, int depth)
 				return (error);
 			break;
 		case CBL_YN_LEAFLIST:
+			if (c->nwhen > 0 && ((const struct yarr *)AT(p,
+			    c->off))->n == 0)
+				break;
 			if ((error = v_count(v, c,
 			    ((const struct yarr *)AT(p, c->off))->n)) != 0 ||
 			    (error = v_leaflist(v, c, AT(p, c->off))) != 0)
 				return (error);
 			break;
 		case CBL_YN_LIST:
+			if (c->nwhen > 0 && ((const struct yarr *)AT(p,
+			    c->off))->n == 0)
+				break;
 			if ((error = v_count(v, c,
 			    ((const struct yarr *)AT(p, c->off))->n)) != 0 ||
 			    (error = v_list(v, c, AT(p, c->off),
@@ -616,7 +666,8 @@ v_struct(struct yv *v, const struct cbl_ynode *n, const void *p, int depth)
 				    depth + 1)) != 0)
 					return (error);
 			} else if ((c->flags & CBL_YNF_PRESENCE) == 0 &&
-			    (m = mandatory_below(c, 0)) != NULL)
+			    c->nwhen == 0 && (m = mandatory_below(c, 0,
+			    (v->flags & CBL_YV_EDIT) != 0)) != NULL)
 				/* It is there in effect: what it needs too. */
 				return (vfail(v, m, "missing-element", NULL,
 				    NULL, "%s: mandatory, missing", m->name));

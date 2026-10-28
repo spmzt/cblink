@@ -861,11 +861,11 @@ has_name(const struct yrd *r, size_t hlen, const struct cbl_ytype *t)
 }
 
 /*
- * Which member of union t the next item is, by what it is: its tag, or
- * its major type; -1 none.
+ * Which member of union t, from the from'th, the next item may be, by
+ * what it is: its tag, or its major type; -1 none.
  */
 static int
-member(struct yrd *r, const struct cbl_ytype *t)
+member(struct yrd *r, const struct cbl_ytype *t, uint16_t from)
 {
 	unsigned major, kind;
 	uint64_t arg;
@@ -873,7 +873,7 @@ member(struct yrd *r, const struct cbl_ytype *t)
 
 	if (peek(r, &major, &arg, &hlen) != 0)
 		return (-1);
-	for (uint16_t i = 0; i < t->nmembers; i++) {
+	for (uint16_t i = from; i < t->nmembers; i++) {
 		kind = t->members[i]->kind;
 		if (major == 6) {
 			if (arg == 44 && kind == CBL_YT_ENUMERATION) {
@@ -911,7 +911,7 @@ member(struct yrd *r, const struct cbl_ytype *t)
 		    kind == CBL_YT_BOOLEAN) ||
 		    (major == 7 && arg == 22 && kind == CBL_YT_EMPTY))
 			return (i);
-		if (kind == CBL_YT_UNION && member(r, t->members[i]) >= 0)
+		if (kind == CBL_YT_UNION && member(r, t->members[i], 0) >= 0)
 			return (i);
 	}
 	return (-1);
@@ -1045,12 +1045,35 @@ dec_value(struct yrd *r, const struct cbl_ytype *t, void *v, bool inunion)
 			return (fail(r, EINVAL, "an instance-identifier (tag "
 			    "46) expected"));
 		return (raw(r, v));
-	case CBL_YT_UNION:
-		if ((m = member(r, t)) < 0)
+	case CBL_YT_UNION: {
+		/*
+		 * The first member it is a value of, restrictions and all
+		 * (RFC 7950 9.12): two strings, one of a pattern, are told
+		 * apart by it.  The last that may be is taken as it is, for
+		 * the validator to say why not.
+		 */
+		const struct yrd at = *r;
+		int next;
+
+		if ((m = member(r, t, 0)) < 0)
 			return (fail(r, EINVAL, "no member of the union is "
 			    "this"));
-		*(unsigned *)v = (unsigned)m;
-		return (dec_value(r, t->members[m], WAT(v, t->voff), true));
+		for (;; m = next) {
+			*r = at;
+			memset(WAT(v, t->voff), 0, t->csize - t->voff);
+			*(unsigned *)v = (unsigned)m;
+			next = member(r, t, (uint16_t)(m + 1));
+			if ((error = dec_value(r, t->members[m], WAT(v,
+			    t->voff), true)) != 0 && next < 0)
+				return (error);
+			if (next < 0 || (error == 0 && cbl_ytype_admits(
+			    r->leafmod != NULL ? r->leafmod->schema : NULL,
+			    t->members[m], AT(v, t->voff))))
+				return (error);
+			if (r->why != NULL && r->whylen > 0)
+				r->why[0] = '\0';
+		}
+	}
 	}
 	return (fail(r, EINVAL, "a type not known"));
 }

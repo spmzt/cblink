@@ -130,6 +130,7 @@ cbl_conn_rele(cbl_conn *conn)
 	if (conn->counted)
 		atomic_fetch_sub(&conn->ctx->nconns, 1);
 	atomic_fetch_sub(&conn->ctx->nobjs, 1);
+	free(conn->user);
 	pthread_cond_destroy(&conn->cv);
 	pthread_mutex_destroy(&conn->mtx);
 	free(conn);
@@ -286,6 +287,7 @@ cbl_conn_fail(cbl_conn *conn, int error)
 	free(conn->big);
 	conn->big = NULL;
 	cbl_notify_conn_closed(conn);
+	cbl_yds_conn_closed(conn);
 	cbl_stream_conn_closed(conn, error != 0 ? error : ECONNRESET);
 	cbl_server_abort(conn);
 	pend_fail_all(conn, error != 0 ? error : ECONNRESET);
@@ -1345,6 +1347,7 @@ req_issue(cbl_conn *conn, cbl_msg *req, struct cbl_pending *p,
 		cbl_msg_free(req);
 		return (ENOTCONN);
 	}
+	cbl_conn_stamp(conn, req);
 	if ((req->hdr.flags & ~(CBL_F_REQUEST | CBL_F_ACK | CBL_F_DUMP)) != 0) {
 		cbl_msg_free(req);
 		return (EINVAL);

@@ -25,12 +25,23 @@ struct cblink_close;
 struct cblink_get;
 struct cblink_action;
 struct cblink_notification;
+struct cblink_datastore;
+struct cblink_accept;
+struct cblink_warnings_warning;
+struct cblink_warnings;
+struct cblink_user;
 
 enum cblink_error_error_type {
 	CBLINK_ERROR_ERROR_TYPE_TRANSPORT = 0,
 	CBLINK_ERROR_ERROR_TYPE_RPC = 1,
 	CBLINK_ERROR_ERROR_TYPE_PROTOCOL = 2,
 	CBLINK_ERROR_ERROR_TYPE_APPLICATION = 3,
+};
+
+enum cblink_datastore_name {
+	CBLINK_DATASTORE_NAME_RUNNING = 0,
+	CBLINK_DATASTORE_NAME_CANDIDATE = 1,
+	CBLINK_DATASTORE_NAME_OPERATIONAL = 2,
 };
 
 /* structure */
@@ -102,6 +113,41 @@ struct cblink_notification {
 	struct cbl_bytes	 event;	/* anydata, in CBOR */
 };
 
+/* structure */
+struct cblink_datastore {
+	bool			 has_name;
+	enum cblink_datastore_name	 name;
+};
+
+/* structure */
+struct cblink_accept {
+	struct {
+		size_t		 n;
+		const char	*const	*v;
+	}			 warning;
+};
+
+/* list entry */
+struct cblink_warnings_warning {
+	bool			 has_error_path;
+	uint64_t	 error_path;
+	const char	*error_app_tag;
+	const char	*error_message;
+};
+
+/* structure */
+struct cblink_warnings {
+	struct {
+		size_t		 n;
+		const struct cblink_warnings_warning	*v;
+	}			 warning;
+};
+
+/* structure */
+struct cblink_user {
+	const char	*name;
+};
+
 /*
  * Each struct's value in YANG-CBOR (RFC 9254) and back: cbl_yencode(),
  * cbl_ydecode() with its node (base_schema.c).
@@ -161,6 +207,41 @@ int	cblink_notification_decode(const void *, size_t, struct cblink_notification 
 	    cbl_yarena *, int, char *, size_t);
 int	cblink_notification_put(cbl_msg *, const struct cblink_notification *);
 int	cblink_notification_parse(const cbl_msg *, struct cblink_notification *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_datastore_encode(const struct cblink_datastore *,
+	    struct cbl_ybuf *);
+int	cblink_datastore_decode(const void *, size_t, struct cblink_datastore *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_datastore_put(cbl_msg *, const struct cblink_datastore *);
+int	cblink_datastore_parse(const cbl_msg *, struct cblink_datastore *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_accept_encode(const struct cblink_accept *,
+	    struct cbl_ybuf *);
+int	cblink_accept_decode(const void *, size_t, struct cblink_accept *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_accept_put(cbl_msg *, const struct cblink_accept *);
+int	cblink_accept_parse(const cbl_msg *, struct cblink_accept *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_warnings_warning_encode(const struct cblink_warnings_warning *,
+	    struct cbl_ybuf *);
+int	cblink_warnings_warning_decode(const void *, size_t, struct cblink_warnings_warning *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_warnings_warning_put(cbl_msg *, const struct cblink_warnings_warning *);
+int	cblink_warnings_warning_parse(const cbl_msg *, struct cblink_warnings_warning *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_warnings_encode(const struct cblink_warnings *,
+	    struct cbl_ybuf *);
+int	cblink_warnings_decode(const void *, size_t, struct cblink_warnings *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_warnings_put(cbl_msg *, const struct cblink_warnings *);
+int	cblink_warnings_parse(const cbl_msg *, struct cblink_warnings *, cbl_yarena *,
+	    int, char *, size_t);
+int	cblink_user_encode(const struct cblink_user *,
+	    struct cbl_ybuf *);
+int	cblink_user_decode(const void *, size_t, struct cblink_user *,
+	    cbl_yarena *, int, char *, size_t);
+int	cblink_user_put(cbl_msg *, const struct cblink_user *);
+int	cblink_user_parse(const cbl_msg *, struct cblink_user *, cbl_yarena *,
 	    int, char *, size_t);
 
 #endif /* !_CBL_YMOD_H_ */

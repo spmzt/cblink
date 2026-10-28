@@ -2,7 +2,7 @@
   "ietf-sid-file:sid-file": {
     "module-name": "dsdemo",
     "module-revision": "2026-10-28",
-    "sid-file-version": 1,
+    "sid-file-version": 2,
     "description": "yds_test's tables, numbered for the test alone.",
     "assignment-range": [
       {
@@ -65,6 +65,11 @@
         "namespace": "data",
         "identifier": "/dsdemo:cfg/tag-id",
         "sid": "82910"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/dsdemo:cfg/level",
+        "sid": "82911"
       }
     ]
   }

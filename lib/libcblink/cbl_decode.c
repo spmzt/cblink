@@ -394,9 +394,10 @@ cb_tag(void *ctx, uint64_t v)
 		return;
 	}
 	top = &d->st[d->depth - 1];
-	/* An absolute SID as a key, RFC 9254 section 4.2.1: tag 47. */
+	/* An absolute SID as a key of an inner map, RFC 9254 section
+	 * 4.2.1: tag 47.  The body's own keys are SIDs already. */
 	if (top->is_map && top->want_key) {
-		if (v != 47 || d->keytag) {
+		if (v != 47 || d->keytag || d->depth == 1) {
 			dec_fail(d, EPROTO, "map keys must be integers");
 			return;
 		}

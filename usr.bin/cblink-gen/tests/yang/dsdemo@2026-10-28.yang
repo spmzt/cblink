@@ -49,6 +49,12 @@ module dsdemo {
     uses tagging {
       when "kind = 'tagged'";
     }
+    leaf level {
+      type uint8;
+      default "3";
+      description
+        "A leaf with a default, for with-defaults (RFC 6243).";
+    }
     leaf c {
       type string;
       must "string-length(.) <= 8" {

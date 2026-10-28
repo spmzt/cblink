@@ -743,6 +743,16 @@ int		 cbl_msg_put_yget(cbl_msg *msg, const uint64_t *sids,
  * what it selects comes back, the nodes above it and keys with it. */
 int		 cbl_msg_put_yget_xpath(cbl_msg *msg, const uint64_t *sids,
 		    size_t n, const char *xpath);
+/* The same with RFC 6243's retrieval mode: explicit (what the server
+ * has), report-all (the defaults in use too), trim (leaves at their
+ * default left out). */
+enum cbl_ywd {
+	CBL_YWD_EXPLICIT,
+	CBL_YWD_REPORT_ALL,
+	CBL_YWD_TRIM,
+};
+int		 cbl_msg_put_yget_wd(cbl_msg *msg, const uint64_t *sids,
+		    size_t n, const char *xpath, enum cbl_ywd wd);
 void		*cbl_req_yarg(const cbl_req *req);
 int		 cbl_req_set_yerr(cbl_req *req, const char *text,
 		    uint64_t sid);

@@ -34,6 +34,7 @@ static struct {
 	uint32_t hits;
 	int	 undo_fails;	/* how often an undo failed */
 	int	 edits;		/* how often the handler was asked */
+	int	 level;		/* reported as set; 0: not reported */
 } kept;
 
 static const struct cbl_ynode *
@@ -82,6 +83,10 @@ cfg_get(cbl_req *req, void *data, cbl_yarena *a)
 	c->b = b[0] != '\0' ? b : NULL;
 	c->has_hits = true;
 	c->hits = kept.hits;
+	if (kept.level != 0) {
+		c->has_level = true;
+		c->level = (uint8_t)kept.level;
+	}
 	d->cfg = c;
 	return (0);
 }
@@ -477,6 +482,46 @@ ATF_TC_BODY(conditions, tc)
 	teardown(&f);
 }
 
+/* cfg's level read in mode wd (RFC 6243): -1, not there. */
+static int
+get_level(struct fixture *f, enum cbl_ywd wd)
+{
+	struct dsdemo d = { 0 };
+	cbl_msg *m, *r = NULL;
+	cbl_yarena *a;
+	int v = -1;
+
+	ATF_REQUIRE_EQ(0, cbl_msg_new(f->cctx, CBL_YANG_FAMILY, CBL_YCMD_GET,
+	    0, &m));
+	ATF_REQUIRE_EQ(0, cbl_msg_put_yget_wd(m, &n_cfg->sid, 1, NULL, wd));
+	ATF_REQUIRE_EQ(0, cbl_request(f->c, m, &r, 5000));
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	if (cbl_msg_ydecode_member(r, n_cfg, &d, a, CBL_YD_STRICT, NULL,
+	    0) == 0 && d.cfg != NULL && d.cfg->has_level)
+		v = d.cfg->level;
+	cbl_yarena_free(a);
+	cbl_msg_free(r);
+	return (v);
+}
+
+/* RFC 6243's modes on a GET: what the server has; the default in use
+ * too; a leaf at its default left out. */
+ATF_TC_WITHOUT_HEAD(with_defaults);
+ATF_TC_BODY(with_defaults, tc)
+{
+	struct fixture f;
+
+	setup(&f);
+	ATF_CHECK_EQ(-1, get_level(&f, CBL_YWD_EXPLICIT));
+	ATF_CHECK_EQ(3, get_level(&f, CBL_YWD_REPORT_ALL));
+	kept.level = 3;
+	ATF_CHECK_EQ(3, get_level(&f, CBL_YWD_EXPLICIT));
+	ATF_CHECK_EQ(-1, get_level(&f, CBL_YWD_TRIM));
+	kept.level = 5;
+	ATF_CHECK_EQ(5, get_level(&f, CBL_YWD_TRIM));
+	teardown(&f);
+}
+
 /* A commit whose change fails: the handler asked once, the change
  * that failed not undone (RFC 6241 section 7.2 undoes the others). */
 ATF_TC_WITHOUT_HEAD(failed_alone);
@@ -524,5 +569,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, conditions);
 	ATF_TP_ADD_TC(tp, undo_accepts);
 	ATF_TP_ADD_TC(tp, failed_alone);
+	ATF_TP_ADD_TC(tp, with_defaults);
 	return (atf_no_error());
 }

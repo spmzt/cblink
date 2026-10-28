@@ -443,6 +443,29 @@ module cblink {
         "RFC 6241: Network Configuration Protocol (NETCONF), Section
          8.9";
     }
+    leaf with-defaults {
+      type enumeration {
+        enum explicit {
+          description
+            "What the server has, as it has it: its basic mode.";
+        }
+        enum report-all {
+          description
+            "Every default in use too, a leaf the server has not set
+             reported at its default.";
+        }
+        enum trim {
+          description
+            "A leaf at its default left out.";
+        }
+      }
+      description
+        "How defaults are read (RFC 6243 section 3); without it,
+         explicit.  report-all-tagged waits on an annotation of the
+         default in YANG-CBOR.";
+      reference
+        "RFC 6243: With-defaults Capability for NETCONF, Section 3";
+    }
   }
 
   sx:structure action {

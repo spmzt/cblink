@@ -40,6 +40,7 @@
 #include <time.h>
 
 #include "cbl_data.h"
+#include "cbl_dimpl.h"
 #include "cbl_impl.h"
 #include "cbl_schema.h"
 #include "cbl_yimpl.h"
@@ -225,7 +226,7 @@ sid_cmp(const void *a, const void *b)
  */
 static int
 get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
-    char **xpathp)
+    char **xpathp, int *wdp)
 {
 	cbl_ctx *ctx = req->conn->ctx;
 	struct cblink_get g;
@@ -271,6 +272,8 @@ get_targets(cbl_req *req, const cbl_msg *msg, uint64_t **vp, size_t *np,
 		error = cbl_ysay(req, error, 0, "malformed-message", why);
 	/* An xpath filter: copied, the arena goes. */
 	*xpathp = NULL;
+	*wdp = g.has_with_defaults ? (int)g.with_defaults :
+	    CBLINK_GET_WITH_DEFAULTS_EXPLICIT;
 	if (error == 0 && g.xpath_filter != NULL &&
 	    (*xpathp = strdup(g.xpath_filter)) == NULL)
 		error = ENOMEM;
@@ -374,9 +377,53 @@ cbl_yread_tree(cbl_req *req, const uint64_t *v, size_t n, cbl_dtree **tp,
  * the nodes above and a list entry's keys, RFC 6241 section 8.9) into
  * reply.
  */
+/* Leaves at their defaults taken out (RFC 6243's trim), below n. */
+static int
+wd_trim(const cbl_dtree *t, cbl_dnode *n, int depth)
+{
+	cbl_dnode *c, *next;
+	int error;
+
+	if (depth > 64)
+		return (ELOOP);
+	for (c = cbl_dnode_first(n); c != NULL; c = next) {
+		const struct cbl_ynode *sn = cbl_dnode_schema(c);
+		char *s = NULL;
+
+		next = cbl_dnode_next(c);
+		if (sn->kind == CBL_YN_LEAF && sn->ndflt > 0 &&
+		    (sn->flags & CBL_YNF_KEY) == 0) {
+			if (cbl_d_vstring(cbl_dtree_schema(t), sn->type,
+			    cbl_dnode_value(c), &s) == 0 && s != NULL &&
+			    strcmp(s, sn->dflt[0]) == 0)
+				(void)cbl_dnode_remove(c);
+			free(s);
+			continue;
+		}
+		if ((error = wd_trim(t, c, depth + 1)) != 0)
+			return (error);
+	}
+	return (0);
+}
+
+int
+cbl_ywd_apply(cbl_dtree *t, int wd)
+{
+
+	switch (wd) {
+	case CBLINK_GET_WITH_DEFAULTS_REPORT_ALL:
+		return (cbl_dtree_defaults(cbl_dtree_root(t)) < 0 ? (errno !=
+		    0 ? errno : ENOMEM) : 0);
+	case CBLINK_GET_WITH_DEFAULTS_TRIM:
+		return (wd_trim(t, cbl_dtree_root(t), 0));
+	default:
+		return (0);
+	}
+}
+
 static int
 get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
-    const char *xpath)
+    const char *xpath, int wd)
 {
 	struct cbl_ybuf b = { NULL, 0, 0 };
 	cbl_dtree *t, *ft;
@@ -386,13 +433,21 @@ get_filtered(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 
 	if ((error = cbl_yread_tree(req, v, n, &t, NULL)) != 0 || t == NULL)
 		return (error);
+	/* The defaults as asked for (RFC 6243), before the access rules
+	 * take out what may not be read. */
+	if ((error = cbl_ywd_apply(t, wd)) != 0) {
+		cbl_dtree_free(t);
+		return (error);
+	}
 	/* What the user may not read is not there to be selected. */
 	if ((error = cbl_ynacm_read(req->conn->ctx, req->conn,
 	    &(struct cbl_ywho){ req->user, req->recovery }, t)) != 0) {
 		cbl_dtree_free(t);
 		return (error);
 	}
-	if ((ft = cbl_dtree_filter_xpath(t, xpath, why, sizeof(why))) ==
+	if (xpath == NULL)
+		ft = t, t = NULL;
+	else if ((ft = cbl_dtree_filter_xpath(t, xpath, why, sizeof(why))) ==
 	    NULL) {
 		error = errno;
 		cbl_dtree_free(t);
@@ -487,14 +542,14 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	char *xpath;
 	size_t n;
 	bool put;
-	int error;
+	int error, wd;
 
 	enum cbl_yds_name ds;
 	bool said;
 
 	if ((error = cbl_yds_of(req, &ds, &said)) != 0)
 		return (error);
-	if ((error = get_targets(req, msg, &v, &n, &xpath)) != 0)
+	if ((error = get_targets(req, msg, &v, &n, &xpath, &wd)) != 0)
 		return (error);
 	if ((error = cbl_req_reply_new(req, 0, &reply)) != 0) {
 		free(v);
@@ -503,11 +558,12 @@ y_get_now(cbl_req *req, const cbl_msg *msg, void *arg __unused)
 	}
 	/* A datastore's: running or the candidate, configuration alone. */
 	if (ds != CBL_YDS_OPERATIONAL)
-		error = cbl_yds_get(req, reply, v, n, xpath, ds);
-	else if (xpath != NULL)
-		error = get_filtered(req, reply, v, n, xpath);
+		error = cbl_yds_get(req, reply, v, n, xpath, ds, wd);
+	else if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT)
+		error = get_filtered(req, reply, v, n, xpath, wd);
 	for (size_t i = 0; ds == CBL_YDS_OPERATIONAL && xpath == NULL &&
-	    error == 0 && i < n; i++)
+	    wd == CBLINK_GET_WITH_DEFAULTS_EXPLICIT && error == 0 && i < n;
+	    i++)
 		error = get_one(req, reply, v[i], &put);
 	free(v);
 	free(xpath);
@@ -541,7 +597,7 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 	cbl_msg *item;
 	char *xpath;
 	bool put;
-	int error;
+	int error, wd;
 
 	if (d == NULL) {
 		enum cbl_yds_name ds;
@@ -555,13 +611,14 @@ y_get_dump(cbl_req *req, const cbl_msg *msg, struct cbl_dump_state *st,
 			    "a GET, not a dump"));
 		if ((d = calloc(1, sizeof(*d))) == NULL)
 			return (ENOMEM);
-		if ((error = get_targets(req, msg, &d->v, &d->n, &xpath)) !=
-		    0) {
+		if ((error = get_targets(req, msg, &d->v, &d->n, &xpath,
+		    &wd)) != 0) {
 			free(d);
 			return (error);
 		}
-		/* A dump is a node a frame: a filter is a GET's. */
-		if (xpath != NULL) {
+		/* A dump is a node a frame: a filter is a GET's, and the
+		 * defaults' modes. */
+		if (xpath != NULL || wd != CBLINK_GET_WITH_DEFAULTS_EXPLICIT) {
 			free(xpath);
 			free(d->v);
 			free(d);
@@ -1235,16 +1292,28 @@ int
 cbl_msg_put_yget_xpath(cbl_msg *msg, const uint64_t *sids, size_t n,
     const char *xpath)
 {
+
+	return (cbl_msg_put_yget_wd(msg, sids, n, xpath,
+	    CBL_YWD_EXPLICIT));
+}
+
+int
+cbl_msg_put_yget_wd(cbl_msg *msg, const uint64_t *sids, size_t n,
+    const char *xpath, enum cbl_ywd wd)
+{
 	struct cblink_get g = { 0 };
 	struct cbl_bytes *t;
 	uint8_t *b;
 	int error;
 
-	if (msg == NULL || (sids == NULL && n > 0))
+	if (msg == NULL || (sids == NULL && n > 0) || wd < CBL_YWD_EXPLICIT ||
+	    wd > CBL_YWD_TRIM)
 		return (EINVAL);
-	if (n == 0 && xpath == NULL)
+	if (n == 0 && xpath == NULL && wd == CBL_YWD_EXPLICIT)
 		return (0);
 	g.xpath_filter = xpath;
+	g.has_with_defaults = wd != CBL_YWD_EXPLICIT;
+	g.with_defaults = (enum cblink_get_with_defaults)wd;
 	if ((t = calloc(n > 0 ? n : 1, sizeof(*t))) == NULL ||
 	    (b = calloc(n > 0 ? n : 1, 9)) == NULL) {
 		free(t);

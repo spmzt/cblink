@@ -346,6 +346,11 @@ ATF_TC_BODY(yang_tags, tc)
 	/* Not on the body, a key, or twice; nor on the wrong kind. */
 	require_body_error(ctx, "D8 2F A1 01 01", EPROTO);
 	require_body_error(ctx, "A1 D8 2F 01 01", EPROTO);
+	/* On an inner map's key, 47 alone: an absolute SID. */
+	a = yang_value(ctx, "A1 01 A1 D8 2F 19 05 DC 01", &msg);
+	ATF_CHECK(a != NULL);
+	cbl_msg_free(msg);
+	require_body_error(ctx, "A1 01 A1 D8 2E 01 01", EPROTO);
 	require_body_error(ctx, "A1 01 D8 2F D8 2F 01", EPROTO);
 	require_body_error(ctx, "A1 01 C4 83 21 01 01", EPROTO);
 	require_body_error(ctx, "A1 01 C4 19 0C 5D", EPROTO);

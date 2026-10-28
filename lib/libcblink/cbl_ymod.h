@@ -38,6 +38,12 @@ enum cblink_error_error_type {
 	CBLINK_ERROR_ERROR_TYPE_APPLICATION = 3,
 };
 
+enum cblink_get_with_defaults {
+	CBLINK_GET_WITH_DEFAULTS_EXPLICIT = 0,
+	CBLINK_GET_WITH_DEFAULTS_REPORT_ALL = 1,
+	CBLINK_GET_WITH_DEFAULTS_TRIM = 2,
+};
+
 enum cblink_datastore_name {
 	CBLINK_DATASTORE_NAME_RUNNING = 0,
 	CBLINK_DATASTORE_NAME_CANDIDATE = 1,
@@ -96,6 +102,8 @@ struct cblink_close {
 /* structure */
 struct cblink_get {
 	const char	*xpath_filter;
+	bool			 has_with_defaults;
+	enum cblink_get_with_defaults	 with_defaults;
 	struct {
 		size_t		 n;
 		const struct cbl_bytes	 *v;

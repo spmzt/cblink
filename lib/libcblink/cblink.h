@@ -22,7 +22,7 @@
 
 #define	CBLINK_VERSION_MAJOR	0
 #define	CBLINK_VERSION_MINOR	2
-#define	CBLINK_VERSION_PATCH	13
+#define	CBLINK_VERSION_PATCH	14
 
 #ifdef __cplusplus
 extern "C" {

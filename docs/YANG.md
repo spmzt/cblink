@@ -60,8 +60,8 @@ are from that SID, not the `input` or `output` node's.
 | `union` | as the member that matches, with the tags above where members could be told apart no other way |
 | anydata, anyxml | as a container, its keys deltas from its own SID |
 
-Tag 47, an absolute SID, is taken as a value and as a key in any map
-(RFC 9254 section 4.2.1), the key then the child of that SID. Tag
+Tag 47, an absolute SID, is taken as a value and as a key in any inner
+map (RFC 9254 section 4.2.1), the key then the child of that SID. Tag
 109 is draft-ietf-core-yang-metadata's: a node's annotations (RFC
 7952), `[metadata, value]` in place of its value, the metadata a map
 keyed by each annotation's delta from the node's own SID (an entry's:
@@ -216,7 +216,11 @@ the handlers, every top-level node the candidate has otherwise than
 running, all or nothing, NACM's write checks each; a confirmed commit
 (section 8.4) is undone at its `confirm-timeout`, by `cancel-commit`, or
 when its session goes without `persist`, unless a commit confirms it
-(its session's, or any with its `persist-id`). An undo a handler fails
+(its session's, or any with its `persist-id`). A GET's `with-defaults`
+(RFC 6243) reads `explicit` (what the server has, the basic mode),
+`report-all` (the defaults in use too) or `trim` (a leaf at its default
+left out), of any datastore (`cbl_msg_put_yget_wd()`); `report-all-tagged`
+waits on an annotation of the default in YANG-CBOR. An undo a handler fails
 is the program's to hear of, and the undo stops there; an undo needs
 no consent its commit had (`cbl_req_yundo()`). A get handler
 reading for running (`cbl_req_ydatastore()`) leaves out what is no

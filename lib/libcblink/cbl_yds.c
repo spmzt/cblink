@@ -565,7 +565,7 @@ put_tree(cbl_req *req, cbl_msg *reply, cbl_dtree *t, const uint64_t *v,
 
 int
 cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
-    const char *xpath, enum cbl_yds_name ds)
+    const char *xpath, enum cbl_yds_name ds, int wd)
 {
 	struct cbl_yds *d = req->conn->ctx->yds;
 	cbl_dtree *t;
@@ -581,7 +581,8 @@ cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
 		return (ENOMEM);
 	if (t == NULL && (error = running_tree(req, &t)) != 0)
 		return (error);
-	error = put_tree(req, reply, t, v, n, xpath);
+	if ((error = cbl_ywd_apply(t, wd)) == 0)
+		error = put_tree(req, reply, t, v, n, xpath);
 	cbl_dtree_free(t);
 	return (error);
 }

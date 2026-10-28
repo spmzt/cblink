@@ -51,8 +51,11 @@ int	cbl_yvalid_member(cbl_req *req, const struct cbl_ynode *n,
  * EDIT of one; ietf-netconf's commit, cancel-commit, discard-changes
  * (handled: whether it was one). */
 int	cbl_yds_of(cbl_req *req, enum cbl_yds_name *ds, bool *said);
+/* A tree read as RFC 6243's mode wd says (CBLINK_GET_WITH_DEFAULTS_*). */
+struct cbl_dtree;
+int	cbl_ywd_apply(struct cbl_dtree *t, int wd);
 int	cbl_yds_get(cbl_req *req, cbl_msg *reply, const uint64_t *v, size_t n,
-	    const char *xpath, enum cbl_yds_name ds);
+	    const char *xpath, enum cbl_yds_name ds, int wd);
 int	cbl_yds_edit(cbl_req *req, const cbl_msg *msg);
 bool	cbl_yds_running_locked(cbl_req *req);
 int	cbl_yds_rpc(cbl_req *req, const cbl_msg *msg, const struct cbl_ynode *n,

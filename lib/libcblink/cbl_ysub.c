@@ -117,12 +117,13 @@ struct yrcv {
 	_Atomic uint64_t	 sent, excluded;
 	struct timespec		 retry;		/* connect again then */
 	unsigned		 backoff;	/* seconds */
-	/* The last record's event time and bytes: a replay begins there,
-	 * that record itself not sent again. */
+	/* The last record's event time, and the records of that second:
+	 * a replay begins at that second (what the program keeps is kept
+	 * at that resolution), those sent not sent again. */
 	struct timespec		 last;
 	bool			 has_last;
-	uint8_t			*lastp;
-	size_t			 lastlen;
+	struct yrec		*sec;
+	size_t			 nsec, capsec;
 	/* ysublock's: live records waiting for the thread (listed:
 	 * taking them); asked to connect anew; out of the configuration. */
 	struct yrec		*q;
@@ -472,7 +473,9 @@ rcv_free(struct yrcv *r)
 	for (size_t i = 0; i < r->nq; i++)
 		free(r->q[i].p);
 	free(r->q);
-	free(r->lastp);
+	for (size_t i = 0; i < r->nsec; i++)
+		free(r->sec[i].p);
+	free(r->sec);
 	free((char *)(uintptr_t)r->pub.name);
 	free((char *)(uintptr_t)r->pub.instance);
 	free(r);
@@ -573,6 +576,21 @@ rcv_down(struct cbl_ysub *sub, struct yrcv *r)
 		ctx->ytr_disconnect(&r->pub, ctx->ytr_arg);
 }
 
+/* Whether sid is a state notification of the subscription's. */
+static bool
+is_state(const struct cbl_ysub *sub, uint64_t sid)
+{
+	const struct ynodes *y = &sub->y;
+	const struct cbl_ynode *const v[] = { y->n_susp, y->n_resumed,
+	    y->n_modified, y->n_replayed, y->n_started, y->n_terminated,
+	    y->n_completed };
+
+	for (size_t i = 0; i < nitems(v); i++)
+		if (v[i] != NULL && v[i]->sid == sid)
+			return (true);
+	return (false);
+}
+
 /* One record to one receiver, by the transport; the thread's. */
 static int
 rcv_send(struct cbl_ysub *sub, struct yrcv *r, uint64_t sid,
@@ -580,7 +598,6 @@ rcv_send(struct cbl_ysub *sub, struct yrcv *r, uint64_t sid,
 {
 	cbl_ctx *ctx = sub->ctx;
 	struct timespec now;
-	uint8_t *p;
 	int error;
 
 	if (r->state != CBL_YSUB_RCV_ACTIVE) {
@@ -601,15 +618,34 @@ rcv_send(struct cbl_ysub *sub, struct yrcv *r, uint64_t sid,
 	}
 	atomic_fetch_add(&r->sent, 1);
 	atomic_fetch_add(&sub->sent, 1);
-	if ((p = malloc(len > 0 ? len : 1)) != NULL) {
-		memcpy(p, content, len);
-		free(r->lastp);
-		r->lastp = p;
-		r->lastlen = len;
+	/* The last record it had, a replay's start: the stream's, not a
+	 * state notification (which the program keeps none of). */
+	if (sub->stream != NULL && !is_state(sub, sid)) {
+		if (!r->has_last || when->tv_sec != r->last.tv_sec) {
+			for (size_t i = 0; i < r->nsec; i++)
+				free(r->sec[i].p);
+			r->nsec = 0;
+		}
+		(void)rec_add(&r->sec, &r->nsec, &r->capsec, sid, content, len,
+		    when);
 		r->last = *when;
 		r->has_last = true;
 	}
 	return (0);
+}
+
+/* Whether the receiver had this record, of the last second's. */
+static bool
+rcv_had(const struct yrcv *r, const struct yrec *v)
+{
+
+	if (!r->has_last || !v->has_when || v->when.tv_sec != r->last.tv_sec)
+		return (false);
+	for (size_t i = 0; i < r->nsec; i++)
+		if (r->sec[i].sid == v->sid && r->sec[i].len == v->len &&
+		    memcmp(r->sec[i].p, v->p, v->len) == 0)
+			return (true);
+	return (false);
 }
 
 /*
@@ -2496,19 +2532,20 @@ cfg_connect(struct cbl_ysub *sub, struct yrcv *r)
 	memset(&rp, 0, sizeof(rp));
 	rp.sub = sub;
 	rp.rcv = r;
+	/* From the last record's second; what it had of it is left out
+	 * below. */
 	rp.from = r->has_last ? r->last : sub->has_replay ? sub->replay_from :
 	    sub->made;
+	if (r->has_last)
+		rp.from.tv_nsec = 0;
 	error = ctx->yreplay(&rp.from, &rp, ctx->yreplay_arg);
 	cbl_ysub_replay_live(&rp);
 	(void)clock_gettime(CLOCK_REALTIME, &now);
 	for (size_t i = 0; i < rp.n; i++) {
 		struct yrec *v = &rp.v[i];
 
-		/* The record it had last is not sent again. */
-		if (!(r->has_last && v->has_when && v->when.tv_sec ==
-		    r->last.tv_sec && v->when.tv_nsec == r->last.tv_nsec &&
-		    v->len == r->lastlen && memcmp(v->p, r->lastp, v->len) ==
-		    0) && r->state == CBL_YSUB_RCV_ACTIVE)
+		/* What it had of that second is not sent again. */
+		if (!rcv_had(r, v) && r->state == CBL_YSUB_RCV_ACTIVE)
 			(void)rcv_send(sub, r, v->sid, v->p, v->len,
 			    v->has_when ? &v->when : &now);
 		free(v->p);

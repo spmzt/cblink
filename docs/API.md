@@ -486,6 +486,11 @@ cbl_dfilter *cbl_dfilter_new(const struct cbl_yschema *);
 int	cbl_dfilter_add(cbl_dfnode *parent, const struct cbl_ynode *,
 	    const void *value, cbl_dfnode **);	/* parent: cbl_dfilter_root() */
 cbl_dtree *cbl_dtree_filter_subtree(const cbl_dtree *, const cbl_dfilter *);
+/* a subtree filter as anydata's YANG-CBOR, its keys deltas from base */
+cbl_dfilter *cbl_dfilter_decode(const struct cbl_yschema *, uint64_t base,
+	    const void *, size_t, char *why, size_t whylen);
+int	cbl_dfilter_encode(const cbl_dfilter *, uint64_t base, struct cbl_ybuf *);
+const struct cbl_ynode *cbl_dfilter_top(const cbl_dfilter *, size_t i);
 /* a mount point's parent references, and the mounted tree given them */
 cbl_dtree *cbl_dtree_parent_refs(const cbl_dtree *, const cbl_dnode *mp,
 	    const char *const *exprs, size_t n, char *why, size_t whylen);
@@ -556,7 +561,12 @@ void	cbl_xval_free(struct cbl_xval *);
   match node, one with children a containment node, one with neither a
   selection node. Its content match nodes all matching, a node is
   selected whole if it has no other filter nodes under it, else with
-  what they match and select; an empty filter selects nothing.
+  what they match and select; an empty filter selects nothing. On the
+  wire a subtree filter is the YANG-CBOR of an anydata (RFC 8639's
+  `stream-subtree-filter`, RFC 8641's `datastore-subtree-filter`), as
+  WIRE-FORMAT.md section 7.6.1 has it: `cbl_dfilter_decode()` reads one,
+  `cbl_dfilter_encode()` writes one, each with the SID of the anydata it
+  is carried in, which its keys are deltas from.
 - **NACM paths**: a data-node rule's `path` (RFC 8341 section 3.4.5) is
   an instance-identifier whose key predicates may be left out, any
   entry then, and whose values may be `$USER`; `/` is every node. It is

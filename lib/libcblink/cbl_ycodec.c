@@ -1526,6 +1526,47 @@ cbl_ydecode(const struct cbl_ynode *n, const void *data, size_t len,
 	return (0);
 }
 
+/*
+ * One value of leaf or leaf-list n, the CBOR item at data, into out as
+ * its member is; a value of type t written; a head of major type major
+ * (cbl_yimpl.h).
+ */
+int
+cbl_ydecode_value(const struct cbl_ynode *n, const void *data, size_t len,
+    void *out, cbl_yarena *a, char *why, size_t whylen)
+{
+	struct yrd r = { data, (const uint8_t *)data + len, data, a, 0,
+	    why, whylen, NULL };
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (n == NULL || n->type == NULL || data == NULL || out == NULL ||
+	    a == NULL)
+		return (EINVAL);
+	r.leafmod = n->module;
+	if ((error = dec_value(&r, n->type, out, false)) != 0)
+		return (error);
+	if (r.p != r.end)
+		return (fail(&r, EINVAL, "bytes after the value"));
+	return (0);
+}
+
+int
+cbl_yencode_value(struct cbl_ybuf *b, const struct cbl_ytype *t,
+    const void *v)
+{
+
+	return (enc_value(b, t, v, false));
+}
+
+int
+cbl_ycbor_head(struct cbl_ybuf *b, unsigned major, uint64_t v)
+{
+
+	return (put_head(b, major, v));
+}
+
 /* The length of the CBOR item at p, 0 where it is none. */
 size_t
 cbl_ycbor_skip(const uint8_t *p, const uint8_t *end)

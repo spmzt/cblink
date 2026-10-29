@@ -514,11 +514,12 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   the subscription's `id`; each data frame one record in `NOTIFY`'s
   envelope. Two targets are served: the `NETCONF` stream, every
   notification the server sends to group `notify` that the
-  `stream-xpath-filter` selects; and, with `ietf-yang-push` and
-  `ietf-datastores`, the `operational` datastore with `periodic`
-  (RFC 8641): a `push-update` every `period` (10 centiseconds at least)
-  from `anchor-time` (without one, at once), its
-  `datastore-contents` what the `datastore-xpath-filter` selects of the
+  `stream-xpath-filter` or `stream-subtree-filter` selects; and, with
+  `ietf-yang-push` and `ietf-datastores`, the `operational` datastore
+  with `periodic` (RFC 8641): a `push-update` every `period` (10
+  centiseconds at least) from `anchor-time` (without one, at once), its
+  `datastore-contents` what the `datastore-xpath-filter` or
+  `datastore-subtree-filter` selects of the
   data the server's get handlers read on the stream's connection, and
   `incomplete-update` where a read failed. With `on-change` (where
   `ietf-yang-push`'s feature is on), the data is read every
@@ -540,10 +541,10 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   `subscription-resumed`, and an on-change subscription pushes the whole
   of it again. `modify-subscription` and `resync-subscription` are the
   program's rpcs, answered by `cbl_ysub_modify()` and
-  `cbl_ysub_resync()`; the first sends `subscription-modified`. Subtree
-  filters, filters by reference and configured subscriptions are not
-  served: a record that does not fit the
-  stream's credit is left out. An input member that is not served is
+  `cbl_ysub_resync()`; the first sends `subscription-modified`, with
+  the filter as it is now. A subtree filter is encoded as section 7.6.1
+  says. Filters by reference are not served. An input member that is
+  not served is
   refused by name (`operation-not-supported`), and the open fails with
   the error.
 - **Errors.** The `cblink:error` structure's `error-path` is the SID of
@@ -552,6 +553,68 @@ keys are SIDs, values YANG-CBOR (RFC 9254).
   `operation-not-supported` for a node without the handler asked for or
   a `config false` node edited, `bad-element` for a value that is not
   the node's.
+
+### 7.6.1 Subtree filters
+
+RFC 8639's `stream-subtree-filter` and RFC 8641's
+`datastore-subtree-filter` are `anydata` whose content is an RFC 6241
+section 6 subtree filter. RFC 6241 defines that filter in XML alone, and
+RFC 9254 gives it no CBOR form, so cblink defines one: **the filter is a
+YANG-CBOR instance of the nodes it names**, carried as the anydata's
+content, and each kind of filter node is told by its value.
+
+- The anydata's content is a map whose keys are SID deltas from the
+  anydata's own SID (RFC 9254 section 4.5: an anydata's keys are as a
+  container's). Its members are top-level nodes of the server's schema:
+  data nodes for a datastore's subscription, notifications for a
+  stream's.
+- Below the top, a node's members are keyed by deltas from that node's
+  SID, a list entry's from its list's, as RFC 9254 has them.
+- `null` (`0xf6`) is a **selection node**, of any kind of node: a
+  container, a list (every entry), a leaf, a leaf-list (every value), an
+  anydata. A leaf of type `empty`, whose value is `null` too, is so a
+  selection node, as RFC 6241 has an empty element.
+- A container's (or a notification's) map is a **containment node**, its
+  members the filter nodes under it; an empty map is a selection node.
+- A list is an array of maps, each a containment node of its own (an
+  entry's filter, the `<interface>` element repeated in XML); an empty
+  map selects every entry. Two maps select what either selects.
+- A leaf's value, as YANG-CBOR encodes the leaf, is a **content match
+  node**: an identityref by SID, an enumeration by its value, a union
+  by RFC 9254 section 6.12's rules. Sibling content match nodes are
+  ANDed (RFC 6241 section 6.2.5).
+- A leaf-list's array of values is a content match node for each.
+
+What the filter selects is RFC 6241 section 6.2's: a node whose content
+match nodes all match is selected whole when it has no other filter node
+under it, else with those, its selection nodes' nodes and what its
+containment nodes select; an empty map at the top selects nothing.
+
+Example, one interface's counters (RFC 8343, `ietf-interfaces`):
+
+```
+<interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+  <interface><name>lo0</name><statistics/></interface>
+</interfaces>
+```
+
+is, with `ietf-interfaces`' SIDs (`interfaces` 1505, `interface` 1533,
+`name` 1542, `statistics` 1546), carried in an anydata of SID `A`:
+
+```
+{ 1505 - A: { 28: [ { 9: "lo0", 13: null } ] } }
+```
+
+What XML has and this has not: a namespace without a name (a wildcard
+over modules) and attribute match expressions. A SID names one node of
+one module, and YANG data has no XML attributes, so neither has a
+meaning here. Because the keys are deltas, a filter moved to another
+anydata (from `establish-subscription`'s input to `subscription-modified`
+or the `subscriptions` list) is written again from the schema, not
+copied: `cbl_dfilter_decode()` and `cbl_dfilter_encode()` take the
+anydata's SID. A filter that names a SID of no node where it is, gives a
+leaf a value not of its type, or a list anything but an array, is
+refused at the open, `invalid-value`.
 
 ---
 

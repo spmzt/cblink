@@ -28,6 +28,7 @@
 
 #include "cbl_data.h"
 #include "cbl_dimpl.h"
+#include "cbl_yimpl.h"
 
 struct cbl_dfnode {
 	const struct cbl_ynode	*sn;
@@ -443,4 +444,293 @@ cbl_dtree_filter_subtree(const cbl_dtree *t, const cbl_dfilter *f)
 	out = cbl_dtree_select(t, s.v, s.n);
 	ps_free(&s);
 	return (out);
+}
+
+/*
+ * A subtree filter as YANG-CBOR (WIRE-FORMAT.md section 7): anydata's
+ * content, a map whose keys are SID deltas from the anydata's own, each
+ * a node of the filter keyed as RFC 9254 keys a container's children.
+ * null is a selection node, of any kind; a container's map a
+ * containment node (an empty one, a selection node); a list's array of
+ * maps, a filter node each; a leaf's value a content match node; a
+ * leaf-list's array of values, a content match node each.  At the top,
+ * the schema's top-level data nodes and notifications.
+ */
+
+const struct cbl_ynode *
+cbl_dfilter_top(const cbl_dfilter *f, size_t i)
+{
+	const cbl_dfnode *n;
+
+	if (f == NULL)
+		return (NULL);
+	for (n = f->root.first; n != NULL && i > 0; n = n->next)
+		i--;
+	return (n != NULL ? n->sn : NULL);
+}
+
+struct frd {
+	const struct cbl_yschema *s;
+	const uint8_t	*p, *end;
+	cbl_yarena	*a;
+	char		*why;
+	size_t		 whylen;
+};
+
+static int
+frd_fail(struct frd *r, int error, const char *what,
+    const struct cbl_ynode *sn)
+{
+
+	if (r->why != NULL && r->whylen > 0 && r->why[0] == '\0')
+		(void)snprintf(r->why, r->whylen, "subtree filter: %s%s%s",
+		    sn != NULL ? sn->name : "", sn != NULL ? ": " : "", what);
+	return (error);
+}
+
+/* A head of major type major at r->p, its argument in *v. */
+static bool
+fhead(struct frd *r, int major, uint64_t *v)
+{
+	const uint8_t *p = r->p;
+	size_t k;
+
+	if (p >= r->end || *p >> 5 != major)
+		return (false);
+	*v = *p++ & 0x1f;
+	if (*v >= 24) {
+		if (*v > 27)
+			return (false);
+		k = (size_t)1 << (*v - 24);
+		if ((size_t)(r->end - p) < k)
+			return (false);
+		for (*v = 0; k > 0; k--)
+			*v = *v << 8 | *p++;
+	}
+	r->p = p;
+	return (true);
+}
+
+/* A value of sn's at r->p, a content match node of parent's. */
+static int
+fvalue(struct frd *r, cbl_dfnode *parent, const struct cbl_ynode *sn)
+{
+	size_t len;
+	void *v;
+	int error;
+
+	if ((len = cbl_ycbor_skip(r->p, r->end)) == 0)
+		return (frd_fail(r, EINVAL, "not CBOR", sn));
+	if ((v = cbl_yarena_alloc(r->a, sn->type->csize)) == NULL)
+		return (ENOMEM);
+	memset(v, 0, sn->type->csize);
+	if ((error = cbl_ydecode_value(sn, r->p, len, v, r->a, NULL, 0)) != 0)
+		return (frd_fail(r, error, "not one of its values", sn));
+	r->p += len;
+	if ((error = cbl_dfilter_add(parent, sn, v, NULL)) != 0)
+		return (frd_fail(r, error, "no content match node", sn));
+	return (0);
+}
+
+static int	fmap(struct frd *, cbl_dfnode *, uint64_t, int);
+
+/* Node sn of the filter, a child of parent: its encoding at r->p. */
+static int
+fnode(struct frd *r, cbl_dfnode *parent, const struct cbl_ynode *sn,
+    int depth)
+{
+	cbl_dfnode *n;
+	uint64_t k;
+	int error;
+
+	if (depth > CBL_D_DEPTH_MAX)
+		return (frd_fail(r, ELOOP, "too deep", sn));
+	if (r->p < r->end && *r->p == 0xf6) {
+		r->p++;
+		return (cbl_dfilter_add(parent, sn, NULL, NULL));
+	}
+	switch (sn->kind) {
+	case CBL_YN_CONTAINER:
+	case CBL_YN_NOTIF:
+		if ((error = cbl_dfilter_add(parent, sn, NULL, &n)) != 0)
+			return (error);
+		return (fmap(r, n, sn->sid, depth + 1));
+	case CBL_YN_LIST:
+		if (!fhead(r, 4, &k))
+			return (frd_fail(r, EINVAL, "a list is an array", sn));
+		for (uint64_t i = 0; i < k; i++)
+			if ((error = cbl_dfilter_add(parent, sn, NULL,
+			    &n)) != 0 ||
+			    (error = fmap(r, n, sn->sid, depth + 1)) != 0)
+				return (error);
+		return (0);
+	case CBL_YN_LEAF:
+		return (fvalue(r, parent, sn));
+	case CBL_YN_LEAFLIST:
+		if (!fhead(r, 4, &k))
+			return (frd_fail(r, EINVAL, "a leaf-list is an array",
+			    sn));
+		for (uint64_t i = 0; i < k; i++)
+			if ((error = fvalue(r, parent, sn)) != 0)
+				return (error);
+		return (0);
+	default:
+		return (frd_fail(r, EINVAL, "null alone selects it", sn));
+	}
+}
+
+/* The map at r->p: parent's children, keyed by deltas from base. */
+static int
+fmap(struct frd *r, cbl_dfnode *parent, uint64_t base, int depth)
+{
+	const struct cbl_ynode *sn;
+	uint64_t k, d;
+	int64_t delta;
+	int error;
+
+	if (!fhead(r, 5, &k))
+		return (frd_fail(r, EINVAL, "a map was expected",
+		    parent->sn));
+	for (uint64_t i = 0; i < k; i++) {
+		if (fhead(r, 0, &d) && d <= INT64_MAX)
+			delta = (int64_t)d;
+		else if (fhead(r, 1, &d) && d < INT64_MAX)
+			delta = -1 - (int64_t)d;
+		else
+			return (frd_fail(r, EINVAL, "a key is a SID delta",
+			    parent->sn));
+		sn = cbl_yschema_node(r->s, (uint64_t)((int64_t)base + delta));
+		if (sn == NULL || sn->parent != parent->sn ||
+		    (parent->sn == NULL && sn->kind != CBL_YN_NOTIF &&
+		    !cbl_yis_top_data(sn)) || (parent->sn != NULL &&
+		    sn->kind != CBL_YN_CONTAINER && sn->kind != CBL_YN_LIST &&
+		    sn->kind != CBL_YN_LEAF && sn->kind != CBL_YN_LEAFLIST &&
+		    sn->kind != CBL_YN_ANYDATA && sn->kind != CBL_YN_ANYXML))
+			return (frd_fail(r, EINVAL, "a SID of no node there",
+			    parent->sn));
+		if ((error = fnode(r, parent, sn, depth)) != 0)
+			return (error);
+	}
+	return (0);
+}
+
+cbl_dfilter *
+cbl_dfilter_decode(const struct cbl_yschema *s, uint64_t base,
+    const void *data, size_t len, char *why, size_t whylen)
+{
+	struct frd r = { s, data, (const uint8_t *)data + len, NULL, why,
+	    whylen };
+	cbl_dfilter *f;
+	int error;
+
+	if (why != NULL && whylen > 0)
+		why[0] = '\0';
+	if (s == NULL || data == NULL) {
+		errno = EINVAL;
+		return (NULL);
+	}
+	if ((f = cbl_dfilter_new(s)) == NULL)
+		return (NULL);
+	if ((r.a = cbl_yarena_new()) == NULL)
+		error = ENOMEM;
+	else if ((error = fmap(&r, &f->root, base, 0)) == 0 && r.p != r.end)
+		error = frd_fail(&r, EINVAL, "bytes after it", NULL);
+	cbl_yarena_free(r.a);
+	if (error != 0) {
+		cbl_dfilter_free(f);
+		errno = error;
+		return (NULL);
+	}
+	return (f);
+}
+
+/* The children of filter node n, each schema node's in one member. */
+static int
+fenc(const cbl_dfnode *n, uint64_t base, struct cbl_ybuf *b, int depth)
+{
+	const cbl_dfnode *c, *g;
+	uint64_t k = 0, m;
+	bool sel;
+	int error;
+
+	if (depth > CBL_D_DEPTH_MAX)
+		return (ELOOP);
+	/* A member each schema node, at its first filter node. */
+	for (c = n->first; c != NULL; c = c->next) {
+		for (g = n->first; g != c && g->sn != c->sn; g = g->next)
+			;
+		if (g == c)
+			k++;
+	}
+	if ((error = cbl_ycbor_head(b, 5, k)) != 0)
+		return (error);
+	for (c = n->first; c != NULL; c = c->next) {
+		for (g = n->first; g != c && g->sn != c->sn; g = g->next)
+			;
+		if (g != c)
+			continue;
+		error = c->sn->sid >= base ?
+		    cbl_ycbor_head(b, 0, c->sn->sid - base) :
+		    cbl_ycbor_head(b, 1, base - c->sn->sid - 1);
+		if (error != 0)
+			return (error);
+		/* Those of its schema node: how many, a selection node
+		 * among them. */
+		for (g = c, m = 0, sel = false; g != NULL; g = g->next)
+			if (g->sn == c->sn) {
+				m++;
+				if (g->first == NULL && g->value == NULL)
+					sel = true;
+			}
+		switch (c->sn->kind) {
+		case CBL_YN_LIST:
+			if (m == 1 && sel) {
+				error = cbl_ycbor_head(b, 7, 22);
+				break;
+			}
+			error = cbl_ycbor_head(b, 4, m);
+			for (g = c; error == 0 && g != NULL; g = g->next)
+				if (g->sn == c->sn)
+					error = fenc(g, c->sn->sid, b,
+					    depth + 1);
+			break;
+		case CBL_YN_LEAFLIST:
+			/* Its values, or the selection node alone. */
+			if (sel && m > 1)
+				return (EINVAL);
+			if (sel) {
+				error = cbl_ycbor_head(b, 7, 22);
+				break;
+			}
+			error = cbl_ycbor_head(b, 4, m);
+			for (g = c; error == 0 && g != NULL; g = g->next)
+				if (g->sn == c->sn)
+					error = cbl_yencode_value(b,
+					    g->sn->type, g->value);
+			break;
+		default:
+			if (m > 1)
+				return (EINVAL);
+			if (c->value != NULL)
+				error = cbl_yencode_value(b, c->sn->type,
+				    c->value);
+			else if (c->first == NULL)
+				error = cbl_ycbor_head(b, 7, 22);
+			else
+				error = fenc(c, c->sn->sid, b, depth + 1);
+			break;
+		}
+		if (error != 0)
+			return (error);
+	}
+	return (0);
+}
+
+int
+cbl_dfilter_encode(const cbl_dfilter *f, uint64_t base, struct cbl_ybuf *b)
+{
+
+	if (f == NULL || b == NULL)
+		return (EINVAL);
+	return (fenc(&f->root, base, b, 0));
 }

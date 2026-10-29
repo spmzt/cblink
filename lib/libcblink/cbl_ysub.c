@@ -10,8 +10,9 @@
  * (SUBSCRIBE).
  *
  *	open	{SID(establish-subscription): input}, as an rpc's: the
- *		NETCONF stream (stream, stream-xpath-filter) or the
- *		operational datastore (datastore, datastore-xpath-filter,
+ *		NETCONF stream (stream, stream-xpath-filter or
+ *		stream-subtree-filter) or the operational datastore
+ *		(datastore, datastore-xpath-filter or -subtree-filter,
  *		periodic {period, anchor-time}, or on-change
  *		{dampening-period, sync-on-start, excluded-change});
  *		stop-time.  What else
@@ -27,7 +28,7 @@
  * ietf-datastores there too.  A periodic subscription has a thread of
  * its own that reads, at each period from its anchor, the top-level
  * nodes the filter's paths begin with (all of them, where it cannot
- * tell) through their get handlers, on a request of the stream's
+ * tell; a subtree filter's own) through their get handlers, on a request of the stream's
  * connection (so a handler sees the subscriber as the peer), and pushes
  * what the filter selects.  On-change is a read at each dampening
  * period (a second at least) compared with the last one: what changed,
@@ -155,6 +156,7 @@ struct cbl_ysub {
 	char			*stream;	/* or NULL: a datastore's */
 	uint64_t		 datastore;
 	char			*xpath;
+	cbl_dfilter		*subtree;	/* or NULL: the filter is xpath */
 	uint32_t		 period;	/* centiseconds */
 	char			*anchor_s, *stop_s;
 	struct timespec		 anchor, stop;
@@ -184,6 +186,8 @@ struct cbl_ysub {
 	 * may be reading it still. */
 	void			**retired;
 	size_t			 nretired;
+	cbl_dfilter		**rfilters;
+	size_t			 nrfilters;
 	/* ysublock's: a thread runs it; push now (resync, modify); its
 	 * first read done; told of a change since its last read. */
 	bool			 dead, listed, threaded, kick, synced, dirty;
@@ -377,9 +381,9 @@ datetime(const char *s, struct timespec *ts)
 }
 
 /*
- * The top-level nodes a period reads: those the filter's paths begin
- * with ("/module:name"), or every one the server reads where a path
- * does not begin so.
+ * The top-level nodes a period reads: a subtree filter's, those the
+ * filter's paths begin with ("/module:name"), or every one the server
+ * reads where a path does not begin so.
  */
 static int
 targets(struct cbl_ysub *sub)
@@ -387,11 +391,29 @@ targets(struct cbl_ysub *sub)
 	const struct cbl_yserver *srv = sub->y.srv;
 	const struct cbl_ynode *n;
 	char *x, *p, *e, *mod, *name;
-	bool all = sub->xpath == NULL;
+	bool all = sub->xpath == NULL && sub->subtree == NULL;
 	size_t cap = 0;
 	int depth;
 
 	sub->ntop = 0;
+	if (sub->subtree != NULL) {
+		for (size_t i = 0; (n = cbl_dfilter_top(sub->subtree, i)) !=
+		    NULL; i++) {
+			if (!cbl_yis_top_data(n))
+				continue;
+			if (sub->ntop == cap) {
+				uint64_t *v = reallocarray(sub->top, cap + 4,
+				    sizeof(*v));
+
+				if (v == NULL)
+					return (ENOMEM);
+				sub->top = v;
+				cap += 4;
+			}
+			sub->top[sub->ntop++] = n->sid;
+		}
+		return (0);
+	}
 	if ((x = sub->xpath != NULL ? strdup(sub->xpath) : NULL) == NULL &&
 	    sub->xpath != NULL)
 		return (ENOMEM);
@@ -520,9 +542,13 @@ sub_rele(struct cbl_ysub *sub)
 	for (size_t i = 0; i < sub->nretired; i++)
 		free(sub->retired[i]);
 	free(sub->retired);
+	for (size_t i = 0; i < sub->nrfilters; i++)
+		cbl_dfilter_free(sub->rfilters[i]);
+	free(sub->rfilters);
 	pthread_cond_destroy(&sub->cv);
 	free(sub->stream);
 	free(sub->xpath);
+	cbl_dfilter_free(sub->subtree);
 	free(sub->anchor_s);
 	free(sub->stop_s);
 	free(sub->top);
@@ -717,6 +743,26 @@ send_record(struct cbl_ysub *sub, uint64_t sid, const uint8_t *content,
 	return (send_at(sub, sid, content, len, NULL, false));
 }
 
+/* The subtree filter, anydata c of dn (NULL: none in the tables). */
+static int
+state_subtree(const struct cbl_ysub *sub, cbl_dnode *dn,
+    const struct cbl_ynode *c)
+{
+	struct cbl_ybuf b = { 0 };
+	struct cbl_bytes v;
+	int error;
+
+	if (sub->subtree == NULL || c == NULL)
+		return (0);
+	if ((error = cbl_dfilter_encode(sub->subtree, c->sid, &b)) == 0) {
+		v.p = b.p;
+		v.len = b.len;
+		error = cbl_dnode_add(dn, c, &v, NULL);
+	}
+	cbl_ybuf_free(&b);
+	return (error);
+}
+
 /*
  * A state notification n of the subscription (RFC 8639 section 2.7):
  * its id, a reason (an identity's SID, 0: none) and, for
@@ -751,12 +797,18 @@ state_content(struct cbl_ysub *sub, const struct cbl_ynode *n,
 		    (s = sub->xpath) != NULL &&
 		    (c = child_named(n, "stream-xpath-filter")) != NULL)
 			error = cbl_dnode_add(dn, c, &s, NULL);
+		if (error == 0 && sub->stream != NULL)
+			error = state_subtree(sub, dn, child_named(n,
+			    "stream-subtree-filter"));
 		if (error == 0 && sub->stream == NULL &&
 		    (c = child_named(n, "datastore")) != NULL &&
 		    (error = cbl_dnode_add(dn, c, &sub->datastore, NULL)) ==
 		    0 && (s = sub->xpath) != NULL &&
 		    (c = child_named(n, "datastore-xpath-filter")) != NULL)
 			error = cbl_dnode_add(dn, c, &s, NULL);
+		if (error == 0 && sub->stream == NULL)
+			error = state_subtree(sub, dn, child_named(n,
+			    "datastore-subtree-filter"));
 		if (error == 0 && (s = sub->stop_s) != NULL &&
 		    (c = child_named(n, "stop-time")) != NULL)
 			error = cbl_dnode_add(dn, c, &s, NULL);
@@ -864,6 +916,25 @@ buf_text(struct cbl_ybuf *b, const char *t)
 	return (buf_put(b, t, strlen(t)));
 }
 
+/* What the subscription's filter selects of t, a tree of its own; NULL
+ * and errno (and why) on failure. */
+static cbl_dtree *
+filter(const struct cbl_ysub *sub, const cbl_dtree *t, char *why,
+    size_t whylen)
+{
+
+	if (sub->subtree != NULL)
+		return (cbl_dtree_filter_subtree(t, sub->subtree));
+	return (cbl_dtree_filter_xpath(t, sub->xpath, why, whylen));
+}
+
+static bool
+filtered(const struct cbl_ysub *sub)
+{
+
+	return (sub->xpath != NULL || sub->subtree != NULL);
+}
+
 /*
  * What the filter selects of the nodes read, a tree of its own (NULL:
  * none read); *incomplete where a read or the filter failed.
@@ -888,9 +959,9 @@ read_filtered(struct cbl_ysub *sub, bool *incomplete)
 	if (t != NULL && cbl_ynacm_read(sub->ctx, r.conn, &(struct cbl_ywho){
 	    sub->user, sub->recovery }, t) != 0)
 		*incomplete = true;
-	if (t == NULL || sub->xpath == NULL)
+	if (t == NULL || !filtered(sub))
 		return (t);
-	ft = cbl_dtree_filter_xpath(t, sub->xpath, why, sizeof(why));
+	ft = filter(sub, t, why, sizeof(why));
 	if (ft == NULL)
 		*incomplete = true;
 	cbl_dtree_free(t);
@@ -1471,6 +1542,23 @@ rcvs_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *drs)
 	return (0);
 }
 
+/* Anydata sn's value v, a subtree filter, into *fp; 0, or said. */
+static int
+subtree_in(cbl_req *req, const struct cbl_yschema *s,
+    const struct cbl_ynode *sn, const void *v, cbl_dfilter **fp)
+{
+	const struct cbl_bytes *b = v;
+	char why[160];
+
+	if ((*fp = cbl_dfilter_decode(s, sn->sid, b->p, b->len, why,
+	    sizeof(why))) != NULL)
+		return (0);
+	if (errno == ENOMEM)
+		return (ENOMEM);
+	return (cbl_ysay(req, EINVAL, sn->sid, "invalid-value", why[0] !=
+	    '\0' ? why : "no subtree filter"));
+}
+
 /* The input read into sub, by its leaves' names; 0, or said. */
 static int
 sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
@@ -1495,6 +1583,13 @@ sub_input(cbl_req *req, struct cbl_ysub *sub, const cbl_dnode *din)
 			if ((sub->xpath = strdup(*(const char *const *)v)) ==
 			    NULL)
 				return (ENOMEM);
+		} else if (strcmp(name, "stream-subtree-filter") == 0 ||
+		    strcmp(name, "datastore-subtree-filter") == 0) {
+			int error;
+
+			if ((error = subtree_in(req, sub->y.srv->schema, sn, v,
+			    &sub->subtree)) != 0)
+				return (error);
 		} else if (strcmp(name, "stop-time") == 0) {
 			if ((sub->stop_s = strdup(*(const char *const *)v)) ==
 			    NULL)
@@ -1751,7 +1846,7 @@ cbl_ysub_replay_emit(struct cbl_ysub_replay *r, const struct cbl_ynode *n,
 	if (r->live || (when != NULL && ts_before(when, &r->from)))
 		return (0);
 	/* What the filter leaves out is not replayed either. */
-	if ((error = cbl_yencode(n, p, &b)) == 0 && (r->sub->xpath == NULL ||
+	if ((error = cbl_yencode(n, p, &b)) == 0 && (!filtered(r->sub) ||
 	    selects(r->sub, n, b.p, b.len)))
 		error = rec_add(&r->v, &r->n, &r->cap, n->sid, b.p, b.len,
 		    when);
@@ -2025,7 +2120,7 @@ selects(const struct cbl_ysub *sub, const struct cbl_ynode *n,
 		return (false);
 	if (cbl_dnode_decode(cbl_dtree_root(t), n, content, len, 0, why,
 	    sizeof(why), NULL) == 0)
-		ft = cbl_dtree_filter_xpath(t, sub->xpath, why, sizeof(why));
+		ft = filter(sub, t, why, sizeof(why));
 	any = ft != NULL && cbl_dnode_first(cbl_dtree_root(ft)) != NULL;
 	cbl_dtree_free(ft);
 	cbl_dtree_free(t);
@@ -2054,7 +2149,7 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
 		TAILQ_FOREACH(r, &sub->rcvs, link)
 			if (r->listed)
 				any = true;
-		if (!any || (sub->xpath != NULL && !selects(sub, n, content,
+		if (!any || (filtered(sub) && !selects(sub, n, content,
 		    len)) || !event_ok(sub, n->sid))
 			continue;
 		TAILQ_FOREACH(r, &sub->rcvs, link)
@@ -2069,7 +2164,7 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
 			continue;
 		/* Its replay is being sent: held, sent after it. */
 		if (sub->replaying) {
-			if (sub->xpath == NULL || selects(sub, n, content, len))
+			if (!filtered(sub) || selects(sub, n, content, len))
 				(void)rec_add(&sub->held, &sub->nheld,
 				    &sub->capheld, n->sid, content, len, NULL);
 			continue;
@@ -2091,7 +2186,7 @@ cbl_ysub_event(cbl_ctx *ctx, const struct cbl_ynode *n,
 		sub = v[i];
 		/* What the filter leaves out is no record of it; what the
 		 * subscriber may not read, not sent. */
-		if ((sub->xpath == NULL || selects(sub, n, content, len)) &&
+		if ((!filtered(sub) || selects(sub, n, content, len)) &&
 		    event_ok(sub, n->sid))
 			(void)send_record(sub, n->sid, content, len);
 		sub_rele(sub);
@@ -2159,6 +2254,21 @@ retire(struct cbl_ysub *sub, void *p)
 	return (0);
 }
 
+static int
+retire_filter(struct cbl_ysub *sub, cbl_dfilter *f)
+{
+	cbl_dfilter **v;
+
+	if (f == NULL)
+		return (0);
+	if ((v = reallocarray(sub->rfilters, sub->nrfilters + 1,
+	    sizeof(*v))) == NULL)
+		return (ENOMEM);
+	sub->rfilters = v;
+	v[sub->nrfilters++] = f;
+	return (0);
+}
+
 /*
  * modify-subscription (RFC 8639 section 2.4.3, RFC 8641 section
  * 4.4.2): the filter, the stop-time, the period or the dampening period
@@ -2207,6 +2317,10 @@ cbl_ysub_modify(cbl_req *req, const void *in)
 		    strcmp(sn->name, "datastore-xpath-filter") == 0)
 			want.xpath = (char *)(uintptr_t)
 			    *(const char *const *)v;
+		else if (strcmp(sn->name, "stream-subtree-filter") == 0 ||
+		    strcmp(sn->name, "datastore-subtree-filter") == 0)
+			error = subtree_in(req, y.srv->schema, sn, v,
+			    &want.subtree);
 		else if (strcmp(sn->name, "stop-time") == 0) {
 			want.stop_s = (char *)(uintptr_t)
 			    *(const char *const *)v;
@@ -2256,12 +2370,14 @@ cbl_ysub_modify(cbl_req *req, const void *in)
 		error = cbl_ysay(req, EINVAL, 0, "invalid-value",
 		    "the period is 10 centiseconds at least");
 	if (error != 0) {
+		cbl_dfilter_free(want.subtree);
 		cbl_dtree_free(t);
 		return (error);
 	}
 	pthread_mutex_lock(&ctx->ysublock);
 	if ((sub = sub_find(ctx, req->conn, id)) == NULL) {
 		pthread_mutex_unlock(&ctx->ysublock);
+		cbl_dfilter_free(want.subtree);
 		cbl_dtree_free(t);
 		return (cbl_ysay(req, ENOENT, 0, "invalid-value",
 		    "no such subscription of this connection"));
@@ -2269,17 +2385,24 @@ cbl_ysub_modify(cbl_req *req, const void *in)
 	if (want.onchange != sub->onchange || (want.period != 0 &&
 	    sub->stream != NULL)) {
 		pthread_mutex_unlock(&ctx->ysublock);
+		cbl_dfilter_free(want.subtree);
 		cbl_dtree_free(t);
 		return (cbl_ysay(req, EINVAL, 0, "invalid-value",
 		    "the kind of trigger is not changed"));
 	}
-	if (want.xpath != NULL) {
-		char *x = strdup(want.xpath);
+	/* One filter in the place of the other, of either kind. */
+	if (want.xpath != NULL || want.subtree != NULL) {
+		char *x = want.xpath != NULL ? strdup(want.xpath) : NULL;
 
-		if (x == NULL || retire(sub, sub->xpath) != 0)
+		if ((x == NULL && want.xpath != NULL) ||
+		    retire(sub, sub->xpath) != 0 ||
+		    retire_filter(sub, sub->subtree) != 0) {
+			free(x);
+			cbl_dfilter_free(want.subtree);
 			error = ENOMEM;
-		else {
+		} else {
 			sub->xpath = x;
+			sub->subtree = want.subtree;
 			if (sub->stream == NULL) {
 				(void)retire(sub, sub->top);
 				sub->top = NULL;
@@ -2427,6 +2550,7 @@ cbl_ysub_each(cbl_ctx *ctx, int (*fn)(const struct cbl_ysub_info *, void *),
 		in.stream = sub->stream;
 		in.datastore = sub->datastore;
 		in.xpath = sub->xpath;
+		in.subtree = sub->subtree;
 		in.period = sub->onchange ? 0 : sub->period;
 		in.on_change = sub->onchange;
 		in.dampening = sub->dampening;
@@ -2740,6 +2864,7 @@ cfg_new(cbl_ctx *ctx, const struct ynodes *y, const cbl_dnode *e, char *why,
 		pthread_cond_destroy(&sub->cv);
 		free(sub->stream);
 		free(sub->xpath);
+		cbl_dfilter_free(sub->subtree);
 		free(sub->anchor_s);
 		free(sub->stop_s);
 		free(sub->top);
@@ -2766,6 +2891,9 @@ cfg_modify(struct cbl_ysub *old, struct cbl_ysub *sub)
 	(void)retire(old, old->xpath);
 	old->xpath = sub->xpath;
 	sub->xpath = NULL;
+	(void)retire_filter(old, old->subtree);
+	old->subtree = sub->subtree;
+	sub->subtree = NULL;
 	(void)retire(old, old->stop_s);
 	old->stop_s = sub->stop_s;
 	sub->stop_s = NULL;

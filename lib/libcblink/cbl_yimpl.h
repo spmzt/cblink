@@ -77,8 +77,15 @@ struct timespec;
 int	cbl_ynotif_put_at(cbl_msg *msg, uint64_t sid, const uint8_t *content,
 	    size_t len, const struct timespec *when);
 size_t	cbl_ycbor_int(uint8_t *p, int64_t v);
-/* The codec's: the length of the CBOR item at p, 0 where it is none. */
+/* The codec's: the length of the CBOR item at p, 0 where it is none;
+ * one value of leaf or leaf-list n read into out, as its member is; a
+ * value of type t written; a head of major type major. */
 size_t	cbl_ycbor_skip(const uint8_t *p, const uint8_t *end);
+int	cbl_ydecode_value(const struct cbl_ynode *n, const void *data,
+	    size_t len, void *out, cbl_yarena *a, char *why, size_t whylen);
+int	cbl_yencode_value(struct cbl_ybuf *b, const struct cbl_ytype *t,
+	    const void *v);
+int	cbl_ycbor_head(struct cbl_ybuf *b, unsigned major, uint64_t v);
 
 /* cbl_ysub.c: SUBSCRIBE's open; an event to the NETCONF stream's
  * subscriptions. */

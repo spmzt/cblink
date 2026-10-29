@@ -267,6 +267,23 @@ cbl_dtree	*cbl_dtree_filter_xpath(const cbl_dtree *t, const char *expr,
 		    char *why, size_t whylen);
 cbl_dtree	*cbl_dtree_filter_subtree(const cbl_dtree *t,
 		    const cbl_dfilter *f);
+/*
+ * A subtree filter as YANG-CBOR, the content of an anydata such as RFC
+ * 8639's stream-subtree-filter (WIRE-FORMAT.md section 7 says the
+ * encoding): its keys deltas from base, the anydata's SID.
+ * cbl_dfilter_decode(): NULL, errno and why on failure; values not of
+ * their node's type, a SID of no node where it is, refused.
+ * cbl_dfilter_encode() appends it to b; EINVAL, a leaf twice, or a
+ * leaf-list's selection node beside its values.  cbl_dfilter_top():
+ * the schema node of the filter's i-th top-level node, NULL after the
+ * last.
+ */
+cbl_dfilter	*cbl_dfilter_decode(const struct cbl_yschema *s,
+		    uint64_t base, const void *data, size_t len, char *why,
+		    size_t whylen);
+int		 cbl_dfilter_encode(const cbl_dfilter *f, uint64_t base,
+		    struct cbl_ybuf *b);
+const struct cbl_ynode *cbl_dfilter_top(const cbl_dfilter *f, size_t i);
 
 /*
  * Parent references (RFC 8528 section 4): what the XPath expressions of

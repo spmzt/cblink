@@ -773,13 +773,16 @@ uint64_t	 cbl_msg_err_sid(const cbl_msg *msg);
  * its output, the id, and carries the subscription's records, each a
  * cblink:notification as group "notify" has them (cbl_msg_ynotif()).
  * The NETCONF stream: every notification cbl_ynotify() sends, what
- * stream-xpath-filter selects of it.  The operational datastore,
- * periodic (period, anchor-time): a push-update every period of what
- * datastore-xpath-filter selects, read by the get handlers on the
+ * stream-xpath-filter or stream-subtree-filter selects of it.  The
+ * operational datastore, periodic (period, anchor-time): a push-update
+ * every period of what datastore-xpath-filter or
+ * datastore-subtree-filter selects, read by the get handlers on the
  * stream's connection; or on-change, where ietf-yang-push's on-change
  * is on: read every dampening-period (a second at least) and compared
  * with the last read, its changes a push-change-update's YANG Patch,
- * the first read a push-update (sync-on-start).  A stop-time ends it, the stream closed.  A
+ * the first read a push-update (sync-on-start).  A subtree filter is
+ * YANG-CBOR as cbl_dfilter_decode() reads it (cbl_data.h).  A stop-time
+ * ends it, the stream closed.  A
  * record that does not fit in the stream's credit is left out, and
  * counted.  The subscription ends with its stream (the subscriber's
  * close), cbl_ysub_delete() (the subscriber's, from the request of a
@@ -818,6 +821,8 @@ struct cbl_ysub_info {
 	bool		 configured, concluded;
 	const struct cbl_ysub_rcv_info *rcvs;
 	size_t		 nrcvs;
+	/* The subtree filter, or NULL (cbl_dfilter_encode() writes it). */
+	const struct cbl_dfilter *subtree;
 };
 
 /*

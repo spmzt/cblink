@@ -275,9 +275,12 @@ CBLINK_1.0 {
 	cbl_dnacm_path_match_schema;
 	cbl_dnacm_path_new;
 	cbl_dfilter_add;
+	cbl_dfilter_decode;
+	cbl_dfilter_encode;
 	cbl_dfilter_free;
 	cbl_dfilter_new;
 	cbl_dfilter_root;
+	cbl_dfilter_top;
 	cbl_dtree_check_conds;
 	cbl_dnode_check_conds;
 	cbl_dtree_filter_subtree;

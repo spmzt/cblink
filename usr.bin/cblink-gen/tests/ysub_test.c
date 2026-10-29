@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cbl_data.h"
 #include "cbl_net_test.h"
 #include "ysubh.h"
 
@@ -614,6 +615,175 @@ ATF_TC_BODY(told, tc)
 	teardown(&f);
 }
 
+static void	refused_by(struct fixture *, const est_in *, const char *);
+
+/* A CBOR head of major type major into b. */
+static void
+chead(struct cbl_ybuf *b, unsigned major, uint64_t v)
+{
+	uint8_t h[9];
+	size_t n;
+
+	if (v < 24) {
+		h[0] = (uint8_t)(major << 5 | v);
+		n = 1;
+	} else {
+		ATF_REQUIRE(v <= UINT16_MAX);
+		h[0] = (uint8_t)(major << 5 | 25);
+		h[1] = (uint8_t)(v >> 8);
+		h[2] = (uint8_t)v;
+		n = 3;
+	}
+	if (b->len + n > b->cap) {
+		b->cap = b->cap * 2 + 64;
+		ATF_REQUIRE((b->p = realloc(b->p, b->cap)) != NULL);
+	}
+	memcpy(b->p + b->len, h, n);
+	b->len += n;
+}
+
+static const struct cbl_ynode *
+child(const struct cbl_ynode *n, const char *name)
+{
+
+	for (uint32_t i = 0; i < n->nchild; i++)
+		if (strcmp(n->child[i]->name, name) == 0)
+			return (n->child[i]);
+	atf_tc_fail("no %s under %s", name, n->name);
+}
+
+/*
+ * Subtree filters (RFC 6241 section 6) as YANG-CBOR anydata: one port's
+ * octets, by its name; written and read back the same; the periodic
+ * push of it has nothing of the other port, the ticks or other; the
+ * stream's alerts of one level alone, whole; a filter of a node that is
+ * not there, or a value not of its type, refused at the open.
+ */
+ATF_TC_WITHOUT_HEAD(subtree);
+ATF_TC_BODY(subtree, tc)
+{
+	struct subdemo_alert low = { .level = "low", .text = "a" };
+	struct subdemo_alert high = { .level = "high", .text = "b" };
+	struct cbl_ybuf b1 = { 0 }, b2 = { 0 }, ab = { 0 };
+	const struct cbl_ynode *port, *any;
+	const char *em1name = "em1", *hi = "high";
+	cbl_dfnode *fc, *fp;
+	cbl_dfilter *f, *g;
+	struct fixture fx;
+	struct cli c, cs;
+	cbl_stream *s, *s2;
+	est_per per;
+	est_in in;
+	char why[160];
+
+	setup(&fx);
+	atomic_store(&em1, true);
+	any = child(n_est_in, "datastore-subtree-filter");
+	port = child(n_counters, "port");
+	ATF_REQUIRE((f = cbl_dfilter_new(&ysubh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(cbl_dfilter_root(f), n_counters,
+	    NULL, &fc));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(fc, port, NULL, &fp));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(fp, child(port, "name"), &em1name,
+	    NULL));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(fp, child(port, "octets"), NULL,
+	    NULL));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_encode(f, any->sid, &b1));
+	/* {counters: {port: [{name: "em1", octets: null}]}} */
+	ATF_REQUIRE(b1.len > 4 && b1.p[0] == 0xa1);
+	g = cbl_dfilter_decode(&ysubh_schema, any->sid, b1.p, b1.len, why,
+	    sizeof(why));
+	ATF_REQUIRE_MSG(g != NULL, "%s", why);
+	ATF_REQUIRE_EQ(n_counters, cbl_dfilter_top(g, 0));
+	ATF_REQUIRE_EQ(NULL, cbl_dfilter_top(g, 1));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_encode(g, any->sid, &b2));
+	ATF_REQUIRE_EQ(b1.len, b2.len);
+	ATF_REQUIRE(memcmp(b1.p, b2.p, b1.len) == 0);
+	cbl_dfilter_free(g);
+	cbl_dfilter_free(f);
+
+	cli_init(&c);
+	for_datastore(&in, "operational", NULL, &per, 10);
+	in.yp_selection_filter = SN(YP_SELECTION_FILTER_WITHIN_SUBSCRIPTION);
+	in.yp_filter_spec = SN(YP_FILTER_SPEC_DATASTORE_SUBTREE_FILTER);
+	in.yp_datastore_subtree_filter.p = b1.p;
+	in.yp_datastore_subtree_filter.len = b1.len;
+	s = subscribe(&fx, &in, &c);
+	ATF_REQUIRE_EQ_MSG(0, c.open_error, "%s", c.open_text);
+	wait_for(&c.records, 2, 3000);
+	ATF_REQUIRE(c.records >= 2);
+	pthread_mutex_lock(&c.mtx);
+	ATF_REQUIRE_MATCH("^\\{\"datastore-contents\":\\{\"subdemo:counters\":"
+	    "\\{\"port\":\\[\\{\"name\":\"em1\",\"octets\":\"0\"\\}\\]\\}"
+	    "\\},\"id\":[0-9]+\\}$", c.json[0]);
+	ATF_REQUIRE(strstr(c.json[1], "em0") == NULL);
+	pthread_mutex_unlock(&c.mtx);
+	ATF_REQUIRE_EQ(0, cbl_stream_close(s, 0, NULL));
+	wait_for(&c.closed, 1, 3000);
+	cli_fini(&c);
+
+	/* The stream: an alert whose level is high, whole. */
+	any = child(n_est_in, "stream-subtree-filter");
+	ATF_REQUIRE((f = cbl_dfilter_new(&ysubh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(cbl_dfilter_root(f), n_alert, NULL,
+	    &fc));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(fc, child(n_alert, "level"), &hi,
+	    NULL));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_encode(f, any->sid, &ab));
+	cbl_dfilter_free(f);
+	cli_init(&cs);
+	for_stream(&in, "NETCONF", NULL);
+	in.stream_filter = SN(STREAM_FILTER_WITHIN_SUBSCRIPTION);
+	in.filter_spec = SN(FILTER_SPEC_STREAM_SUBTREE_FILTER);
+	in.stream_subtree_filter.p = ab.p;
+	in.stream_subtree_filter.len = ab.len;
+	s2 = subscribe(&fx, &in, &cs);
+	ATF_REQUIRE_EQ_MSG(0, cs.open_error, "%s", cs.open_text);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(fx.sctx, n_alert, &low));
+	ATF_REQUIRE_EQ(0, cbl_ynotify(fx.sctx, n_alert, &high));
+	wait_for(&cs.records, 1, 3000);
+	usleep(100000);
+	ATF_REQUIRE_EQ(1, cs.records);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"b\"}", cs.json[0]);
+	ATF_REQUIRE_EQ(0, cbl_stream_close(s2, 0, NULL));
+	wait_for(&cs.closed, 1, 3000);
+	cli_fini(&cs);
+
+	/* A SID of no node under other's; a name that is no string. */
+	any = child(n_est_in, "datastore-subtree-filter");
+	for_datastore(&in, "operational", NULL, &per, 100);
+	in.yp_selection_filter = SN(YP_SELECTION_FILTER_WITHIN_SUBSCRIPTION);
+	in.yp_filter_spec = SN(YP_FILTER_SPEC_DATASTORE_SUBTREE_FILTER);
+	b2.len = 0;
+	chead(&b2, 5, 1);
+	chead(&b2, n_other->sid >= any->sid ? 0 : 1, n_other->sid >=
+	    any->sid ? n_other->sid - any->sid : any->sid - n_other->sid - 1);
+	chead(&b2, 5, 1);
+	chead(&b2, 0, 5000);
+	chead(&b2, 7, 22);
+	in.yp_datastore_subtree_filter.p = b2.p;
+	in.yp_datastore_subtree_filter.len = b2.len;
+	refused_by(&fx, &in, "subtree filter: other: a SID of no node there");
+	b2.len = 0;
+	chead(&b2, 5, 1);
+	chead(&b2, n_counters->sid >= any->sid ? 0 : 1, n_counters->sid >=
+	    any->sid ? n_counters->sid - any->sid : any->sid -
+	    n_counters->sid - 1);
+	chead(&b2, 5, 1);
+	chead(&b2, 0, port->sid - n_counters->sid);
+	chead(&b2, 4, 1);
+	chead(&b2, 5, 1);
+	chead(&b2, 0, child(port, "name")->sid - port->sid);
+	chead(&b2, 0, 5);
+	in.yp_datastore_subtree_filter.p = b2.p;
+	in.yp_datastore_subtree_filter.len = b2.len;
+	refused_by(&fx, &in, "subtree filter: name: not one of its values");
+	cbl_ybuf_free(&b1);
+	cbl_ybuf_free(&b2);
+	cbl_ybuf_free(&ab);
+	teardown(&fx);
+}
+
 /* What is refused at the open, and why. */
 static void
 refused_by(struct fixture *f, const est_in *in, const char *why)
@@ -844,6 +1014,11 @@ ATF_TC_BODY(modify, tc)
 	struct ietf_subscribed_notifications_modify_subscription_input mi;
 	struct subdemo_alert low = { .level = "low", .text = "a" };
 	struct subdemo_alert high = { .level = "high", .text = "b" };
+	struct cbl_ybuf fb = { 0 };
+	const struct cbl_ynode *any;
+	const char *hi = "high";
+	cbl_dfilter *sf;
+	cbl_dfnode *fa;
 	struct fixture f;
 	struct cli c;
 	est_in in;
@@ -876,6 +1051,36 @@ ATF_TC_BODY(modify, tc)
 	    c.json[0]);
 	ATF_REQUIRE_STREQ("{\"level\":\"low\",\"text\":\"a\"}", c.json[1]);
 	pthread_mutex_unlock(&c.mtx);
+	/* A subtree filter in the XPath one's place: the high ones. */
+	ATF_REQUIRE((sf = cbl_dfilter_new(&ysubh_schema)) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(cbl_dfilter_root(sf), n_alert, NULL,
+	    &fa));
+	ATF_REQUIRE_EQ(0, cbl_dfilter_add(fa, child(n_alert, "level"), &hi,
+	    NULL));
+	any = child(io(top("ietf-subscribed-notifications",
+	    "modify-subscription"), CBL_YN_INPUT), "stream-subtree-filter");
+	ATF_REQUIRE_EQ(0, cbl_dfilter_encode(sf, any->sid, &fb));
+	cbl_dfilter_free(sf);
+	mi.filter_spec =
+	    IETF_SUBSCRIBED_NOTIFICATIONS_MODIFY_SUBSCRIPTION_INPUT_FILTER_SPEC_STREAM_SUBTREE_FILTER;
+	mi.stream_xpath_filter = NULL;
+	mi.stream_subtree_filter.p = fb.p;
+	mi.stream_subtree_filter.len = fb.len;
+	ATF_REQUIRE_EQ(0, call_rpc(&f, "ietf-subscribed-notifications",
+	    "modify-subscription", &mi));
+	wait_for(&c.records, 3, 3000);
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &low));
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, n_alert, &high));
+	wait_for(&c.records, 4, 3000);
+	usleep(100000);
+	ATF_REQUIRE_EQ(4, c.records);
+	pthread_mutex_lock(&c.mtx);
+	ATF_REQUIRE_STREQ("subscription-modified", c.kind[2]);
+	ATF_REQUIRE_MATCH("\"stream-subtree-filter\":", c.json[2]);
+	ATF_REQUIRE(strstr(c.json[2], "stream-xpath-filter") == NULL);
+	ATF_REQUIRE_STREQ("{\"level\":\"high\",\"text\":\"b\"}", c.json[3]);
+	pthread_mutex_unlock(&c.mtx);
+	cbl_ybuf_free(&fb);
 	/* Another connection's, or none: refused. */
 	mi.id = c.id + 100;
 	ATF_REQUIRE(call_rpc(&f, "ietf-subscribed-notifications",
@@ -1226,6 +1431,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, configured);
 	ATF_TP_ADD_TC(tp, periodic);
 	ATF_TP_ADD_TC(tp, stream);
+	ATF_TP_ADD_TC(tp, subtree);
 	ATF_TP_ADD_TC(tp, on_change);
 	ATF_TP_ADD_TC(tp, told);
 	ATF_TP_ADD_TC(tp, suspend);

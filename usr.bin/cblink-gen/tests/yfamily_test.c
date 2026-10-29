@@ -135,6 +135,13 @@ ping_rpc(cbl_req *req, const void *in, void *out, cbl_yarena *a)
 
 	(void)out;
 	(void)a;
+	/* 7: an alarm told to the peer that asked, alone. */
+	if (p->has_count && p->count == 7) {
+		struct shapes_alarm al = { .text = "own" };
+
+		return (cbl_ynotify_conn(cbl_req_conn(req), top("shapes",
+		    "alarm"), &al));
+	}
 	if (p->has_count && p->count > 10) {
 		(void)cbl_req_set_yerr(req, "too many", n_ping->sid);
 		return (ERANGE);
@@ -601,6 +608,78 @@ ATF_TC_BODY(notify, tc)
 	teardown(&f);
 }
 
+/* Until h has n, or 5 s: a failure. */
+static void
+hear(cbl_conn *c, struct heard *h, int n)
+{
+	struct timespec t0, t1;
+	struct pollfd pfd;
+	int events, timeout;
+
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	while (h->n < n) {
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		ATF_REQUIRE(t1.tv_sec - t0.tv_sec < 5);
+		cbl_conn_interest(c, &events, &timeout);
+		pfd.fd = cbl_conn_fd(c);
+		pfd.events = POLLIN | ((events & CBL_EV_WRITE) ? POLLOUT : 0);
+		(void)poll(&pfd, 1, 10);
+		(void)cbl_conn_process(c,
+		    ((pfd.revents & POLLIN) ? CBL_EV_READ : 0) |
+		    ((pfd.revents & POLLOUT) ? CBL_EV_WRITE : 0));
+	}
+}
+
+/*
+ * A notification told to one peer, that of the request, where it joined
+ * group "notify": the other member hears nothing; not joined, ENOENT.
+ */
+ATF_TC_WITHOUT_HEAD(notify_conn);
+ATF_TC_BODY(notify_conn, tc)
+{
+	struct shapes_ping_input in = { .has_count = true, .count = 7 };
+	const struct cbl_ynode *n_in = NULL;
+	struct heard h = { 0 }, other = { 0 };
+	struct fixture f;
+	cbl_conn *c2;
+	cbl_msg *m, *r;
+	cbl_sub *sub, *sub2;
+
+	setup(&f);
+	for (uint32_t i = 0; i < n_ping->nchild; i++)
+		if (n_ping->child[i]->kind == CBL_YN_INPUT)
+			n_in = n_ping->child[i];
+	ATF_REQUIRE(n_in != NULL);
+	ATF_REQUIRE_EQ(EINVAL, cbl_ynotify_conn(f.c, n_shapes, &in));
+	/* Not joined: the handler's ENOENT. */
+	m = new_req(&f, CBL_YCMD_RPC);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_in, &in));
+	ATF_REQUIRE(cbl_request(f.c, m, &r, 5000) != 0);
+	cbl_msg_free(r);
+	ATF_REQUIRE_EQ(0, cbl_conn_new(f.cctx, f.ts.uri, CBL_PLAINTEXT, &c2));
+	ATF_REQUIRE_EQ(0, cbl_conn_connect(c2));
+	ATF_REQUIRE_EQ(0, cbl_subscribe(f.c, "cblink.yang", "notify",
+	    heard_cb, &h, &sub));
+	ATF_REQUIRE_EQ(0, cbl_subscribe(c2, "cblink.yang", "notify",
+	    heard_cb, &other, &sub2));
+	m = new_req(&f, CBL_YCMD_RPC);
+	ATF_REQUIRE_EQ(0, cbl_msg_put_ynode(m, n_in, &in));
+	ATF_REQUIRE_EQ(0, cbl_request(f.c, m, NULL, 5000));
+	hear(f.c, &h, 1);
+	ATF_REQUIRE_EQ(top("shapes", "alarm")->sid, h.sid);
+	ATF_REQUIRE_STREQ("own", h.text);
+	/* The other is told what goes to every member, and that alone. */
+	ATF_REQUIRE_EQ(0, cbl_ynotify(f.sctx, top("shapes", "alarm"),
+	    &(struct shapes_alarm){ .text = "all" }));
+	hear(c2, &other, 1);
+	ATF_REQUIRE_STREQ("all", other.text);
+	ATF_REQUIRE_EQ(1, other.n);
+	ATF_REQUIRE_EQ(0, cbl_unsubscribe(sub2));
+	ATF_REQUIRE_EQ(0, cbl_unsubscribe(sub));
+	cbl_conn_free(c2);
+	teardown(&f);
+}
+
 /*
  * The event's key is a delta from its own SID, 60 000 + 47: a notification
  * of a smaller SID, a negative one.
@@ -828,6 +907,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, rpc);
 	ATF_TP_ADD_TC(tp, dump);
 	ATF_TP_ADD_TC(tp, notify);
+	ATF_TP_ADD_TC(tp, notify_conn);
 	ATF_TP_ADD_TC(tp, notif_delta);
 	ATF_TP_ADD_TC(tp, threads);
 	ATF_TP_ADD_TC(tp, action);

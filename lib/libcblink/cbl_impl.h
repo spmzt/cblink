@@ -172,6 +172,8 @@ void	cbl_conn_stamp(cbl_conn *conn, cbl_msg *msg);
 struct cbl_ynode;
 int	cbl_notify_if(cbl_family *fam, uint32_t group_idx, cbl_msg *msg,
 	    const struct cbl_ynode *n);
+int	cbl_conn_notify_if(cbl_conn *conn, cbl_family *fam,
+	    uint32_t group_idx, cbl_msg *msg, const struct cbl_ynode *n);
 int	cbl_ynacm_op(cbl_req *req, const char *module, const char *name,
 	    bool deny);
 void	cbl_ynacm_free(cbl_ctx *ctx);

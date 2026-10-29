@@ -190,6 +190,7 @@ CBLINK_1.0 {
 	cbl_msg_put_yget_wd;
 	cbl_msg_put_yget_opts;
 	cbl_ynotify;
+	cbl_ynotify_conn;
 	cbl_msg_ynotif;
 	cbl_yvalidate;
 	cbl_yvalidate_member;

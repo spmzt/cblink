@@ -1395,6 +1395,41 @@ out:
 	return (error);
 }
 
+/*
+ * n's notification to conn alone, where it joined group "notify" and
+ * NACM lets it read it: what a peer is told of its own request.  Not to
+ * the subscriptions to the NETCONF stream.
+ */
+int
+cbl_ynotify_conn(cbl_conn *conn, const struct cbl_ynode *n, const void *p)
+{
+	struct cbl_ybuf c = { 0 };
+	cbl_family *fam;
+	cbl_msg *msg;
+	int error;
+
+	if (conn == NULL || n == NULL || p == NULL ||
+	    n->kind != CBL_YN_NOTIF || event_node() == NULL)
+		return (EINVAL);
+	if ((fam = conn->ctx->yfam) == NULL)
+		return (ENOENT);	/* no module served */
+	/* Nobody listening: no work. */
+	if (!cbl_conn_subscribed(conn, fam, 0))
+		return (ENOENT);
+	if ((error = cbl_yencode(n, p, &c)) != 0)
+		return (error);
+	if ((error = cbl_notify_msg_new(fam, CBL_YCMD_NOTIFY, &msg)) != 0)
+		goto out;
+	if ((error = cbl_ynotif_put(msg, n->sid, c.p, c.len)) != 0) {
+		cbl_msg_free(msg);
+		goto out;
+	}
+	error = cbl_conn_notify_if(conn, fam, 0, msg, n);
+out:
+	cbl_ybuf_free(&c);
+	return (error);
+}
+
 int
 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt, cbl_yarena *a)
 {

@@ -417,7 +417,9 @@ says whether a peer joined, for what is told only to those that asked.
 A YANG notification goes to the YANG family's group
 .Ql notify
 with
-.Fn cbl_ynotify ;
+.Fn cbl_ynotify ,
+or to one peer that joined it, of its own request, with
+.Fn cbl_ynotify_conn ;
 .Fn cbl_msg_ynotif
 tells a receiver which it is, when it happened and its content.
 .Pp

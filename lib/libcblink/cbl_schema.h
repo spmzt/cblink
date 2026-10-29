@@ -627,7 +627,9 @@ enum cbl_ycmd {
 
 /*
  * A YANG notification: cbl_ynotify() sends n's, its struct p, to the
- * subscribers of family 1's group "notify", the time now.  A receiver
+ * subscribers of family 1's group "notify", the time now;
+ * cbl_ynotify_conn() to conn alone, where it subscribed (ENOENT where
+ * not): what a peer is told of its own request.  A receiver
  * gets its SID, time and content (cbl_ydecode() with the node of that
  * SID) from cbl_msg_ynotif(), what it points to a's or msg's.
  */
@@ -639,6 +641,8 @@ struct cbl_ynotif {
 };
 
 int		 cbl_ynotify(cbl_ctx *ctx, const struct cbl_ynode *n,
+		    const void *p);
+int		 cbl_ynotify_conn(cbl_conn *conn, const struct cbl_ynode *n,
 		    const void *p);
 int		 cbl_msg_ynotif(const cbl_msg *msg, struct cbl_ynotif *nt,
 		    cbl_yarena *a);

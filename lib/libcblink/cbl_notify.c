@@ -343,6 +343,48 @@ cbl_conn_notify(cbl_conn *conn, cbl_family *fam, uint32_t group_idx,
 }
 
 /*
+ * The same, to conn alone, a member of the group: ENOENT where it is
+ * not.  With n, family 1's notification, where NACM lets its user read
+ * it; otherwise dropped, 0.
+ */
+int
+cbl_conn_notify_if(cbl_conn *conn, cbl_family *fam, uint32_t group_idx,
+    cbl_msg *msg, const struct cbl_ynode *n)
+{
+	struct cbl_member *m;
+	struct cbl_ywho who = { 0 };
+	char *user = NULL;
+	int error;
+
+	if (conn == NULL ||
+	    (error = notify_prepare(fam, group_idx, msg)) != 0) {
+		cbl_msg_free(msg);
+		return (conn == NULL ? EINVAL : error);
+	}
+	pthread_mutex_lock(&conn->ctx->submtx);
+	LIST_FOREACH(m, &conn->memberships, clink)
+		if (m->g->gid == msg->hdr.stream)
+			break;
+	if (m == NULL)
+		error = ENOENT;
+	else if (m->user != NULL && (user = strdup(m->user)) == NULL)
+		error = ENOMEM;
+	else
+		who.recovery = m->recovery;
+	pthread_mutex_unlock(&conn->ctx->submtx);
+	who.user = user;
+	if (error == 0 && (n == NULL || cbl_ynacm_notif(conn->ctx, conn, &who,
+	    n))) {
+		pthread_mutex_lock(&conn->ctx->submtx);
+		error = deliver(conn, msg);
+		pthread_mutex_unlock(&conn->ctx->submtx);
+	}
+	free(user);
+	cbl_msg_free(msg);
+	return (error);
+}
+
+/*
  * Whether conn has subscribed to the family's group: so that a server
  * sends what a peer asked to be told on its own connection only to one
  * that asked.  Thread-safe.

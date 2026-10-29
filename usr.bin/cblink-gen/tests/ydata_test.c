@@ -425,6 +425,29 @@ ATF_TC_BODY(module, tc)
  * it was, the first whose restrictions it meets (RFC 7950 9.12), not
  * the first string.
  */
+/*
+ * An integer outside its type is refused, never taken modulo the type's
+ * size: a uint16's 70000 is not 4464.
+ */
+ATF_TC_WITHOUT_HEAD(int_range);
+ATF_TC_BODY(int_range, tc)
+{
+	const struct cbl_ynode *port =
+	    sn("ietf-system:system/ntp/server/udp/port");
+	cbl_yarena *a;
+	uint16_t v;
+
+	ATF_REQUIRE((a = cbl_yarena_new()) != NULL);
+	ATF_REQUIRE_EQ(0, cbl_yvalue_parse(port, port->type, "65535", &v, a));
+	ATF_CHECK_EQ(65535, v);
+	ATF_CHECK_EQ(ERANGE, cbl_yvalue_parse(port, port->type, "65536", &v,
+	    a));
+	ATF_CHECK_EQ(ERANGE, cbl_yvalue_parse(port, port->type, "70000", &v,
+	    a));
+	ATF_CHECK(cbl_yvalue_parse(port, port->type, "-1", &v, a) != 0);
+	cbl_yarena_free(a);
+}
+
 ATF_TC_WITHOUT_HEAD(union_member);
 ATF_TC_BODY(union_member, tc)
 {
@@ -493,6 +516,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, choices);
 	ATF_TP_ADD_TC(tp, defaults);
 	ATF_TP_ADD_TC(tp, roundtrip);
+	ATF_TP_ADD_TC(tp, int_range);
 	ATF_TP_ADD_TC(tp, union_member);
 	ATF_TP_ADD_TC(tp, module);
 	return (atf_no_error());

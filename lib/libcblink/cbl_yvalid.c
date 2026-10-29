@@ -871,6 +871,12 @@ parse_value(const struct cbl_ynode *n, const struct cbl_ytype *t,
 		i = strtoll(s, &end, 10);
 		if (errno != 0 || *end != '\0')
 			return (EINVAL);
+		/* Outside its type: refused, never taken modulo its size. */
+		if ((t->kind == CBL_YT_INT8 && (i < INT8_MIN || i > INT8_MAX)) ||
+		    (t->kind == CBL_YT_INT16 && (i < INT16_MIN ||
+		    i > INT16_MAX)) || (t->kind == CBL_YT_INT32 &&
+		    (i < INT32_MIN || i > INT32_MAX)))
+			return (ERANGE);
 		if (t->kind == CBL_YT_INT8)
 			*(int8_t *)out = (int8_t)i;
 		else if (t->kind == CBL_YT_INT16)
@@ -888,6 +894,10 @@ parse_value(const struct cbl_ynode *n, const struct cbl_ytype *t,
 		u = strtoull(s, &end, 10);
 		if (errno != 0 || *end != '\0' || *s == '-')
 			return (EINVAL);
+		if ((t->kind == CBL_YT_UINT8 && u > UINT8_MAX) ||
+		    (t->kind == CBL_YT_UINT16 && u > UINT16_MAX) ||
+		    (t->kind == CBL_YT_UINT32 && u > UINT32_MAX))
+			return (ERANGE);
 		if (t->kind == CBL_YT_UINT8)
 			*(uint8_t *)out = (uint8_t)u;
 		else if (t->kind == CBL_YT_UINT16)

@@ -349,7 +349,8 @@ ATF_TC_BODY(edit_rollback, tc)
 	ATF_REQUIRE_EQ(100, get_ratio(&f));
 	ATF_REQUIRE_EQ(EIO, edit(&f, 300, "fail", &r));
 	ATF_REQUIRE_EQ(n_system->sid, cbl_msg_err_sid(r));
-	ATF_REQUIRE_STREQ("the edit failed", cbl_msg_err_str(r));
+	ATF_REQUIRE_STREQ("the edit failed: Input/output error",
+	    cbl_msg_err_str(r));
 	cbl_msg_free(r);
 	ATF_REQUIRE_EQ(100, get_ratio(&f));
 	teardown(&f);

@@ -339,11 +339,107 @@ cbor_head(const uint8_t **pp, const uint8_t *end, int *major, uint64_t *v)
 	return (true);
 }
 
+static bool	json_loose(struct cbl_ybuf *, const struct cbl_ynode *,
+		    const uint8_t **, const uint8_t *, cbl_yarena *, int);
+
+/*
+ * A map of YANG-CBOR walked by the tables alone, its keys deltas from
+ * base, each member named as a child of parent's: false where it is not
+ * one of the tables.
+ */
+static bool
+json_loose_map(struct cbl_ybuf *b, const struct cbl_yschema *s,
+    const struct cbl_ynode *parent, uint64_t base, const uint8_t **pp,
+    const uint8_t *end, cbl_yarena *a, int depth)
+{
+	const struct cbl_ynode *c;
+	uint64_t count, d;
+	int major;
+
+	if (depth > JDEPTH_MAX || !cbor_head(pp, end, &major, &count) ||
+	    major != 5 || jputs(b, "{") != 0)
+		return (false);
+	for (uint64_t i = 0; i < count; i++) {
+		if (!cbor_head(pp, end, &major, &d) || major > 1 ||
+		    d > INT64_MAX)
+			return (false);
+		c = cbl_yschema_node(s, (uint64_t)((int64_t)base +
+		    (major == 0 ? (int64_t)d : -1 - (int64_t)d)));
+		if (c == NULL || (parent != NULL && c->parent != parent) ||
+		    (i > 0 && jputs(b, ",") != 0) ||
+		    json_name(b, c, parent) != 0 ||
+		    !json_loose(b, c, pp, end, a, depth + 1))
+			return (false);
+	}
+	return (jputs(b, "}") == 0);
+}
+
+/*
+ * Node n's YANG-CBOR at *pp by the tables alone, null where it has one:
+ * what is not data of the tables but has their shape, a subtree
+ * filter's selection nodes (WIRE-FORMAT.md section 7.6.1).
+ */
+static bool
+json_loose(struct cbl_ybuf *b, const struct cbl_ynode *n, const uint8_t **pp,
+    const uint8_t *end, cbl_yarena *a, int depth)
+{
+	const uint8_t *q;
+	uint64_t count;
+	size_t len;
+	void *v;
+	int major;
+
+	if (*pp < end && **pp == 0xf6) {
+		(*pp)++;
+		return (jputs(b, "null") == 0);
+	}
+	switch (n->kind) {
+	case CBL_YN_CONTAINER:
+	case CBL_YN_NOTIF:
+		return (json_loose_map(b, n->module->schema, n, n->sid, pp,
+		    end, a, depth));
+	case CBL_YN_LIST:
+	case CBL_YN_LEAFLIST:
+		if (!cbor_head(pp, end, &major, &count) || major != 4 ||
+		    jputs(b, "[") != 0)
+			return (false);
+		for (uint64_t i = 0; i < count; i++) {
+			if (i > 0 && jputs(b, ",") != 0)
+				return (false);
+			if (n->kind == CBL_YN_LIST) {
+				if (!json_loose_map(b, n->module->schema, n,
+				    n->sid, pp, end, a, depth))
+					return (false);
+				continue;
+			}
+			q = *pp;
+			if ((len = cbl_ycbor_skip(q, end)) == 0 ||
+			    (v = cbl_yarena_alloc(a, n->type->csize)) == NULL ||
+			    cbl_ydecode_value(n, q, len, v, a, NULL, 0) != 0 ||
+			    json_value(b, n, n->type, v) != 0)
+				return (false);
+			*pp += len;
+		}
+		return (jputs(b, "]") == 0);
+	case CBL_YN_LEAF:
+		if ((len = cbl_ycbor_skip(*pp, end)) == 0 ||
+		    (v = cbl_yarena_alloc(a, n->type->csize)) == NULL ||
+		    cbl_ydecode_value(n, *pp, len, v, a, NULL, 0) != 0 ||
+		    json_value(b, n, n->type, v) != 0)
+			return (false);
+		*pp += len;
+		return (true);
+	default:
+		return (false);
+	}
+}
+
 /*
  * Anydata's YANG-CBOR, {delta: value}, as an object of its members,
  * each a node of the tables decoded and said as one, "module:name"
- * (a top-level node, or one below, as a YANG Patch's value has); null
- * where it is not so.
+ * (a top-level node, or one below, as a YANG Patch's value has); where
+ * it does not decode as data, walked by the tables (json_loose(): a
+ * subtree filter); null where it is neither.
  */
 static int
 json_anydata(struct cbl_ybuf *b, const struct cbl_ynode *n,
@@ -396,6 +492,14 @@ json_anydata(struct cbl_ybuf *b, const struct cbl_ynode *n,
 	}
 	if (ok)
 		error = jputs(&out, "}");
+	/* Not data: the same walked by the tables, nulls and all. */
+	if (!ok && (error == 0 || error == EINVAL)) {
+		p = v->p;
+		out.len = 0;
+		error = 0;
+		ok = json_loose_map(&out, s, NULL, n->sid, &p, end, a,
+		    depth + 1) && p == end;
+	}
 	cbl_yarena_free(a);
 	if (ok && error == 0)
 		error = jput(b, out.p, out.len);
